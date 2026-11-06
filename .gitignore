@@ -3,7 +3,11 @@
 /api.php
 /*.log
 /snappymail/v/0.0.0/static/*
+!/snappymail/v/0.0.0/static/css/
+!/snappymail/v/0.0.0/static/js/
+!/snappymail/v/0.0.0/static/fonts/
 /node_modules
+/ui/node_modules
 /build/local
 /build/dist
 /build/tmp

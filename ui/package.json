@@ -1,0 +1,20 @@
+{
+  "name": "snappymail-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:fonts": "node scripts/copy-fonts.mjs",
+    "build:css": "tailwindcss -i ./src/styles/app.css -o ../snappymail/v/0.0.0/static/css/app.css --minify",
+    "build:js": "esbuild src/main.ts --bundle --format=esm --target=es2022 --outfile=../snappymail/v/0.0.0/static/js/app.js",
+    "build": "npm run build:fonts && npm run build:css && npm run build:js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/space-mono": "^5.2.8",
+    "@tailwindcss/cli": "^4.1.16",
+    "esbuild": "^0.25.11",
+    "tailwindcss": "^4.1.16",
+    "typescript": "^5.9.3"
+  }
+}

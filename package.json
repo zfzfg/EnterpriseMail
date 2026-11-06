@@ -14,7 +14,9 @@
     "type": "git",
     "url": "git://github.com/the-djmaze/snappymail.git"
   },
-  "scripts": {},
+  "scripts": {
+    "build:ui": "npm --prefix ui run build"
+  },
   "license": "SEE LICENSE IN LICENSE",
   "licenses": [
     {
