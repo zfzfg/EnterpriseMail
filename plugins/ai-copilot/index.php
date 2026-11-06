@@ -52,16 +52,6 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		$this->UseLangs(true);
 
-		$this->addCss('style.css');
-		$this->addJs('js/common.js');
-		$this->addJs('js/message.js');
-		$this->addJs('js/compose.js');
-		$this->addJs('js/search.js');
-		$this->addJs('js/tabs.js');
-		$this->addJs('js/sidebar.js');
-		$this->addJs('js/settings.js');
-		$this->addTemplate('templates/AiCopilotSettingsTab.html');
-		$this->addTemplate('templates/PopupsAiDraft.html');
 
 		$this->addJsonHook('AiGetSettings', 'DoGetSettings');
 		$this->addJsonHook('AiSaveSettings', 'DoSaveSettings');
