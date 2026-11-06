@@ -78,6 +78,8 @@ services:
     volumes:
       - certs:/certs:ro
       - snappymail-data:/var/lib/snappymail
+      - ../../../index.php:/snappymail/index.php:ro
+      - ../../../snappymail:/snappymail/snappymail:ro
       - ..:/opt/ai-copilot:ro
       - ${AI_KEY_FILE:-../../../../MISTRAL-API-KEY.env}:/run/secrets/mistral.env:ro
     ports:
