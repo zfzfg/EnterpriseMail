@@ -1,0 +1,46 @@
+AI Copilot für SnappyMail
+
+KI-Funktionen nach dem Vorbild von Canary Mail, angebunden an Mistral (direkt,
+OpenAI-kompatible API) oder an llmster / LM Studio. Inhalte gehen nur an den
+Anbieter, wenn der Benutzer eine KI-Aktion anklickt.
+
+Funktionen
+- Zusammenfassung eines Verlaufs (Nachrichtenansicht, Button „Zusammenfassen“).
+  Eigene Antworten aus dem Gesendet-Ordner werden mit einbezogen. Ergebnisse
+  werden 30 Tage zwischengespeichert und beim erneuten Öffnen ohne Anfrage gezeigt.
+- Entwürfe im Compose-Fenster: KI-Entwurf, Umschreiben, Korrektur, Ton-Auswahl,
+  Betreffvorschlag, Streaming. Auch über den Zauberstab in der Editor-Leiste und
+  dreimal „c“ (außerhalb von Eingabefeldern).
+- Antwortvorschläge: drei Karten auf Klick, Klick öffnet die Antwort mit Text.
+- Suche in natürlicher Sprache: Text ins Suchfeld, dann KI-Knopf daneben. Nur
+  die Anfrage geht an das Modell, die Suche läuft per IMAP.
+- Kategorien und Tabs (Antwort nötig, Für mich, Newsletter, Benachrichtigungen,
+  Rechnungen): Regeln ohne Modell, gespeichert als IMAP-Schlagwörter $ai_*.
+  Optional „Mit KI einordnen“ (Admin-Schalter, Standard aus).
+- Copilot-Seitenleiste: Chat mit Werkzeugen (Suche, Mail lesen). Aktionen wie
+  Archivieren, Löschen, Verschieben, Antworten werden nur vorgeschlagen und erst
+  nach Klick auf „Ausführen“ im Browser über die normalen SnappyMail-Aktionen
+  ausgeführt.
+- Hinweise oben in der Seitenleiste (ohne Modell): offene Antworten, gesendete
+  Mails ohne Antwort, ungelesene Rechnungen. Optional Fristen mit KI auslesen.
+
+Einrichtung
+- Admin → Erweiterungen → AI Copilot: Funktionen, Profile, Modelle.
+- Mistral-Key: Umgebungsvariable MISTRAL_API_KEY (php-fpm gibt sie meist nicht
+  weiter), besser Key-Datei (Standard /run/secrets/mistral.env, Inhalt
+  MISTRAL_API_KEY=... oder nur der Key), sonst das verschlüsselte Admin-Feld.
+  Der Key wird nie an den Browser gegeben.
+- zai-* Modelle: reasoning_effort=low, Thinking-Blöcke werden entfernt.
+- llmster: Base-URL z. B. http://172.20.0.1:1234/v1, Chat-Modell eintragen
+  (kein Embedding-Modell). JSON-Modus „ohne response_format“.
+- Benutzer: Einstellungen → KI-Assistent (Funktionen, Ton, Sprache, Name, Stil).
+
+Datenschutz
+- Ohne Klick wird nichts an den Anbieter gesendet. Beim ersten Mal erscheint ein
+  Hinweis mit dem Anbieter.
+- SnappyMail protokolliert bei aktiviertem Log POST-Parameter (INFO). Darin können
+  Chat-Nachrichten und Entwurfstexte stehen. Im Betrieb Logging aus oder auf
+  Warnungen beschränken.
+
+Entwicklung: siehe dev/ (Docker-Umgebung mit Testmailserver, Testdaten,
+API- und UI-Tests).

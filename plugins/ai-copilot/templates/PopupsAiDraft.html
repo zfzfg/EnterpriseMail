@@ -1,0 +1,49 @@
+<header>
+	<a href="#" class="close" data-bind="click: close">×</a>
+	<h3 data-bind="text: title"></h3>
+</header>
+<div class="modal-body ai-draft">
+	<div class="ai-draft-modes">
+		<label class="ai-chip" data-bind="css: {active: 'new' === mode()}"><input type="radio" value="new" data-bind="checked: mode"><span data-i18n="AI_COPILOT/MODE_NEW"></span></label>
+		<label class="ai-chip" data-bind="css: {active: 'reply' === mode()}, visible: canReply"><input type="radio" value="reply" data-bind="checked: mode"><span data-i18n="AI_COPILOT/MODE_REPLY"></span></label>
+		<label class="ai-chip" data-bind="css: {active: 'rewrite' === mode()}"><input type="radio" value="rewrite" data-bind="checked: mode"><span data-i18n="AI_COPILOT/MODE_REWRITE"></span></label>
+		<label class="ai-chip" data-bind="css: {active: 'proofread' === mode()}"><input type="radio" value="proofread" data-bind="checked: mode"><span data-i18n="AI_COPILOT/MODE_PROOFREAD"></span></label>
+	</div>
+
+	<div data-bind="visible: showInstruction">
+		<textarea class="ai-instruction" rows="3" data-bind="textInput: instruction, enable: !busy()"
+			data-i18n="[placeholder]AI_COPILOT/INSTRUCTION_PLACEHOLDER"></textarea>
+	</div>
+
+	<div class="ai-tones" data-bind="visible: showTone">
+		<span class="ai-label" data-i18n="AI_COPILOT/TONE"></span>
+		<!-- ko foreach: tones -->
+		<button type="button" class="ai-chip" data-bind="text: label, css: {active: $parent.tone() === id}, click: $parent.setTone.bind($parent)"></button>
+		<!-- /ko -->
+		<input type="text" class="ai-custom-tone" data-bind="visible: 'custom' === tone(), textInput: customTone"
+			data-i18n="[placeholder]AI_COPILOT/TONE_CUSTOM_PLACEHOLDER">
+	</div>
+
+	<div class="ai-draft-output" data-bind="visible: output() || busy() || error()">
+		<div class="ai-subject-chip" data-bind="visible: subject() && !busy()">
+			<span class="ai-label" data-i18n="AI_COPILOT/SUBJECT_SUGGESTION"></span>
+			<span data-bind="text: subject"></span>
+			<button type="button" class="btn btn-small" data-bind="click: applySubject, visible: !subjectApplied()" data-i18n="AI_COPILOT/APPLY_SUBJECT"></button>
+		</div>
+		<textarea class="ai-output" rows="12" data-bind="textInput: output, attr: {readonly: busy()}"></textarea>
+		<div class="ai-loading" data-bind="visible: busy() && !output()"><span class="ai-spinner"></span><span data-i18n="AI_COPILOT/WORKING"></span></div>
+		<div class="ai-error" data-bind="visible: error, text: error"></div>
+	</div>
+
+	<div class="ai-muted ai-provider">
+		<span data-i18n="AI_COPILOT/PROVIDER"></span>: <span data-bind="text: model() || providerLabel()"></span>
+	</div>
+</div>
+<footer>
+	<button type="button" class="btn" data-bind="visible: busy, click: stop" data-i18n="AI_COPILOT/STOP"></button>
+	<button type="button" class="btn" data-bind="visible: !busy(), click: generate">
+		<span data-bind="text: generateLabel"></span>
+	</button>
+	<button type="button" class="btn" data-bind="enable: canApply, click: applyCursor, visible: 'proofread' !== mode() && 'rewrite' !== mode()" data-i18n="AI_COPILOT/INSERT_AT_CURSOR"></button>
+	<button type="button" class="btn btn-success" data-bind="enable: canApply, click: applyReplace" data-i18n="AI_COPILOT/APPLY"></button>
+</footer>
