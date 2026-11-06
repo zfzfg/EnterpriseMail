@@ -1,226 +1,80 @@
-<div align="center">
-  <a href="https://github.com/the-djmaze/snappymail">
-    <img src="https://snappymail.eu/static/img/logo-256x256-white.png">
-  </a>
-  <br>
-  <h1>SnappyMail</h1>
-  <br>
+# SnappyMail
 
-[![github-actions](https://github.com/the-djmaze/snappymail/actions/workflows/docker.yml/badge.svg)](https://github.com/the-djmaze/snappymail/actions/workflows/docker.yml)
-[![docker-image-size](https://img.shields.io/docker/image-size/djmaze/snappymail/latest)](https://hub.docker.com/r/djmaze/snappymail/tags)
+Fork von [the-djmaze/snappymail](https://github.com/the-djmaze/snappymail) (selbst ein Fork von RainLoop). Das PHP-Protokoll bleibt. Die Oberfläche ist ein eigener Client in TypeScript, und der KI-Assistent sitzt in dieser Oberfläche.
 
-  <p>
-    Simple, modern, lightweight &amp; fast web-based email client.
-  </p>
-  <p>
-    The drastically upgraded &amp; secured fork of <a href="https://github.com/RainLoop/rainloop-webmail">RainLoop Webmail Community edition</a>.
-  </p>
-  <p>
-    We thank the RainLoop Team for making a great PHP 5 product that was good in the past.
-  </p>
-  <p>
-    Up to date system requirements, snappy performance, simple installation and upgrade, no database required
-    - all these make SnappyMail a good choice.
-  </p>
-  <h2></h2>
-  <br>
-</div>
+Postfach: drei Spalten, Brief in einem sandboxed iframe, Assistent als Blatt auf dem Brief. Deutsch, Satzschrift. Erscheinungsbild folgt `prefers-color-scheme`. Der Schalter dafür liegt in den Einstellungen.
 
-For more information about the product, check [snappymail.eu](https://snappymail.eu/).
+## Bauen
 
-Information about installing the product, check the [wiki page](https://github.com/the-djmaze/snappymail/wiki/Installation-instructions).
+Die Quellen liegen unter `ui/`. PHP lädt das Ergebnis aus `snappymail/v/0.0.0/static/`.
 
-And don't forget to read the whole [Wiki](https://github.com/the-djmaze/snappymail/wiki).
+```sh
+cd ui
+npm install
+npm run build
+npm run typecheck
+```
 
-## License
+Vom Repo-Wurzelverzeichnis aus genügt `npm run build:ui`.
 
-**SnappyMail** is released under
-**GNU AFFERO GENERAL PUBLIC LICENSE Version 3 (AGPL)**.
-http://www.gnu.org/licenses/agpl-3.0.html
+| Befehl | Ergebnis |
+| --- | --- |
+| `npm run build:js` | `static/js/app.js` und `static/js/admin.js` |
+| `npm run build:css` | `static/css/app.css`, Kopie als `static/css/admin.css` |
+| `npm run build:fonts` | Inter und Space Mono nach `static/fonts/` |
 
-Copyright (c) 2020 - 2024 SnappyMail
-Copyright (c) 2013 - 2022 RainLoop
+CSS, JS und Schriften werden mitcommittet. `ui/node_modules` nicht. Es gibt kein UI-Framework. Der Mail-Client startet bei `ui/src/main.ts`, der Admin bei `ui/src/admin.ts`.
 
-## Modifications
+## Vorschau
 
-This fork of RainLoop has the following changes:
+Die Entwicklungsumgebung steht in `plugins/ai-copilot/dev`. Der erste Start baut das Image und dauert. Danach hängt Compose `index.php` und `snappymail/` aus diesem Baum in den Container. Ein erneutes `npm run build` in `ui/` ist im Browser nach einem Reload sichtbar.
 
-* Privacy/GDPR friendly (no: Social, Gravatar, Facebook, Google, Twitter, DropBox, X-Mailer)
-* Admin uses password_hash/password_verify
-* Auth failed attempts written to syslog
-* Added Fail2ban instructions
-* ES2020
-* PHP 7.4+ required
-* PHP mbstring extension required
-* PHP replaced pclZip with PharData and ZipArchive
-* Dark mode
-* Added option to remove background/font colors from messages for real "dark mode"
-* Removed BackwardCapability (class \RainLoop\Account)
-* Removed ChangePassword (re-implemented as plugin)
-* Removed POP3 support
-* Removed background video support
-* Removed Sentry (Application Monitoring and Error Tracking Software)
-* Removed Spyc yaml
-* Removed OwnCloud
-* Replaced gulp-uglify with gulp-terser
-* CRLF => LF line endings
-* Embed boot.js and boot.css into index.html
-* Removal of old JavaScript code (things are native these days)
-* Added modified [Squire](https://github.com/the-djmaze/Squire/tree/snappymail) HTML editor as replacement for CKEditor
-* Updated [Sabre/VObject](https://github.com/sabre-io/vobject)
-* Split Admin specific JavaScript code from User code
-* Split Sieve specific JavaScript code from User code
-* JSON reviver
-* Better memory garbage collection management
-* Added serviceworker for Notifications
-* Added advanced Sieve scripts editor
-* Slimmed down language files
-* Replaced webpack with rollup
-* No user-agent detection (use device width)
-* Added support to load plugins as .phar
-* Replaced old Sabre library
-* AddressBook Contacts support MySQL/MariaDB utf8mb4
-* Added [Fetch Metadata Request Headers](https://www.w3.org/TR/fetch-metadata/) checks
-* Reduced excessive DOM size
-* Support [Kolab groupware](https://kolab.org/)
-* Support many more [IMAP RFC's](https://snappymail.eu/comparison#IMAP)
-* Support Sodium and OpenSSL for encryption
-* Much better PGP support
+```sh
+cd plugins/ai-copilot/dev
+docker compose up -d
+python seed.py
+```
 
+Die Seite ist nur auf dem eigenen Rechner erreichbar: http://localhost:8888
 
-### Supported browsers
+| | |
+| --- | --- |
+| Postfach | `test@example.com` / `test1234` |
+| Zweites Konto | `kollege@example.com` / `test1234` |
+| Admin | http://localhost:8888/?admin |
 
-This fork uses downsized/simplified versions of scripts and has no support for Internet Explorer nor Edge Legacy.
-Supported are:
+Benutzer im Admin ist `admin`. Das Passwort erzeugt die Installation selbst:
 
-* Chrome 80+
-* Edge 80+
-* Firefox 78+
-* Opera 67+
-* Safari 13.1+
+```sh
+docker compose exec snappymail cat /var/lib/snappymail/_data_/_default_/admin_password.txt
+```
 
+`python seed.py` legt die Domain `example.com` an, schaltet das Plugin ein und schreibt Testdaten. `python seed.py --mails` setzt nur die Mails zurück. Der Testmailserver spricht IMAP und SMTP. ManageSieve ist in dieser Compose-Datei aus, deshalb bleibt der Filter-Abschnitt in der Vorschau zu, bis Sieve am Konto an ist.
 
-### Removal of old JavaScript
+Ein Mistral-Schlüssel ist für die Postfach-Oberfläche nicht nötig. Für echte Modellantworten liegt die Datei außerhalb des Repos, standardmäßig `MISTRAL-API-KEY.env` neben dem Checkout. Ein anderer Pfad geht über `AI_KEY_FILE`. Ohne Schlüssel bleiben die Klick-Aktionen ohne Modell.
 
-The result is faster and smaller download code (good for mobile networks).
+## Assistent
 
-* Added dev/prototype.js for some additional features
-* Modified Jua.js to be without jQuery
-* Replaced Autolinker with simple https/email detection
-* Replaced momentToNode with proper HTML5 `<time>`
-* Replaced resize listeners with ResizeObserver
-* Replaced bootstrap.js with native drop-in replacement
-* Replaced dev/Common/ClientStorageDriver/* with Web Storage Objects polyfill
-* Replaced *Ajax with *Fetch classes because we use the Fetch API, not jQuery.ajax
-* Replaced [knockoutjs](https://github.com/knockout/knockout) 3.4 with a modified 3.5.1
-* Replaced knockout-sortable with native HTML5 drag&drop
-* Replaced simplestatemanager with CSS @media
-* Replaced inputosaurus with own code
-* Replaced keymaster with own shortcuts handler
-* Replaced OpenPGP.js v2 with OpenPGP.js v5
-* Removed ifvisible.js
-* Removed pikaday
-* Removed underscore
-* Removed polyfills
-* Removed Modernizr
-* Removed nanoscroll
-* Removed lightgallery
-* Removed jQuery
-* Removed jquery-ui
-* Removed jquery-scrollstop
-* Removed jquery-mousewheel
-* Removed matchmedia-polyfill
-* Removed momentjs (use Intl)
-* Removed opentip (use CSS)
-* Removed non-community (aka Prem/Premium/License) code
-* Removed ProgressJS
+Das Plugin ist `plugins/ai-copilot`. Zusammenfassung, Entwurf, Sprachsuche, Einordnung, Fragen und Fristen laufen über die vorhandenen JSON- und SSE-Hooks. Inhalt geht erst beim Klick an den Anbieter. Ist das Plugin aus oder das Konto abgeschaltet, sieht die Oberfläche aus wie das Postfach ohne Assistent.
 
+Die Plugin-Beschreibung steht in `plugins/ai-copilot/README`. Die ältere Schilderung einer Seitenleiste und eines Zauberstabs gilt für diese Oberfläche nicht mehr. Der Assistent ist das Blatt auf dem Brief.
 
-RainLoop 1.17 vs SnappyMail
+## Einstellungen und Admin
 
-|js/*           	|RainLoop 	|Snappy   	|
-|---------------	|--------:	|--------:	|
-|admin.js        	|2.170.153	|   85.206	|
-|app.js          	|4.207.787	|  457.090	|
-|boot.js         	|  868.735	|    4.343	|
-|libs.js         	|  658.812	|  239.404	|
-|sieve.js         	|        0	|   91.418	|
-|polyfills.js    	|  334.608	|        0	|
-|serviceworker.js	|        0	|      285	|
-|TOTAL           	|8.240.095	|  877.746	|
+Einstellungen hängen am Konto-Menü: Erscheinungsbild, Konten, Identitäten, Kontakte, Filter, Schlüssel. Ein Abschnitt bleibt zu, wenn der Server die Fähigkeit nicht hat. OpenPGP und S/MIME sind Liste, Import und die Felder an der Identität.
 
-|js/min/*       	|RainLoop 	|Snappy   	|RL gzip	|SM gzip	|RL brotli	|SM brotli	|
-|---------------	|--------:	|--------:	|------:	|------:	|--------:	|--------:	|
-|admin.min.js    	|  256.831	|   41.594	| 73.606	| 13.985	| 60.877  	| 12.530	|
-|app.min.js      	|  515.367	|  205.961	|139.456	| 69.537	|110.485  	| 59.427	|
-|boot.min.js     	|   84.659	|    2.211	| 26.998	|  1.266	| 23.643  	|  1.061	|
-|libs.min.js     	|  584.772	|  112.838	|180.901	| 40.094	|155.182  	| 35.736	|
-|sieve.min.js     	|        0	|   45.380	|      0	| 11.095	|      0  	|  9.909	|
-|polyfills.min.js	|   32.837	|        0	| 11.406	|      0	| 10.175  	|      0	|
-|TOTAL user      	|1.217.635	|  321.010	|358.761	|110.897	|299.485  	| 96.224	|
-|TOTAL user+sieve	|1.217.635	|  366.390	|358.761	|121.992	|299.485  	|106.133	|
-|TOTAL admin     	|  959.099	|  156.643	|292.911	| 55.345	|249.877  	| 49.327	|
+Der Admin ist dieselbe Token-Datei, dicht, unter `/?admin`. Anmeldung, Domainliste, Aktivieren, Deaktivieren, Löschen, Abmelden.
 
-For a user it is around 66% smaller and faster than traditional RainLoop.
+## Was in diesem Baum gilt
 
-### CSS changes
+- UI-Build ist npm in `ui/` mit Tailwind 4 und esbuild. Gulp, Yarn und Knockout sind nicht der Weg für diese Oberfläche.
+- `index.php` lädt Version `0.0.0`. Die Release-Kette, die daraus eine Versionsnummer macht, liegt noch unter `cli/release.php` und `.docker/release`.
+- PHP 8.2 ist die Untergrenze aus dem Upstream-Changelog. Das Vorschau-Image nutzt PHP 8.5.
+- Konfiguration und Postfachdaten liegen unter `data/` bzw. im Container unter `/var/lib/snappymail`. Beides ist nicht Teil des Git-Baums.
+- Designs Slate und SlateDark liegen nicht in diesem Repo.
 
-* Solve jQuery removed "features" with native css code
-* Themes work in mobile mode
-* Bugfix invalid/conflicting css rules
-* Use flexbox
-* Use border-box
-* Split app.css to have separate admin.css
-* Remove oldschool 'float'
-* Remove unused css
-* Removed html.no-css
-* Removed dev/Styles/Cmd.less
-* Removed dev/Styles/Scroll.less
-* Removed Internet Explorer from normalize.css
-* Removed node_modules/opentip/css/opentip.css
-* Removed node_modules/pikaday/css/pikaday.css
-* Removed unused vendors/bootstrap/less/*
-* Removed vendors/jquery-nanoscroller/nanoscroller.css
-* Removed vendors/jquery-letterfx/jquery-letterfx.min.css
-* Removed vendors/Progress.js/minified/progressjs.min.css
-* Removed gulp-autoprefixer
+## Lizenz
 
+GNU Affero General Public License 3.0, Text in `LICENSE`.
 
-|css/*       	|RainLoop	|Snappy   	|RL gzip	|SM gzip	|SM brotli	|
-|------------	|-------:	|------:	|------:	|------:	|--------:	|
-|app.css     	| 340.331	| 85.181	| 46.946	| 17.810	| 15.246	|
-|app.min.css 	| 274.947	| 68.365	| 39.647	| 15.627	| 13.651	|
-|boot.css    	|       	|  1.326	|       	|    664	|    545	|
-|boot.min.css	|       	|  1.071	|       	|    590	|    474	|
-|admin.css    	|       	| 30.880	|       	|  7.045	|  6.127	|
-|admin.min.css	|       	| 24.959	|       	|  6.369	|  5.618	|
-
-### PGP
-RainLoop uses the old OpenPGP.js v2
-SnappyMail v2.12 uses OpenPGP.js v5, GnuPG and Mailvelope.
-SnappyMail is able to use and generate ECDSA and EDDSA keys, where RainLoop does not.
-
-Since SnappyMail tries to achieve the best mobile experience, it forked OpenPGP.js to strip it down.
-* remove all unused Node.js
-* remove all old browsers support
-See https://github.com/the-djmaze/openpgpjs for development
-
-|OpenPGP        	|RainLoop 	|Snappy   	|RL gzip	|SM gzip	|RL brotli	|SM brotli	|
-|---------------	|--------:	|--------:	|------:	|-------:	|--------:	|--------:	|
-|openpgp.min.js 	|  330.742	|  545.121	|102.388	| 168.745	| 84.241  	|  138.302	|
-|openpgp.worker 	|    1.499	|         	|    824	|        	|    695 	|        	|
-
-
-### Squire vs CKEditor
-The [Squire](https://github.com/the-djmaze/Squire/tree/snappymail) implementation is not 100% compatible yet, but it shows the massive overhead of CKEditor.
-
-Still TODO:
-
-* support for tables (really needed?!?)
-
-|       	| normal	| min    	| gzip  	| min gzip	|
-|--------	|-------:	|-------:	|------:	|--------:	|
-|squire  	| 122.321	|  41.906	| 31.867	|   14.330	|
-|ckeditor	|       ?	| 520.035	|      ?	|  155.916	|
-
-CKEditor including the 7 asset requests (css,language,plugins,icons) is 633.46 KB / 180.47 KB (gzip).
+Copyright der Upstream-Projekte bleibt bei SnappyMail und RainLoop. Dieser Fork ändert die Lizenz nicht.
