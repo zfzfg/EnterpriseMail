@@ -142,7 +142,58 @@ def mails():
     print('Testmails eingespielt')
 
 
+THEME_HTML = '''<!doctype html><html><body style="margin:0;background:#f2f2f2">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2"><tr><td align="center" style="padding:24px">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:6px;font-family:Arial,sans-serif;color:#222222">
+<tr><td style="background:#1d3557;color:#ffffff;padding:20px 24px;font-size:20px;font-weight:bold">Werkzeug-Shop Newsletter</td></tr>
+<tr><td style="padding:24px;font-size:15px;line-height:1.5;color:#333333">
+<p>Hallo Test Nutzer,</p>
+<p>diese Woche im Angebot: <b style="color:#c1121f">Schutzhandschuhe</b> und Schleifscheiben.
+Text in fester dunkler Farbe, damit man sieht, ob er im dunklen Theme lesbar bleibt.</p>
+<p><a href="https://werkzeugshop.example/angebote" style="display:inline-block;background:#e63946;color:#ffffff;padding:10px 18px;border-radius:4px;text-decoration:none">Zu den Angeboten</a></p>
+<p>Ein normaler Link ohne eigene Farbe: <a href="https://werkzeugshop.example/hilfe">Hilfe</a>.</p>
+<blockquote style="margin:0;padding-left:10px">Zitat aus einer frueheren Mail.</blockquote>
+</td></tr></table></td></tr></table></body></html>'''
+
+
+def theme_mails():
+    """Zusaetzliche Grenzfaelle fuer Theme-Tests (keine KI-Aufrufe noetig)."""
+    m = EmailMessage(policy=SMTP)
+    m['From'] = 'Werkzeug-Shop <news@werkzeugshop.example>'
+    m['To'] = ME
+    m['Subject'] = 'Theme-Test: HTML-Newsletter mit festen Farben'
+    m['Date'] = format_datetime(NOW - timedelta(minutes=30))
+    m['Message-ID'] = make_msgid(domain='dev.example')
+    m['List-Unsubscribe'] = '<https://werkzeugshop.example/abmelden>'
+    m.set_content('Werkzeug-Shop Newsletter (Textversion)', charset='utf-8')
+    m.add_alternative(THEME_HTML, subtype='html', charset='utf-8')
+    save('INBOX', m.as_bytes())
+
+    lang = ('Theme-Test: Sehr langer Betreff zur Prüfung von Umbrüchen und Abschneiden in der Liste, '
+            'Auftrag 2026-11-0815 Geländer Treppenhaus Hinterhaus Lindenstraße 12, Nachtrag 3 von 7, bitte bis Freitag prüfen')
+    m = EmailMessage(policy=SMTP)
+    m['From'] = 'sehr.lange.absenderadresse.ohne.leerzeichen.fuer.den.test@ein-ziemlich-langer-domainname.example'
+    m['To'] = ME
+    m['Subject'] = lang
+    m['Date'] = format_datetime(NOW - timedelta(minutes=40))
+    m['Message-ID'] = make_msgid(domain='dev.example')
+    m.set_content('Mail mit mehreren Anhängen.\n\n> Zitierter Text\n>> doppelt zitiert', charset='utf-8')
+    for name in ('Aufmass_Treppenhaus_Hinterhaus_Lindenstrasse_12_final_v3.pdf', 'Foto1.jpg', 'Kalkulation.xlsx'):
+        m.add_attachment(b'Testinhalt, ausgedacht.\n', maintype='application', subtype='octet-stream', filename=name)
+    save('INBOX', m.as_bytes())
+
+    save('INBOX', eml('مكتب الهندسة <info@rtl.example>', ME, 'Theme-Test: نص من اليمين إلى اليسار – Ölçü ✓',
+        'Gemischte Schriftrichtungen: مرحبا بالعالم. Umlaute: äöüß.', hours_ago=1))
+    save('INBOX', eml('A <a@example.com>', ME, '', 'Mail ohne Betreff.', hours_ago=2))
+    # zuletzt gespeicherte Mail markieren (Stern)
+    dc('exec', '-T', 'mail', 'doveadm', 'flags', 'add', '-u', ME, '\\Flagged', 'mailbox', 'INBOX', 'subject', 'Theme-Test: Sehr', check=False)
+    print('Theme-Testmails eingespielt')
+
+
 if __name__ == '__main__':
+    if '--theme-mails' in sys.argv:
+        theme_mails()
+        sys.exit()
     if '--mails' not in sys.argv:
         accounts()
         snappymail_config()

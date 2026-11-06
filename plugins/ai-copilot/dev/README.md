@@ -25,4 +25,15 @@ python mock_llm.py 18234                                  # Mock für das llmste
 npm i puppeteer-core && node uitest.mjs open summary quick sidebar chat
 ```
 
+Themes (`Slate`, `SlateDark` in `snappymail/v/0.0.0/themes/`, ohne KI-Aufrufe):
+
+```sh
+python seed.py --theme-mails                 # Grenzfälle: HTML-Newsletter, langer Betreff, Anhänge, RTL, ohne Betreff
+node themeshots.mjs Slate SlateDark Default  # Screenshots nach shots/themes/
+node themeshots.mjs --login Slate            # Anmeldeseite (Theme aus webmail.theme der Konfiguration)
+python ../../../cli/theme-slate-dark.py ../../../snappymail/v/0.0.0/themes   # SlateDark nach Änderungen an Slate neu erzeugen
+```
+
+Themes stecken im Image: nach Änderungen `docker compose up -d --build`. Zum schnellen Ausprobieren den Theme-Ordner nach `/snappymail/themes/<Name>` einhängen, er erscheint dann als `<Name>@custom`.
+
 `apitest.py` und `uitest.mjs` schicken bei KI-Funktionen die Testmails an den eingestellten Anbieter.
