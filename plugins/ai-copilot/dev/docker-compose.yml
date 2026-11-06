@@ -1,0 +1,113 @@
+# Lokale Entwicklungsumgebung fuer das Plugin ai-copilot.
+#
+# Start (aus diesem Ordner):
+#   docker compose up -d --build
+# SnappyMail:   http://localhost:8888
+# Admin:        http://localhost:8888/?admin   (Passwort: docker compose exec snappymail cat /var/lib/snappymail/_data_/_default_/admin_password.txt)
+# Testkonten und Testmails: siehe README im Plugin-Ordner (dev/seed.sh).
+#
+# Der Mistral-Key wird als Datei eingebunden (php-fpm gibt Umgebungsvariablen
+# nicht an PHP weiter). Pfad per AI_KEY_FILE ueberschreibbar. Die Datei bleibt
+# ausserhalb des Repos.
+name: snappymail-ai-dev
+
+services:
+  step-ca:
+    image: smallstep/step-ca:0.28.4
+    working_dir: /certs
+    volumes:
+      - certs:/certs
+    entrypoint: ["/bin/sh"]
+    user: "0:0"
+    command:
+      - -c
+      - |
+          set -eu
+          if [ ! -d demoCA ]; then
+              mkdir -p demoCA
+              step certificate create "Dev Root CA" demoCA/cacert.pem demoCA/cakey.pem \
+                --no-password --insecure --profile root-ca \
+                --not-before "2025-01-01T00:00:00+00:00" --not-after "2035-01-01T00:00:00+00:00" \
+                --kty RSA --size 2048
+              step certificate create "Dev Leaf" mail.example.com-cert.pem mail.example.com-key.pem \
+                --no-password --insecure --profile leaf \
+                --ca demoCA/cacert.pem --ca-key demoCA/cakey.pem \
+                --not-before "2025-01-01T00:00:00+00:00" --not-after "2035-01-01T00:00:00+00:00" \
+                --san example.com --san mail.example.com --san imap.example.com --san smtp.example.com \
+                --kty RSA --size 2048
+          fi
+
+  mail:
+    image: docker.io/mailserver/docker-mailserver:15.1.0
+    hostname: mail.example.com
+    environment:
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_CLAMAV=0
+      - ENABLE_FAIL2BAN=0
+      - ENABLE_POSTGREY=0
+      - ENABLE_RSPAMD=0
+      - ENABLE_OPENDKIM=0
+      - ENABLE_OPENDMARC=0
+      - ENABLE_POLICYD_SPF=0
+      - ENABLE_AMAVIS=0
+      - ENABLE_MANAGESIEVE=0
+      - PERMIT_DOCKER=network
+      - LOG_LEVEL=warn
+      - SSL_TYPE=manual
+      - SSL_CERT_PATH=/certs/mail.example.com-cert.pem
+      - SSL_KEY_PATH=/certs/mail.example.com-key.pem
+    volumes:
+      - certs:/certs:ro
+      - mail-data:/var/mail
+      - mail-state:/var/mail-state
+      - mail-config:/tmp/docker-mailserver
+    networks:
+      default:
+        aliases: [example.com, mail.example.com, imap.example.com, smtp.example.com]
+    depends_on:
+      step-ca:
+        condition: service_completed_successfully
+
+  snappymail:
+    build:
+      context: ../../..
+      dockerfile: ./.docker/release/Dockerfile
+    image: snappymail-ai-dev:latest
+    environment:
+      - SECURE_COOKIES=false
+    volumes:
+      - certs:/certs:ro
+      - snappymail-data:/var/lib/snappymail
+      - ..:/opt/ai-copilot:ro
+      - ${AI_KEY_FILE:-../../../../MISTRAL-API-KEY.env}:/run/secrets/mistral.env:ro
+    ports:
+      - "127.0.0.1:8888:8888"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+          set -eu
+          # Windows-Checkout: CRLF in den Konfigurationsdateien des Images entfernen
+          for f in /entrypoint.sh /supervisor.conf /listener.php /etc/nginx/nginx.conf /usr/local/etc/php-fpm.d/php-fpm.conf; do
+            if [ -f "$$f" ]; then tr -d "\r" < "$$f" > /tmp/crlf && cat /tmp/crlf > "$$f"; fi
+          done
+          cp /certs/demoCA/cacert.pem /usr/local/share/ca-certificates/dev-ca.crt
+          update-ca-certificates >/dev/null 2>&1 || true
+          # Plugin per Symlink einhaengen (chown -R im Entrypoint folgt Symlinks nicht)
+          mkdir -p /var/lib/snappymail/_data_/_default_/plugins
+          ln -sfn /opt/ai-copilot /var/lib/snappymail/_data_/_default_/plugins/ai-copilot
+          exec /entrypoint.sh
+    depends_on:
+      step-ca:
+        condition: service_completed_successfully
+      mail:
+        condition: service_started
+
+volumes:
+  certs:
+  mail-data:
+  mail-state:
+  mail-config:
+  snappymail-data:

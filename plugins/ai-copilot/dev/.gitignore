@@ -1,0 +1,4 @@
+shots/
+node_modules/
+package*.json
+__pycache__/
