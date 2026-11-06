@@ -439,6 +439,23 @@
 		"REDO": "Redo",
 		"REMOVESTYLE": "Remove style"
 	},
+	"SETTINGS_DESK": {
+		"APPEARANCE": "Appearance",
+		"SYSTEM": "System",
+		"LIGHT": "Light",
+		"DARK": "Dark",
+		"KEYS": "Keys",
+		"SWITCH": "Switch",
+		"EDIT": "Edit",
+		"ACTIVATE": "Activate",
+		"MAIN": "Main account",
+		"ACTIVE": "Active",
+		"SENT_FOLDER": "Sent folder",
+		"EMPTY": "Nothing here.",
+		"UNAVAILABLE": "Not available.",
+		"SCRIPT": "Script",
+		"KEY_HINT": "Signing and encryption live on the identity."
+	},
 	"SETTINGS_LABELS": {
 		"GENERAL": "General",
 		"CONTACTS": "Contacts",

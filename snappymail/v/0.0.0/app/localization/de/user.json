@@ -438,6 +438,23 @@
 		"REDO": "Wiederholen",
 		"REMOVESTYLE": "Remove style"
 	},
+	"SETTINGS_DESK": {
+		"APPEARANCE": "Erscheinungsbild",
+		"SYSTEM": "System",
+		"LIGHT": "Hell",
+		"DARK": "Dunkel",
+		"KEYS": "Schlüssel",
+		"SWITCH": "Wechseln",
+		"EDIT": "Bearbeiten",
+		"ACTIVATE": "Aktivieren",
+		"MAIN": "Hauptkonto",
+		"ACTIVE": "Aktiv",
+		"SENT_FOLDER": "Ordner für Gesendet",
+		"EMPTY": "Nichts vorhanden.",
+		"UNAVAILABLE": "Nicht verfügbar.",
+		"SCRIPT": "Skript",
+		"KEY_HINT": "Signieren und Verschlüsseln stehen an der Identität."
+	},
 	"SETTINGS_LABELS": {
 		"GENERAL": "Allgemein",
 		"CONTACTS": "Kontakte",

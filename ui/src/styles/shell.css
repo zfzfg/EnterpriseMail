@@ -417,8 +417,14 @@ h1, .title {
 .tabbar .ink-btn { min-height: 44px; padding: 0 16px; }
 
 dialog {
+  position: fixed;
+  inset: 0;
   width: min(28rem, calc(100vw - 32px));
+  height: fit-content;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
   padding: 0;
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--popover);
@@ -538,6 +544,67 @@ dialog::backdrop { background: color-mix(in srgb, var(--foreground) 32%, transpa
 
 .dialog-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 
+.dialog-wide {
+  width: min(42rem, calc(100vw - 32px));
+  max-height: min(40rem, calc(100dvh - 32px));
+  overflow: auto;
+}
+.settings-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--popover);
+}
+.dialog-wide .fields { padding: 0; }
+.settings-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.settings-nav .text-btn[aria-pressed="true"] {
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--foreground);
+}
+.set-list { margin: 0; padding: 0; list-style: none; min-width: 0; }
+.set-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: var(--row);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.set-row .grow { flex: 1; min-width: 0; }
+.set-row .grow strong,
+.set-row .grow .quiet {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-row .grow strong { font-weight: 500; }
+.set-row .text-btn, .set-row .danger { flex: 0 0 auto; }
+.check { display: flex; align-items: center; gap: 8px; min-height: var(--hit); }
+.check input, .choices input { accent-color: var(--foreground); width: 1rem; height: 1rem; }
+.field textarea.short { min-height: 4.5rem; }
+.field textarea.code {
+  min-height: 6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+details > summary { min-height: var(--hit); cursor: pointer; font-weight: 500; }
+.admin {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+}
+.admin-head { display: flex; align-items: center; gap: 12px; }
+
 .keys { margin: 0; padding: 0; list-style: none; }
 .keys li { display: flex; justify-content: space-between; gap: 16px; min-height: 32px; align-items: center; }
 kbd {
@@ -555,6 +622,8 @@ kbd {
 
 @media (max-width: 799px) {
   :root { --hit: 44px; --row: 44px; }
+  .set-row { flex-wrap: wrap; }
+  .set-row .grow { flex-basis: 100%; }
   .sidebar, .list-pane, .reader, .splitter { display: none; }
   .shell[data-pane="folders"] .sidebar,
   .shell[data-pane="list"] .list-pane,

@@ -10,12 +10,16 @@
 		"CANCEL": "Abbrechen",
 		"SEARCH": "Suchen",
 		"YES": "Ja",
-		"NO": "Nein"
+		"NO": "Nein",
+		"LOGOUT": "Abmelden",
+		"DELETE": "Löschen",
+		"INACTIVE": "Inaktiv"
 	},
 	"LOGIN": {
 		"LABEL_LOGIN": "Benutzer",
 		"LABEL_TOTP": "TOTP-Code",
-		"BUTTON_LOGIN": "Im Adminpanel anmelden"
+		"BUTTON_LOGIN": "Im Adminpanel anmelden",
+		"TOTP_HINT": "Nur wenn eingerichtet."
 	},
 	"TOP_PANEL": {
 		"LABEL_ADMIN_PANEL": "Adminpanel"
@@ -78,6 +82,11 @@
 	},
 	"TAB_DOMAINS": {
 		"LEGEND_DOMAINS": "Domains",
+		"EMPTY": "Keine Domains.",
+		"LABEL_ALIAS": "Alias",
+		"BUTTON_DISABLE": "Deaktivieren",
+		"BUTTON_ENABLE": "Aktivieren",
+		"WEAK_PASSWORD": "Das Admin-Passwort steht noch in der Standarddatei.",
 		"BUTTON_ADD_DOMAIN": "Domain hinzufügen",
 		"BUTTON_ADD_ALIAS": "Alias hinzufügen",
 		"DELETE_ARE_YOU_SURE": "Sind Sie sicher?",

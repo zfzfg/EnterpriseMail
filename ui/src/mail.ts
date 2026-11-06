@@ -1,5 +1,6 @@
 import { readAssist, type AssistFlags } from "./assistant";
 import { ApiError, call, downloadUrl, explain, loadApp, plugin, streamEvents } from "./api";
+import { applyDesk, loadDesk, readCaps, type Caps, type SettingsSnapshot } from "./settings";
 import { createView, type ChatTurn, type ComposeSeed, type FolderRow, type MailView, type MessageRow, type ReaderData, type StripState } from "./view";
 
 interface Person { name: string; email: string }
@@ -127,6 +128,10 @@ class Session {
   private tagged = new Set<string>();
   private alertItems: { folder: string; uid: number; type: string; title: string }[] = [];
   private category = "all";
+  private mainEmail = "";
+  private caps: Caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
+  private desk: SettingsSnapshot | null = null;
+  private contactSearch = "";
 
   constructor(root: HTMLElement) {
     this.view = createView(root, {
@@ -146,7 +151,8 @@ class Session {
       send: (values) => void this.send(values),
       closeCompose: () => { this.replyKind = ""; },
       back: () => undefined,
-      assist: (name, data) => void this.assist(name, data)
+      assist: (name, data) => void this.assist(name, data),
+      settings: (name, data) => this.settings(name, data)
     });
   }
 
@@ -185,6 +191,8 @@ class Session {
 
   private async enter(data: Record<string, unknown>): Promise<void> {
     this.email = String(data.Email || "");
+    this.mainEmail = String(data.mainEmail || data.Email || "");
+    this.caps = readCaps(data);
     this.accountHash = String(data.accountHash || "");
     this.sentFolder = String(data.SentFolder || "");
     this.archiveFolder = String(data.ArchiveFolder || "");
@@ -199,6 +207,28 @@ class Session {
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
+  }
+
+  private async settings(name: string, data: Record<string, string>): Promise<void> {
+    try {
+      if (name === "open") this.contactSearch = "";
+      if (name === "search-contacts") this.contactSearch = data.search || "";
+      if (name === "open" || name === "search-contacts") {
+        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+        this.view.showSettings(this.desk);
+        return;
+      }
+      if (!this.desk) return;
+      const next = await applyDesk(name, data, this.desk);
+      if (next === "session") {
+        await this.enter(await loadApp());
+        return;
+      }
+      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+      this.view.showSettings(this.desk);
+    } catch (error) {
+      this.view.settingsNotice(explain(error));
+    }
   }
 
   private async loadFolders(): Promise<void> {

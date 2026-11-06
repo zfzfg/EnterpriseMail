@@ -69,11 +69,11 @@ function explain(error) {
     303: "Empf\xE4nger pr\xFCfen.",
     901: "Der Mailserver hat die Anfrage abgelehnt."
   };
-  const text = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
-  return error.detail ? `${text} ${error.detail}` : text;
+  const text2 = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
+  return error.detail ? `${text2} ${error.detail}` : text2;
 }
-async function loadApp() {
-  const response = await fetch(`${root()}?/AppData/0/${Math.random().toString().slice(2)}/`, {
+async function readApp(url) {
+  const response = await fetch(url, {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
   });
@@ -83,8 +83,11 @@ async function loadApp() {
   if (system?.token) token = system.token;
   return data;
 }
-async function call(action, params = {}) {
-  const response = await fetch(`${root()}?/Json/&q[]=/0/`, {
+function loadApp() {
+  return readApp(`${root()}?/AppData/0/${Math.random().toString().slice(2)}/`);
+}
+async function postJson(url, action, params) {
+  const response = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -103,6 +106,9 @@ async function call(action, params = {}) {
     throw new ApiError(data.code || 999, data.message || "", data.messageAdditional || "");
   }
   return data.Result;
+}
+function call(action, params = {}) {
+  return postJson(`${root()}?/Json/&q[]=/0/`, action, params);
 }
 async function plugin(action, params = {}) {
   const result = await call("Plugin" + action, params);
@@ -155,15 +161,6 @@ function downloadUrl(file) {
   return `${root()}?/Raw/&q[]=/0/Download/&q[]=/${hash}`;
 }
 
-// src/icons.ts
-var svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
-var iconMenu = svg(
-  `<rect x="5" y="5" width="4" height="4"/><rect x="13" y="5" width="4" height="4"/><rect x="21" y="5" width="4" height="4"/><rect x="5" y="13" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/><rect x="21" y="13" width="4" height="4"/><rect x="5" y="21" width="4" height="4"/><rect x="13" y="21" width="4" height="4"/><rect x="21" y="21" width="4" height="4"/>`
-);
-var iconClose = svg(
-  `<rect x="5" y="5" width="4" height="4"/><rect x="21" y="5" width="4" height="4"/><rect x="9" y="9" width="4" height="4"/><rect x="17" y="9" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/><rect x="9" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/><rect x="5" y="21" width="4" height="4"/><rect x="21" y="21" width="4" height="4"/>`
-);
-
 // src/i18n.ts
 function dig(bag, path) {
   let cur = bag;
@@ -203,6 +200,436 @@ function watchSystemTheme(onChange) {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onChange);
 }
 
+// src/settings.ts
+function readCaps(data) {
+  const capa = data.Capa && typeof data.Capa === "object" ? data.Capa : {};
+  return {
+    accounts: Boolean(capa.AdditionalAccounts),
+    identities: Boolean(capa.Identities),
+    contacts: Boolean(capa.Contacts),
+    sieve: Boolean(capa.Sieve),
+    openpgp: Boolean(capa.OpenPGP),
+    gnupg: Boolean(capa.GnuPG)
+  };
+}
+function values(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return Object.values(value);
+  return [];
+}
+function text(value) {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+function propText(card, names) {
+  if (!Array.isArray(card) || !Array.isArray(card[1])) return "";
+  const wanted = new Set(names);
+  for (const row2 of card[1]) {
+    if (!Array.isArray(row2) || !wanted.has(String(row2[0]).toLowerCase())) continue;
+    const value = row2[3];
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value.map((part) => typeof part === "string" ? part : "").filter(Boolean).join(" ");
+    }
+  }
+  return "";
+}
+function writeProp(card, name, value) {
+  const rows = Array.isArray(card) && card[0] === "vcard" && Array.isArray(card[1]) ? card[1].map((row2) => Array.isArray(row2) ? row2.slice() : row2) : [["version", {}, "text", "4.0"]];
+  const index = rows.findIndex((row2) => Array.isArray(row2) && String(row2[0]).toLowerCase() === name);
+  const next = [name, {}, "text", value];
+  if (index >= 0) rows[index] = next;
+  else rows.push(next);
+  const extra = Array.isArray(card) && Array.isArray(card[2]) ? [card[2]] : [];
+  return ["vcard", rows, ...extra];
+}
+function identityOf(item) {
+  return {
+    id: text(item.id),
+    label: text(item.label),
+    email: text(item.email),
+    name: text(item.name),
+    replyTo: text(item.replyTo),
+    bcc: text(item.bcc),
+    signature: text(item.signature),
+    signatureInsertBefore: Boolean(item.signatureInsertBefore),
+    sentFolder: text(item.sentFolder),
+    pgpEncrypt: Boolean(item.pgpEncrypt),
+    pgpSign: Boolean(item.pgpSign),
+    smimeKey: text(item.smimeKey),
+    smimeCertificate: text(item.smimeCertificate),
+    smimeCertificateChain: text(item.smimeCertificateChain)
+  };
+}
+function keyRow(armored) {
+  const head = armored.split("\n")[0] || "";
+  const kind = /PRIVATE/i.test(head) ? t("SETTINGS_OPENPGP.TITLE_PRIVATE", "Privat") : /PUBLIC/i.test(head) ? t("SETTINGS_OPENPGP.TITLE_PUBLIC", "\xD6ffentlich") : t("SETTINGS_DESK.KEYS", "Schl\xFCssel");
+  const body = armored.replace(/-----.*?-----/g, "").replace(/\s+/g, "");
+  return { kind, preview: body.slice(0, 32) };
+}
+async function tryCall(action, params = {}) {
+  try {
+    return { value: await call(action, params), error: "" };
+  } catch (error) {
+    return { value: null, error: explain(error) };
+  }
+}
+async function loadDesk(caps, currentEmail, mainEmail, contactSearch = "") {
+  const main = mainEmail || currentEmail;
+  const snap = {
+    caps,
+    mainEmail: main,
+    currentEmail,
+    accounts: [{ email: main, name: "", current: currentEmail === main, main: true }],
+    identities: [],
+    contacts: caps.contacts ? [] : null,
+    contactCount: 0,
+    contactSearch,
+    scripts: caps.sieve ? [] : null,
+    keys: [],
+    certs: [],
+    notes: { accounts: "", contacts: "", filters: "", keys: "", certs: "" }
+  };
+  const desk = await tryCall("AccountsAndIdentities");
+  if (desk.error) snap.notes.accounts = desk.error;
+  else if (desk.value) {
+    const extra = values(desk.value.Accounts).map((item) => {
+      const row2 = item;
+      const email = text(row2.email);
+      return { email, name: text(row2.name), current: email === currentEmail, main: false };
+    }).filter((row2) => row2.email && row2.email !== main);
+    snap.accounts = snap.accounts.concat(extra);
+    snap.identities = values(desk.value.Identities).map((item) => identityOf(item));
+    const named = snap.identities.find((item) => item.email === main && item.name);
+    if (named) snap.accounts[0].name = named.name;
+  }
+  if (caps.contacts) {
+    const book = await tryCall("Contacts", { Search: contactSearch, Offset: 0, Limit: 50 });
+    if (book.error) snap.notes.contacts = book.error;
+    else if (book.value) {
+      snap.contactCount = Number(book.value.Count || 0);
+      snap.contacts = values(book.value.List).map((item) => {
+        const row2 = item;
+        return {
+          id: text(row2.id),
+          name: propText(row2.jCard, ["fn", "n"]),
+          email: propText(row2.jCard, ["email"]),
+          readOnly: Boolean(row2.readOnly),
+          jCard: row2.jCard
+        };
+      });
+    }
+  }
+  if (caps.sieve) {
+    const filters = await tryCall("Filters");
+    if (filters.error) snap.notes.filters = filters.error;
+    else if (filters.value) {
+      snap.scripts = values(filters.value.Scripts).map((item) => {
+        const row2 = item;
+        return { name: text(row2.name), active: Boolean(row2.active), body: text(row2.body) };
+      }).filter((row2) => row2.name);
+    }
+  }
+  const keys = await tryCall("GetPGPKeys");
+  if (keys.error) snap.notes.keys = keys.error;
+  else snap.keys = values(keys.value).map((item) => text(item)).filter(Boolean).map((item) => keyRow(item));
+  const certs = await tryCall("SMimeGetCertificates");
+  if (certs.error) snap.notes.certs = certs.error;
+  else {
+    snap.certs = values(certs.value).map((item) => {
+      const row2 = item;
+      const until = Number(row2.validTo_time_t || 0);
+      return {
+        id: text(row2.id),
+        name: text(row2.CN),
+        email: text(row2.emailAddress),
+        until: until ? new Date(until * 1e3).toLocaleDateString() : ""
+      };
+    });
+  }
+  return snap;
+}
+async function applyDesk(name, data, snap) {
+  if (name === "save-account") {
+    if (!data.email?.trim() || !data.password) throw new ApiError(0, "Adresse und Passwort eintragen.");
+    await call("AccountSetup", { email: data.email.trim(), password: data.password, name: data.name || "", new: 1 });
+    return "reload";
+  }
+  if (name === "delete-account") {
+    await call("AccountDelete", { emailToDelete: data.email });
+    return data.email === snap.currentEmail ? "session" : "reload";
+  }
+  if (name === "switch-account") {
+    await call("AccountSwitch", { Email: data.email });
+    return "session";
+  }
+  if (name === "save-identity") {
+    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    await call("IdentityUpdate", {
+      Id: data.id || "",
+      Label: data.label || "",
+      Email: data.email.trim(),
+      Name: data.name || "",
+      ReplyTo: data.replyTo || "",
+      Bcc: data.bcc || "",
+      Signature: data.signature || "",
+      SignatureInsertBefore: data.signatureInsertBefore ? 1 : 0,
+      sentFolder: data.sentFolder || "",
+      pgpEncrypt: data.pgpEncrypt ? 1 : 0,
+      pgpSign: data.pgpSign ? 1 : 0,
+      smimeKey: data.smimeKey || "",
+      smimeCertificate: data.smimeCertificate || "",
+      smimeCertificateChain: data.smimeCertificateChain || ""
+    });
+    return "reload";
+  }
+  if (name === "delete-identity") {
+    await call("IdentityDelete", { idToDelete: data.id });
+    return "reload";
+  }
+  if (name === "save-contact") {
+    const nameText = (data.name || "").trim();
+    const email = (data.email || "").trim();
+    if (!nameText && !email) throw new ApiError(0, "Name oder E-Mail eintragen.");
+    const existing = snap.contacts?.find((item) => item.id === data.id);
+    let card = writeProp(existing?.jCard, "fn", nameText || email);
+    card = writeProp(card, "email", email);
+    await call("ContactSave", { uid: data.id || "", jCard: card });
+    return "reload";
+  }
+  if (name === "delete-contact") {
+    await call("ContactsDelete", { uids: data.id });
+    return "reload";
+  }
+  if (name === "save-script") {
+    if (!data.name?.trim()) throw new ApiError(0, "Name eintragen.");
+    await call("FiltersScriptSave", { name: data.name.trim(), body: data.body || "" });
+    return "reload";
+  }
+  if (name === "activate-script") {
+    await call("FiltersScriptActivate", { name: data.name });
+    return "reload";
+  }
+  if (name === "delete-script") {
+    await call("FiltersScriptDelete", { name: data.name });
+    return "reload";
+  }
+  if (name === "import-key") {
+    if (!data.key?.trim()) throw new ApiError(0, "Schl\xFCssel einf\xFCgen.");
+    if (!data.backup && !data.gnupg) throw new ApiError(0, "Speicherort w\xE4hlen.");
+    await call("PgpImportKey", {
+      key: data.key,
+      keyId: "",
+      email: data.email || "",
+      backup: data.backup ? 1 : 0,
+      gnuPG: data.gnupg ? 1 : 0
+    });
+    return "reload";
+  }
+  if (name === "import-cert") {
+    if (!data.pem?.trim()) throw new ApiError(0, "Zertifikat einf\xFCgen.");
+    await call("SMimeImportCertificate", { pem: data.pem });
+    return "reload";
+  }
+  return "reload";
+}
+function esc(value) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char] ?? char);
+}
+function field(label2, name, value, type = "text", extra = "") {
+  const control = type === "area" ? `<textarea name="${name}" class="${extra}">${esc(value)}</textarea>` : `<input name="${name}" type="${type}" value="${esc(value)}" ${extra}>`;
+  return `<label class="field"><span>${esc(label2)}</span>${control}</label>`;
+}
+function check(name, label2, on2) {
+  return `<label class="check"><input type="checkbox" name="${name}"${on2 ? " checked" : ""}> ${esc(label2)}</label>`;
+}
+function button(action, label2, attrs, danger = false) {
+  const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${esc(value)}"`).join("");
+  return `<button type="button" class="${danger ? "danger" : "text-btn"}" data-action="${action}"${extra}>${esc(label2)}</button>`;
+}
+function row(title, meta, actions) {
+  return `<li class="set-row"><span class="grow"><strong title="${esc(title)}">${esc(title)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span>${actions}</li>`;
+}
+function form(kind, inner, submit, cancel) {
+  const back = cancel ? `<button type="button" class="text-btn" data-action="settings-cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>` : "";
+  return `<form class="fields" data-action="settings-form" data-kind="${kind}">${inner}<div class="dialog-actions">${back}<button type="submit" class="ink-btn">${esc(submit)}</button></div></form>`;
+}
+function note(textValue, error = false) {
+  if (!textValue) return "";
+  return `<p class="${error ? "error" : "quiet"}">${esc(textValue)}</p>`;
+}
+function loading() {
+  return `<p class="quiet">${esc(t("GLOBAL.LOADING", "Wird geladen"))} \u2026</p>`;
+}
+var blankIdentity = () => ({
+  id: "",
+  label: "",
+  email: "",
+  name: "",
+  replyTo: "",
+  bcc: "",
+  signature: "",
+  signatureInsertBefore: false,
+  sentFolder: "",
+  pgpEncrypt: false,
+  pgpSign: false,
+  smimeKey: "",
+  smimeCertificate: "",
+  smimeCertificateChain: ""
+});
+function identityForm(item, caps) {
+  const crypto = caps.openpgp || caps.gnupg ? `${check("pgpSign", t("CRYPTO.SIGN", "Unterschreiben"), item.pgpSign)}${check("pgpEncrypt", t("CRYPTO.ENCRYPT", "Verschl\xFCsseln"), item.pgpEncrypt)}` : "";
+  const smimeOpen = item.smimeCertificate || item.smimeKey || item.smimeCertificateChain ? " open" : "";
+  return form("save-identity", `
+    <input type="hidden" name="id" value="${esc(item.id)}">
+    ${field(t("POPUPS_IDENTITY.LABEL", "Label"), "label", item.label)}
+    ${field(t("GLOBAL.NAME", "Name"), "name", item.name)}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", item.email, "email", 'autocomplete="email" required')}
+    ${field(t("GLOBAL.REPLY_TO", "Antwort an"), "replyTo", item.replyTo, "email", 'autocomplete="email"')}
+    ${field(t("GLOBAL.BCC", "BCC"), "bcc", item.bcc)}
+    ${field(t("SETTINGS_DESK.SENT_FOLDER", "Ordner f\xFCr Gesendet"), "sentFolder", item.sentFolder)}
+    ${field(t("POPUPS_IDENTITY.SIGNATURE", "Signatur"), "signature", item.signature, "area", "short")}
+    ${check("signatureInsertBefore", t("POPUPS_IDENTITY.LABEL_SIGNATURE_INSERT_BEFORE", "Diese Signatur in Antworten vor dem zitierten Text einf\xFCgen"), item.signatureInsertBefore)}
+    ${crypto}
+    <details${smimeOpen}>
+      <summary>${esc(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</summary>
+      ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "smimeCertificate", item.smimeCertificate, "area", "code")}
+      ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schl\xFCssel"), "smimeKey", item.smimeKey, "area", "code")}
+      ${field(t("SMIME.CERTIFICATECHAIN", "Zwischenzertifikat(e)"), "smimeCertificateChain", item.smimeCertificateChain, "area", "code")}
+    </details>
+  `, t("GLOBAL.SAVE", "Speichern"), true);
+}
+function lookSection() {
+  const current = readAppearance();
+  const choice = (value, label2) => `<label class="check"><input type="radio" name="appearance" value="${value}"${current === value ? " checked" : ""}> ${label2}</label>`;
+  return `
+    <p class="mono">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
+    <fieldset class="choices">
+      ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
+      ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
+      ${choice("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
+    </fieldset>`;
+}
+function renderDesk(section, snap, edit) {
+  const error = `<p class="error" id="settings-error" hidden></p>`;
+  if (section === "look") return error + lookSection();
+  if (!snap) return error + loading();
+  if (section === "accounts") {
+    const rows = snap.accounts.map((item) => {
+      const meta = [item.main ? t("SETTINGS_DESK.MAIN", "Hauptkonto") : item.name, item.current ? t("SETTINGS_DESK.ACTIVE", "Aktiv") : ""].filter(Boolean).join(" \xB7 ");
+      const actions = [
+        item.current ? "" : button("settings-switch", t("SETTINGS_DESK.SWITCH", "Wechseln"), { email: item.email }),
+        item.main ? "" : button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "account", email: item.email }, true)
+      ].join("");
+      return row(item.email, meta, actions);
+    }).join("");
+    const add = snap.caps.accounts ? form("save-account", `
+          ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", "", "email", 'autocomplete="email" required')}
+          ${field(t("GLOBAL.PASSWORD", "Passwort"), "password", "", "password", 'autocomplete="current-password" required')}
+          ${field(t("GLOBAL.NAME", "Name"), "name", "")}
+        `, t("POPUPS_ADD_ACCOUNT.BUTTON_ADD_ACCOUNT", "Hinzuf\xFCgen"), false) : "";
+    return `${error}<p class="mono">${esc(t("SETTINGS_ACCOUNTS.LEGEND_ACCOUNTS", "Konten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows}</ul>${add}`;
+  }
+  if (section === "identities") {
+    const rows = snap.identities.map((item) => row(
+      item.name || item.email || item.label,
+      [item.email, item.label].filter(Boolean).join(" \xB7 "),
+      [
+        button("settings-edit", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "identity", id: item.id }),
+        item.id && snap.caps.identities ? button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "identity", id: item.id }, true) : ""
+      ].join("")
+    )).join("");
+    const adding = edit?.kind === "identity";
+    const current = edit?.kind === "identity" ? edit.fresh ? blankIdentity() : snap.identities.find((item) => item.id === edit.id) || blankIdentity() : null;
+    const editor = current ? identityForm(current, snap.caps) : "";
+    const add = snap.caps.identities && !adding ? button("settings-edit", t("SETTINGS_ACCOUNTS.BUTTON_ADD_IDENTITY", "Identit\xE4t hinzuf\xFCgen"), { kind: "identity", fresh: "1" }) : "";
+    return `${error}<p class="mono">${esc(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows || ""}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+  }
+  if (section === "contacts") {
+    if (!snap.contacts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
+    const rows = snap.contacts.map((item) => row(
+      item.name || item.email || item.id,
+      item.name ? item.email : "",
+      item.readOnly ? "" : [
+        button("settings-edit", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "contact", id: item.id }),
+        button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "contact", id: item.id }, true)
+      ].join("")
+    )).join("");
+    const search = form("search-contacts", field(t("GLOBAL.SEARCH", "Suchen"), "search", snap.contactSearch, "search"), t("GLOBAL.SEARCH", "Suchen"), false);
+    const adding = edit?.kind === "contact";
+    const current = edit?.kind === "contact" && !edit.fresh ? snap.contacts.find((item) => item.id === edit.id) : null;
+    const editor = adding ? form("save-contact", `
+      <input type="hidden" name="id" value="${esc(current?.id || "")}">
+      ${field(t("CONTACTS.DISPLAY_NAME", "Anzeigename"), "name", current?.name || "")}
+      ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", current?.email || "", "email", 'autocomplete="email"')}
+    `, t("GLOBAL.SAVE", "Speichern"), true) : "";
+    const more = snap.contactCount > snap.contacts.length ? note(`${snap.contacts.length} / ${snap.contactCount}`) : "";
+    const add = adding ? "" : button("settings-edit", t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"), { kind: "contact", fresh: "1" });
+    return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</p>${note(snap.notes.contacts, true)}${search}<ul class="set-list">${rows}</ul>${rows ? "" : note(snap.contactSearch ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte"))}${more}${add}${editor}`;
+  }
+  if (section === "filters") {
+    if (!snap.scripts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
+    const rows = snap.scripts.map((item) => row(
+      item.name,
+      item.active ? t("SETTINGS_DESK.ACTIVE", "Aktiv") : "",
+      [
+        item.active ? "" : button("settings-activate", t("SETTINGS_DESK.ACTIVATE", "Aktivieren"), { name: item.name }),
+        button("settings-edit", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "script", id: item.name }),
+        button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "script", name: item.name }, true)
+      ].join("")
+    )).join("");
+    const adding = edit?.kind === "script";
+    const current = edit?.kind === "script" && !edit.fresh ? snap.scripts.find((item) => item.name === edit.id) : null;
+    const editor = adding ? form("save-script", `
+      ${field(t("GLOBAL.NAME", "Name"), "name", current?.name || "", "text", current ? "readonly" : "required")}
+      ${field(t("SETTINGS_DESK.SCRIPT", "Skript"), "body", current?.body || "", "area", "code")}
+    `, t("GLOBAL.SAVE", "Speichern"), true) : "";
+    const add = adding ? "" : button("settings-edit", t("SETTINGS_FILTERS.BUTTON_ADD_SCRIPT", "Skript hinzuf\xFCgen"), { kind: "script", fresh: "1" });
+    return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+  }
+  const keyRows = snap.keys.map((item) => row(item.kind, item.preview, "")).join("");
+  const certRows = snap.certs.map((item) => row(
+    item.name || item.email || item.id,
+    [item.email, item.until ? `${t("CRYPTO.VALID_UNTIL", "G\xFCltig bis")} ${item.until}` : ""].filter(Boolean).join(" \xB7 "),
+    ""
+  )).join("");
+  const keyImport = form("import-key", `
+    ${field(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schl\xFCssel importieren"), "key", "", "area", "code")}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", "", "email", 'autocomplete="email"')}
+    ${check("backup", t("OPENPGP.BACKUP_ON_SERVER", "Auf dem Server verschl\xFCsselt speichern"), true)}
+    ${snap.caps.gnupg ? check("gnupg", t("OPENPGP.STORE_IN_GNUPG", "Auf dem Server in GnuPG speichern"), false) : ""}
+  `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  const certImport = form("import-cert", `
+    ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "pem", "", "area", "code")}
+  `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  return `${error}
+    <p class="mono">${esc(t("SETTINGS_DESK.KEYS", "Schl\xFCssel"))}</p>
+    <p class="quiet">${esc(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschl\xFCsseln stehen an der Identit\xE4t."))}</p>
+    ${note(snap.notes.keys, true)}
+    <ul class="set-list">${keyRows}</ul>
+    ${keyRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
+    <details><summary>${esc(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schl\xFCssel importieren"))}</summary>${keyImport}</details>
+    <p class="mono">${esc(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</p>
+    ${note(snap.notes.certs, true)}
+    <ul class="set-list">${certRows}</ul>
+    ${certRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
+    <details><summary>${esc(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
+}
+
+// src/icons.ts
+var svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
+var iconMenu = svg(
+  `<rect x="5" y="5" width="4" height="4"/><rect x="13" y="5" width="4" height="4"/><rect x="21" y="5" width="4" height="4"/><rect x="5" y="13" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/><rect x="21" y="13" width="4" height="4"/><rect x="5" y="21" width="4" height="4"/><rect x="13" y="21" width="4" height="4"/><rect x="21" y="21" width="4" height="4"/>`
+);
+var iconClose = svg(
+  `<rect x="5" y="5" width="4" height="4"/><rect x="21" y="5" width="4" height="4"/><rect x="9" y="9" width="4" height="4"/><rect x="17" y="9" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/><rect x="9" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/><rect x="5" y="21" width="4" height="4"/><rect x="21" y="21" width="4" height="4"/>`
+);
+
 // src/view.ts
 var CATEGORY = {
   needs_reply: "Antwort n\xF6tig",
@@ -214,9 +641,9 @@ var CATEGORY = {
 function categoryMark(category) {
   if (!category || !CATEGORY[category]) return "";
   const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
-  return `<span class="cat">${mark}${esc(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
+  return `<span class="cat">${mark}${esc2(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
-function esc(value) {
+function esc2(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -228,6 +655,9 @@ function esc(value) {
 function createView(root3, actions) {
   let shell = null;
   let opener = null;
+  let section = "look";
+  let edit = null;
+  let snap = null;
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
   const showLogin = (title) => {
@@ -235,36 +665,36 @@ function createView(root3, actions) {
     root3.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
-          <h1 class="title">${esc(title)}</h1>
-          <label class="field"><span>${esc(t("GLOBAL.EMAIL", "E-Mail"))}</span>
+          <h1 class="title">${esc2(title)}</h1>
+          <label class="field"><span>${esc2(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
           <p class="error" data-for="email" hidden></p>
-          <label class="field"><span>${esc(t("GLOBAL.PASSWORD", "Passwort"))}</span>
+          <label class="field"><span>${esc2(t("GLOBAL.PASSWORD", "Passwort"))}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
-          <label class="stay"><input name="stay" type="checkbox"> ${esc(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
+          <label class="stay"><input name="stay" type="checkbox"> ${esc2(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
-          <button type="submit" class="ink-btn">${esc(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
+          <button type="submit" class="ink-btn">${esc2(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
         </form>
       </main>`;
-    const form = root3.querySelector("form");
-    form.addEventListener("submit", (event) => {
+    const form2 = root3.querySelector("form");
+    form2.addEventListener("submit", (event) => {
       event.preventDefault();
-      const data = new FormData(form);
+      const data = new FormData(form2);
       actions.login(String(data.get("email") || ""), String(data.get("password") || ""), data.get("stay") === "on");
     });
   };
   const setLoginBusy = (busy) => {
-    const button = root3.querySelector(".login-card button");
-    if (button) button.disabled = busy;
+    const button2 = root3.querySelector(".login-card button");
+    if (button2) button2.disabled = busy;
   };
-  const setLoginError = (text) => {
+  const setLoginError = (text2) => {
     const slot = root3.querySelector("[data-for='form']");
     if (!slot) return;
-    slot.hidden = !text;
-    slot.textContent = text;
+    slot.hidden = !text2;
+    slot.textContent = text2;
   };
   const showMail = (email, folderName, assist) => {
     root3.innerHTML = `
@@ -274,11 +704,11 @@ function createView(root3, actions) {
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</button>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}</button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${esc2(t("GLOBAL.LOGOUT", "Abmelden"))}</button>
             </div>
           </div>
-          <p class="group-label mono">${esc(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
+          <p class="group-label mono">${esc2(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
           <div id="folder-inbox"></div>
           <p class="group-label mono">Ordner</p>
           <div id="folder-rest"></div>
@@ -303,15 +733,15 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn" data-action="back" hidden>${esc(t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+            <button type="button" class="text-btn" data-action="back" hidden>${esc2(t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn" data-action="reply" hidden>${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn" data-action="reply-all" hidden>${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn" data-action="forward" hidden>${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn" data-action="archive" hidden>${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn" data-action="reply" hidden>${esc2(t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn" data-action="reply-all" hidden>${esc2(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn" data-action="forward" hidden>${esc2(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn" data-action="archive" hidden>${esc2(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn" data-action="unread" hidden>Ungelesen</button>
-            <button type="button" class="text-btn" data-action="delete" hidden>${esc(t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn" data-action="delete" hidden>${esc2(t("GLOBAL.DELETE", "L\xF6schen"))}</button>
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
@@ -321,16 +751,16 @@ function createView(root3, actions) {
         <section class="composer" hidden aria-label="Neue Mail">
           <form class="composer-form">
             <div class="composer-bar">
-              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
+              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
               <span class="title title-md" id="compose-title">Neue Mail</span>
               <span class="spacer"></span>
-              <button type="submit" class="ink-btn">${esc(t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
+              <button type="submit" class="ink-btn">${esc2(t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
             </div>
             <div class="fields">
               <p class="quiet" id="compose-from"></p>
-              <label class="field"><span>${esc(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+              <label class="field"><span>${esc2(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
+              <label class="field"><span>${esc2(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
+              <label class="field"><span>${esc2(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
               <label class="field"><span>Text</span><textarea name="body"></textarea></label>
               <p class="error" id="send-error" hidden></p>
             </div>
@@ -339,21 +769,26 @@ function createView(root3, actions) {
         <nav class="tabbar" aria-label="Navigation">
           <button type="button" class="text-btn" data-action="pane-folders">Ordner</button>
           <button type="button" class="text-btn" data-action="pane-search">Suche</button>
-          <button type="button" class="ink-btn" data-action="compose">${esc(t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
+          <button type="button" class="ink-btn" data-action="compose">${esc2(t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
         </nav>
-        <dialog id="settings" aria-labelledby="settings-title">
+        <dialog id="settings" class="dialog-wide" aria-labelledby="settings-title">
           <div class="dialog-body">
-            <div class="sheet-head" style="padding:0;border:0;min-height:0">
-              <h2 id="settings-title" class="title title-md">Einstellungen</h2>
-              <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
+            <div class="settings-sticky">
+              <div class="sheet-head" style="padding:0;border:0;min-height:0">
+                <h2 id="settings-title" class="title title-md">${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <span class="spacer"></span>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
+              </div>
+              <nav class="settings-nav" aria-label="${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+                <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${esc2(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${esc2(t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${esc2(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${esc2(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${esc2(t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${esc2(t("SETTINGS_DESK.KEYS", "Schl\xFCssel"))}</button>
+              </nav>
             </div>
-            <fieldset class="choices">
-              <legend class="mono">Erscheinungsbild</legend>
-              <label><input type="radio" name="appearance" value="system"> System</label>
-              <label><input type="radio" name="appearance" value="light"> Hell</label>
-              <label><input type="radio" name="appearance" value="dark"> Dunkel</label>
-            </fieldset>
+            <div id="settings-panel"></div>
           </div>
         </dialog>
         <dialog id="keys" aria-labelledby="keys-title">
@@ -361,7 +796,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
             </div>
             <ul class="keys">
               <li><span>N\xE4chste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
@@ -380,8 +815,8 @@ function createView(root3, actions) {
           <div class="dialog-body">
             <h2 id="confirm-title" class="title title-md">Wirklich l\xF6schen?</h2>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-              <button type="button" class="danger" value="ok">${esc(t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+              <button type="button" class="text-btn" value="cancel">${esc2(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="danger" value="ok">${esc2(t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             </div>
           </div>
         </dialog>
@@ -410,10 +845,10 @@ function createView(root3, actions) {
   }
   function closeMenu() {
     const menu = shell?.querySelector("#account-menu");
-    const button = shell?.querySelector("[data-action='account']");
-    if (!menu || !button) return;
+    const button2 = shell?.querySelector("[data-action='account']");
+    if (!menu || !button2) return;
     menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
+    button2.setAttribute("aria-expanded", "false");
   }
   function openLayer(layer, from) {
     opener = from;
@@ -467,11 +902,41 @@ function createView(root3, actions) {
         accountBtn.setAttribute("aria-expanded", open ? "true" : "false");
       } else if (action === "settings") {
         closeMenu();
-        const current = readAppearance();
-        shell?.querySelectorAll("input[name='appearance']").forEach((input) => {
-          input.checked = input.value === current;
-        });
+        section = "look";
+        edit = null;
+        snap = null;
+        paintSettings();
         (shell?.querySelector("#settings")).showModal();
+        void actions.settings?.("open", {});
+      } else if (action === "settings-section") {
+        section = target.dataset.section || "look";
+        edit = null;
+        paintSettings();
+      } else if (action === "settings-edit") {
+        edit = { kind: target.dataset.kind || "", id: target.dataset.id || "", fresh: target.dataset.fresh === "1" };
+        paintSettings();
+      } else if (action === "settings-cancel") {
+        edit = null;
+        paintSettings();
+      } else if (action === "settings-delete" || action === "settings-switch" || action === "settings-activate") {
+        const name = action === "settings-delete" ? `delete-${target.dataset.kind || ""}` : action === "settings-switch" ? "switch-account" : "activate-script";
+        const payload = {
+          id: target.dataset.id || "",
+          email: target.dataset.email || "",
+          name: target.dataset.name || ""
+        };
+        void (async () => {
+          if (action === "settings-delete") {
+            const dialog = shell?.querySelector("#confirm");
+            if (!dialog) return;
+            dialog.showModal();
+            const ok = await new Promise((resolve) => {
+              dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+            });
+            if (!ok) return;
+          }
+          await actions.settings?.(name, payload);
+        })();
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") target.closest("dialog")?.close();
       else if (action === "search") {
@@ -501,13 +966,13 @@ function createView(root3, actions) {
         const sheet = shell?.querySelector(".sheet");
         if (sheet) openLayer(sheet, target);
       } else if (action === "cat") {
-        shell?.querySelectorAll(".filter").forEach((button) => {
-          button.setAttribute("aria-pressed", button.dataset.cat === target.dataset.cat ? "true" : "false");
+        shell?.querySelectorAll(".filter").forEach((button2) => {
+          button2.setAttribute("aria-pressed", button2.dataset.cat === target.dataset.cat ? "true" : "false");
         });
         actions.assist?.("cat", target.dataset);
       } else if (action === "mode" || action === "tone") {
-        target.parentElement?.querySelectorAll("button").forEach((button) => {
-          button.setAttribute("aria-pressed", button === target ? "true" : "false");
+        target.parentElement?.querySelectorAll("button").forEach((button2) => {
+          button2.setAttribute("aria-pressed", button2 === target ? "true" : "false");
         });
       } else if (action === "prompt") {
         const area = shell?.querySelector("#ask");
@@ -516,10 +981,10 @@ function createView(root3, actions) {
       } else if (action) actions.assist?.(action, target.dataset);
     });
     shell.addEventListener("submit", (event) => {
-      const form = event.target;
-      if (form.classList.contains("composer-form")) {
+      const form2 = event.target;
+      if (form2.classList.contains("composer-form")) {
         event.preventDefault();
-        const data = new FormData(form);
+        const data = new FormData(form2);
         actions.send({
           title: "",
           to: String(data.get("to") || ""),
@@ -527,14 +992,24 @@ function createView(root3, actions) {
           subject: String(data.get("subject") || ""),
           body: String(data.get("body") || "")
         });
-      } else if (form.dataset.action === "search") {
+      } else if (form2.dataset.action === "search") {
         event.preventDefault();
-        actions.search(form.querySelector("#search").value.trim());
-      } else if (form.dataset.action === "ask") {
+        actions.search(form2.querySelector("#search").value.trim());
+      } else if (form2.dataset.action === "ask") {
         event.preventDefault();
-        const area = form.querySelector("textarea");
+        const area = form2.querySelector("textarea");
         actions.assist?.("ask", { text: area.value });
         area.value = "";
+      } else if (form2.dataset.action === "settings-form") {
+        event.preventDefault();
+        const data = {};
+        new FormData(form2).forEach((value, key) => {
+          data[key] = String(value);
+        });
+        form2.querySelectorAll("input[type='checkbox']").forEach((box) => {
+          data[box.name] = box.checked ? "1" : "";
+        });
+        void actions.settings?.(form2.dataset.kind || "", data);
       }
     });
     shell.addEventListener("change", (event) => {
@@ -559,6 +1034,8 @@ function createView(root3, actions) {
         return;
       }
       if (typing) return;
+      const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid && !event.target.dataset.folder;
+      if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
         event.preventDefault();
@@ -601,19 +1078,19 @@ function createView(root3, actions) {
     });
     const confirm = shell.querySelector("#confirm");
     confirm.addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (button) confirm.close(button.value);
+      const button2 = event.target.closest("button");
+      if (button2) confirm.close(button2.value);
     });
   }
   function moveSelection(delta) {
     const rows = [...shell?.querySelectorAll("[data-uid]") ?? []];
     if (!rows.length) return;
-    const index = rows.findIndex((row2) => row2.getAttribute("aria-current") === "true");
+    const index = rows.findIndex((row3) => row3.getAttribute("aria-current") === "true");
     const next = delta === 0 ? Math.max(index, 0) : Math.min(rows.length - 1, Math.max(0, index + delta));
-    const row = rows[next];
-    if (!row) return;
-    actions.selectMessage(Number(row.dataset.uid));
-    row.scrollIntoView({ block: "nearest" });
+    const row2 = rows[next];
+    if (!row2) return;
+    actions.selectMessage(Number(row2.dataset.uid));
+    row2.scrollIntoView({ block: "nearest" });
     if (!wide()) pane("reader");
   }
   function installAssist(flags) {
@@ -637,18 +1114,18 @@ function createView(root3, actions) {
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
       filters.innerHTML = cats.map(
-        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc2(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc2(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "text-btn";
-      button.dataset.action = "lang-search";
-      button.hidden = true;
-      button.textContent = "Als Sprache verstehen";
-      searchForm.append(button);
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "text-btn";
+      button2.dataset.action = "lang-search";
+      button2.hidden = true;
+      button2.textContent = "Als Sprache verstehen";
+      searchForm.append(button2);
       const hint = document.createElement("div");
       hint.id = "translated";
       hint.hidden = true;
@@ -657,7 +1134,7 @@ function createView(root3, actions) {
       searchForm.after(hint);
       const input = shell.querySelector("#search");
       input.addEventListener("input", () => {
-        button.hidden = !input.value.trim();
+        button2.hidden = !input.value.trim();
       });
     }
     if (flags.summarize || flags.replies) {
@@ -677,13 +1154,13 @@ function createView(root3, actions) {
       sheet.hidden = true;
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc(flags.provider)}</span>
+          <span class="title title-md">${esc2(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc2(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${iconClose}</button>
         </div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc2(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
             <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
             <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
@@ -692,8 +1169,8 @@ function createView(root3, actions) {
         </div>
         <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
-          <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <textarea id="ask" rows="2" placeholder="${esc2(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc2(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
         <p class="error" id="chat-error" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -709,16 +1186,16 @@ function createView(root3, actions) {
           <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
           <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc2(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
         <div class="tones" role="toolbar" aria-label="Ton">
-          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
+          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc2(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="text-btn" data-action="generate">${esc(t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
-          <button type="button" class="text-btn" data-action="stop-generate" hidden>${esc(t("AI_COPILOT.STOP", "Stopp"))}</button>
+          <button type="button" class="text-btn" data-action="generate">${esc2(t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
+          <button type="button" class="text-btn" data-action="stop-generate" hidden>${esc2(t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
         </div>
-        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc2(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
         <p class="quiet" id="draft-status"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
@@ -729,19 +1206,34 @@ function createView(root3, actions) {
         <h2 class="title title-md">Assistent</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
-          <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="text-btn" value="cancel">${esc2(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
           <button type="button" class="ink-btn" value="ok">Fortfahren</button>
         </div>
       </div>`;
     consent.addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (button) consent.close(button.value);
+      const button2 = event.target.closest("button");
+      if (button2) consent.close(button2.value);
     });
     shell.append(consent);
   }
-  function folderButton(row) {
-    const count = row.unread > 0 ? `<span class="count">${row.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc(row.fullName)}" aria-current="${row.current ? "page" : "false"}" style="padding-left:${8 + row.depth * 12}px"><span>${esc(row.name)}</span>${count}</button>`;
+  function paintSettings() {
+    const panel = shell?.querySelector("#settings-panel");
+    if (!panel) return;
+    shell?.querySelectorAll("[data-section]").forEach((button2) => {
+      const id = button2.dataset.section || "";
+      button2.setAttribute("aria-pressed", id === section ? "true" : "false");
+      if (id === "contacts") button2.hidden = !snap?.caps.contacts;
+      if (id === "filters") button2.hidden = !snap?.caps.sieve;
+    });
+    panel.innerHTML = renderDesk(section, snap, edit);
+    if (edit) {
+      const field2 = panel.querySelector("input:not([type='hidden']), textarea");
+      field2?.focus({ preventScroll: true });
+    }
+  }
+  function folderButton(row2) {
+    const count = row2.unread > 0 ? `<span class="count">${row2.unread}</span>` : "";
+    return `<button type="button" class="folder" data-folder="${esc2(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px"><span>${esc2(row2.name)}</span>${count}</button>`;
   }
   return {
     showLogin,
@@ -749,13 +1241,13 @@ function createView(root3, actions) {
     setLoginError,
     showMail,
     setFolders(rows) {
-      const inbox = rows.filter((row) => row.inbox);
-      const rest = rows.filter((row) => !inbox.includes(row));
+      const inbox = rows.filter((row2) => row2.inbox);
+      const rest = rows.filter((row2) => !inbox.includes(row2));
       const inboxEl = shell?.querySelector("#folder-inbox");
       const restEl = shell?.querySelector("#folder-rest");
       if (inboxEl) inboxEl.innerHTML = inbox.map(folderButton).join("") || `<button type="button" class="folder" data-folder="INBOX">Posteingang</button>`;
       if (restEl) restEl.innerHTML = rest.map(folderButton).join("");
-      const current = rows.find((row) => row.current);
+      const current = rows.find((row2) => row2.current);
       if (current && shell) {
         shell.querySelector("#folder-title").textContent = current.name;
         shell.querySelector("#reader-place").textContent = current.name;
@@ -770,12 +1262,12 @@ function createView(root3, actions) {
       const moreBtn = shell?.querySelector("[data-action='more']");
       const clearBtn = shell?.querySelector("[data-action='clear-search']");
       if (box) {
-        box.innerHTML = rows.map((row) => `
-          <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" aria-current="${row.current ? "true" : "false"}">
-            <span class="who">${esc(row.who)}</span>
-            <span class="when">${esc(row.when)}</span>
-            <span class="subj">${esc(row.subject || "(ohne Betreff)")}${categoryMark(row.category)}</span>
-            <span class="peek">${esc(row.preview)}</span>
+        box.innerHTML = rows.map((row2) => `
+          <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" aria-current="${row2.current ? "true" : "false"}">
+            <span class="who">${esc2(row2.who)}</span>
+            <span class="when">${esc2(row2.when)}</span>
+            <span class="subj">${esc2(row2.subject || "(ohne Betreff)")}${categoryMark(row2.category)}</span>
+            <span class="peek">${esc2(row2.preview)}</span>
           </button>`).join("");
       }
       if (emptyEl) {
@@ -789,19 +1281,19 @@ function createView(root3, actions) {
       if (moreBtn) moreBtn.hidden = !more;
       if (clearBtn) clearBtn.hidden = !searching;
     },
-    setReader(data, loading, error) {
+    setReader(data, loading2, error) {
       const body = shell?.querySelector("#reader-body");
       const buttons = ["reply", "reply-all", "forward", "archive", "unread", "delete"];
       buttons.forEach((name) => {
-        const button = shell?.querySelector(`[data-action='${name}']`);
-        if (button) button.hidden = !data;
+        const button2 = shell?.querySelector(`[data-action='${name}']`);
+        if (button2) button2.hidden = !data;
       });
       if (!body) return;
       body.replaceChildren();
-      if (loading) {
+      if (loading2) {
         const p = document.createElement("p");
         p.className = "quiet";
-        p.textContent = loading;
+        p.textContent = loading2;
         body.append(p);
         return;
       }
@@ -851,45 +1343,45 @@ function createView(root3, actions) {
       frame.referrerPolicy = "no-referrer";
       frame.title = "Brief";
       const scheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-      frame.srcdoc = data.html ? /<html[\s>]/i.test(data.html) ? data.html : `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${data.html}</body></html>` : `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"><style>body{margin:0;background:Canvas;color:CanvasText;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 sans-serif}</style>${esc(data.plain || "")}`;
+      frame.srcdoc = data.html ? /<html[\s>]/i.test(data.html) ? data.html : `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${data.html}</body></html>` : `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"><style>body{margin:0;background:Canvas;color:CanvasText;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 sans-serif}</style>${esc2(data.plain || "")}`;
       body.append(frame);
     },
     openCompose(seed) {
       if (!shell) return;
       const composer = shell.querySelector(".composer");
       shell.querySelector("#compose-title").textContent = seed.title;
-      const form = shell.querySelector(".composer-form");
-      form.elements.namedItem("to").value = seed.to;
-      form.elements.namedItem("cc").value = seed.cc;
-      form.elements.namedItem("subject").value = seed.subject;
-      form.elements.namedItem("body").value = seed.body;
-      shell.querySelectorAll("[data-mode]").forEach((button) => {
-        button.setAttribute("aria-pressed", button.dataset.mode === (seed.mode || "new") ? "true" : "false");
+      const form2 = shell.querySelector(".composer-form");
+      form2.elements.namedItem("to").value = seed.to;
+      form2.elements.namedItem("cc").value = seed.cc;
+      form2.elements.namedItem("subject").value = seed.subject;
+      form2.elements.namedItem("body").value = seed.body;
+      shell.querySelectorAll("[data-mode]").forEach((button2) => {
+        button2.setAttribute("aria-pressed", button2.dataset.mode === (seed.mode || "new") ? "true" : "false");
       });
       this.setSendState(false, "");
       if (!wide()) pane("compose");
       openLayer(composer, document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      form.elements.namedItem("to").focus({ preventScroll: true });
+      form2.elements.namedItem("to").focus({ preventScroll: true });
     },
     closeCompose() {
       const composer = shell?.querySelector(".composer");
       if (composer && !composer.hidden) closeLayer(composer);
     },
     setSendState(busy, error) {
-      const button = shell?.querySelector(".composer-form button[type='submit']");
+      const button2 = shell?.querySelector(".composer-form button[type='submit']");
       const slot = shell?.querySelector("#send-error");
-      if (button) {
-        button.disabled = busy;
-        button.textContent = busy ? "Wird gesendet \u2026" : t("COMPOSE.BUTTON_SEND", "Senden");
+      if (button2) {
+        button2.disabled = busy;
+        button2.textContent = busy ? "Wird gesendet \u2026" : t("COMPOSE.BUTTON_SEND", "Senden");
       }
       if (slot) {
         slot.hidden = !error;
         slot.textContent = error;
       }
     },
-    notice(text) {
+    notice(text2) {
       const slot = shell?.querySelector("#notice");
-      if (slot) slot.textContent = text;
+      if (slot) slot.textContent = text2;
     },
     confirmDelete() {
       const dialog = shell?.querySelector("#confirm");
@@ -899,19 +1391,19 @@ function createView(root3, actions) {
         dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
       });
     },
-    confirmConsent(text) {
+    confirmConsent(text2) {
       const dialog = shell?.querySelector("#consent");
       const slot = shell?.querySelector("#consent-text");
       if (!dialog || !slot) return Promise.resolve(true);
-      slot.textContent = text;
+      slot.textContent = text2;
       dialog.showModal();
       return new Promise((resolve) => {
         dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
       });
     },
     pressCategory(id) {
-      shell?.querySelectorAll(".filter").forEach((button) => {
-        button.setAttribute("aria-pressed", button.dataset.cat === id ? "true" : "false");
+      shell?.querySelectorAll(".filter").forEach((button2) => {
+        button2.setAttribute("aria-pressed", button2.dataset.cat === id ? "true" : "false");
       });
     },
     setAlerts(reply, follow, invoice, dues) {
@@ -943,38 +1435,38 @@ function createView(root3, actions) {
         p.textContent = state.error;
         strip.append(p);
       }
-      const row = document.createElement("div");
-      row.className = "strip-row";
+      const row2 = document.createElement("div");
+      row2.className = "strip-row";
       if (!state.tldr && state.showSummarize) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "text-btn";
-        button.dataset.action = "summarize";
-        button.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
-        row.append(button);
+        const button2 = document.createElement("button");
+        button2.type = "button";
+        button2.className = "text-btn";
+        button2.dataset.action = "summarize";
+        button2.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
+        row2.append(button2);
       } else if (state.tldr) {
         const label2 = document.createElement("span");
         label2.className = "mono";
         label2.textContent = "Zusammenfassung";
-        const text = document.createElement("p");
-        text.textContent = state.tldr;
+        const text2 = document.createElement("p");
+        text2.textContent = state.tldr;
         const again = document.createElement("button");
         again.type = "button";
         again.className = "text-btn";
         again.dataset.action = "summarize";
         again.dataset.force = "1";
         again.textContent = t("AI_COPILOT.REGENERATE", "Neu erzeugen");
-        row.append(label2, text, again);
+        row2.append(label2, text2, again);
         if (state.cached) {
-          const note = document.createElement("p");
-          note.className = "quiet";
-          note.textContent = "aus dem Zwischenspeicher";
-          row.append(note);
+          const note2 = document.createElement("p");
+          note2.className = "quiet";
+          note2.textContent = "aus dem Zwischenspeicher";
+          row2.append(note2);
         }
         const caveat = document.createElement("p");
         caveat.className = "quiet";
         caveat.textContent = "Kann Angaben enthalten, die so nicht in der Mail stehen. Der Brief darunter ist die Quelle.";
-        row.append(caveat);
+        row2.append(caveat);
       }
       if (state.showReplies && !state.replies.length) {
         const replies = document.createElement("button");
@@ -982,24 +1474,24 @@ function createView(root3, actions) {
         replies.className = "text-btn";
         replies.dataset.action = "replies";
         replies.textContent = t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschl\xE4ge");
-        row.append(replies);
+        row2.append(replies);
       }
       state.replies.forEach((reply, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "prompt";
-        button.dataset.action = "use-reply";
-        button.dataset.index = String(index);
-        button.textContent = reply.label;
-        row.append(button);
+        const button2 = document.createElement("button");
+        button2.type = "button";
+        button2.className = "prompt";
+        button2.dataset.action = "use-reply";
+        button2.dataset.index = String(index);
+        button2.textContent = reply.label;
+        row2.append(button2);
       });
       if (state.model) {
         const model = document.createElement("p");
         model.className = "mono quiet";
         model.textContent = state.model;
-        row.append(model);
+        row2.append(model);
       }
-      strip.append(row);
+      strip.append(row2);
     },
     setChat(turns, thinking, context = "") {
       const log = shell?.querySelector("#chat-log");
@@ -1021,13 +1513,13 @@ function createView(root3, actions) {
         p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten.");
         const prompts = document.createElement("div");
         prompts.className = "prompts";
-        ["Welche Mails warten auf meine Antwort?", "Zeig mir Rechnungen vom letzten Monat", "Fasse die ge\xF6ffnete Mail zusammen"].forEach((text) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "prompt";
-          button.dataset.action = "prompt";
-          button.textContent = text;
-          prompts.append(button);
+        ["Welche Mails warten auf meine Antwort?", "Zeig mir Rechnungen vom letzten Monat", "Fasse die ge\xF6ffnete Mail zusammen"].forEach((text2) => {
+          const button2 = document.createElement("button");
+          button2.type = "button";
+          button2.className = "prompt";
+          button2.dataset.action = "prompt";
+          button2.textContent = text2;
+          prompts.append(button2);
         });
         log.append(p, prompts);
       }
@@ -1040,9 +1532,9 @@ function createView(root3, actions) {
           trace.textContent = turn.trace.join(" \xB7 ");
           item.append(trace);
         }
-        const text = document.createElement("p");
-        text.textContent = turn.text;
-        item.append(text);
+        const text2 = document.createElement("p");
+        text2.textContent = turn.text;
+        item.append(text2);
         turn.actions.forEach((action, index) => {
           const card = document.createElement("div");
           card.className = "action";
@@ -1102,9 +1594,9 @@ function createView(root3, actions) {
         subject: shell?.querySelector("input[name='subject']")?.value || ""
       };
     },
-    setDraftBody(text) {
+    setDraftBody(text2) {
       const area = shell?.querySelector("textarea[name='body']");
-      if (area) area.value = text;
+      if (area) area.value = text2;
     },
     setDraftBusy(busy, status) {
       const generate = shell?.querySelector("[data-action='generate']");
@@ -1123,6 +1615,17 @@ function createView(root3, actions) {
       const span = hint.querySelector("span");
       if (span) span.textContent = subject ? `Betreff: ${subject}` : "";
       hint.dataset.subject = subject;
+    },
+    showSettings(next) {
+      snap = next;
+      edit = null;
+      paintSettings();
+    },
+    settingsNotice(text2) {
+      const slot = shell?.querySelector("#settings-error");
+      if (!slot) return;
+      slot.hidden = !text2;
+      slot.textContent = text2;
     },
     showTranslation(search, explanation) {
       const box = shell?.querySelector("#translated");
@@ -1216,6 +1719,10 @@ var Session = class {
   tagged = /* @__PURE__ */ new Set();
   alertItems = [];
   category = "all";
+  mainEmail = "";
+  caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
+  desk = null;
+  contactSearch = "";
   constructor(root3) {
     this.view = createView(root3, {
       login: (email, password, stay) => void this.login(email, password, stay),
@@ -1231,12 +1738,13 @@ var Session = class {
       archive: () => void this.archive(),
       unread: () => void this.markUnread(),
       askDelete: () => void this.remove(),
-      send: (values) => void this.send(values),
+      send: (values2) => void this.send(values2),
       closeCompose: () => {
         this.replyKind = "";
       },
       back: () => void 0,
-      assist: (name, data) => void this.assist(name, data)
+      assist: (name, data) => void this.assist(name, data),
+      settings: (name, data) => this.settings(name, data)
     });
   }
   async start(data) {
@@ -1274,6 +1782,8 @@ var Session = class {
   }
   async enter(data) {
     this.email = String(data.Email || "");
+    this.mainEmail = String(data.mainEmail || data.Email || "");
+    this.caps = readCaps(data);
     this.accountHash = String(data.accountHash || "");
     this.sentFolder = String(data.SentFolder || "");
     this.archiveFolder = String(data.ArchiveFolder || "");
@@ -1288,6 +1798,27 @@ var Session = class {
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
+  }
+  async settings(name, data) {
+    try {
+      if (name === "open") this.contactSearch = "";
+      if (name === "search-contacts") this.contactSearch = data.search || "";
+      if (name === "open" || name === "search-contacts") {
+        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+        this.view.showSettings(this.desk);
+        return;
+      }
+      if (!this.desk) return;
+      const next = await applyDesk(name, data, this.desk);
+      if (next === "session") {
+        await this.enter(await loadApp());
+        return;
+      }
+      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+      this.view.showSettings(this.desk);
+    } catch (error) {
+      this.view.settingsNotice(explain(error));
+    }
   }
   async loadFolders() {
     try {
@@ -1428,9 +1959,9 @@ var Session = class {
       const result = await call("Message", { folder: this.folder, uid });
       const message = this.parseMessage(result, true);
       this.current = message;
-      const row = this.messages.find((item) => item.uid === uid);
-      if (row && !seen(row.flags)) {
-        row.flags.push("\\seen");
+      const row2 = this.messages.find((item) => item.uid === uid);
+      if (row2 && !seen(row2.flags)) {
+        row2.flags.push("\\seen");
         const folder = this.folders.find((item) => item.fullName === this.folder);
         if (folder && folder.unread > 0) folder.unread -= 1;
         this.paintFolders();
@@ -1503,8 +2034,8 @@ Betreff: ${message.subject}
 ${body}`
     });
   }
-  async send(values) {
-    if (!values.to.trim()) {
+  async send(values2) {
+    if (!values2.to.trim()) {
       this.view.setSendState(false, "Geben Sie bitte mindestens einen Empf\xE4nger an.");
       return;
     }
@@ -1512,11 +2043,11 @@ ${body}`
     const message = this.current;
     const params = {
       from: this.email,
-      to: values.to,
-      cc: values.cc,
+      to: values2.to,
+      cc: values2.cc,
       bcc: "",
-      subject: values.subject,
-      plain: values.body,
+      subject: values2.subject,
+      plain: values2.body,
       html: "",
       saveFolder: this.sentFolder
     };
@@ -1612,8 +2143,8 @@ ${body}`
   async consent(kind = "mail") {
     if (this.noticeAck) return true;
     const name = this.assistFlags?.providerName || "den Anbieter";
-    const text = kind === "query" ? `Nur die Suchanfrage geht an ${name}. Die Mails selbst bleiben auf dem Server. Fortfahren?` : `Diese KI-Funktion sendet den Inhalt der betroffenen Mails an ${name}. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?`;
-    const ok = await this.view.confirmConsent(text);
+    const text2 = kind === "query" ? `Nur die Suchanfrage geht an ${name}. Die Mails selbst bleiben auf dem Server. Fortfahren?` : `Diese KI-Funktion sendet den Inhalt der betroffenen Mails an ${name}. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?`;
+    const ok = await this.view.confirmConsent(text2);
     if (!ok) return false;
     try {
       await plugin("AiSaveSettings", { settings: { notice_ack: true } });
@@ -1668,11 +2199,11 @@ ${body}`
       if (!await this.consent("query")) return;
       const query = data.text || "";
       const input = document.querySelector("#search");
-      const text = query || input?.value.trim() || "";
-      if (!text) return;
+      const text2 = query || input?.value.trim() || "";
+      if (!text2) return;
       try {
         const result = await plugin("AiSearch", {
-          query: text,
+          query: text2,
           folders: this.folders.map((folder) => folder.fullName),
           currentFolder: this.folder,
           sent: this.sentFolder
@@ -1685,10 +2216,10 @@ ${body}`
       return;
     }
     if (name === "run-search") {
-      const field = document.querySelector("#translate-q");
+      const field2 = document.querySelector("#translate-q");
       this.category = "all";
       this.view.pressCategory("all");
-      await this.setSearch(field?.value.trim() || "");
+      await this.setSearch(field2?.value.trim() || "");
       return;
     }
     if (name === "summarize" && this.current) {
@@ -1779,10 +2310,10 @@ ${body}`
       return;
     }
     if (name === "ask") {
-      const text = (data.text || "").trim();
-      if (!text) return;
-      this.chat.push({ role: "user", content: text });
-      this.turns.push({ role: "user", text, trace: [], actions: [] });
+      const text2 = (data.text || "").trim();
+      if (!text2) return;
+      this.chat.push({ role: "user", content: text2 });
+      this.turns.push({ role: "user", text: text2, trace: [], actions: [] });
       this.view.setChat(this.turns, "Copilot arbeitet \u2026", this.contextLabel());
       try {
         const result = await plugin("AiChat", {
@@ -1827,8 +2358,8 @@ ${body}`
     if (name === "apply-subject") {
       const hint = document.querySelector("#subject-hint");
       const subject = hint?.dataset.subject || "";
-      const field = document.querySelector("input[name='subject']");
-      if (field && subject) field.value = subject;
+      const field2 = document.querySelector("input[name='subject']");
+      if (field2 && subject) field2.value = subject;
     }
   }
   contextLabel() {
@@ -1921,9 +2452,9 @@ ${body}`
   }
   async markUnread() {
     if (!this.selected) return;
-    const row = this.messages.find((message) => message.uid === this.selected);
-    if (!row) return;
-    row.flags = row.flags.filter((flag) => flag.toLowerCase() !== "\\seen");
+    const row2 = this.messages.find((message) => message.uid === this.selected);
+    if (!row2) return;
+    row2.flags = row2.flags.filter((flag) => flag.toLowerCase() !== "\\seen");
     const folder = this.folders.find((item) => item.fullName === this.folder);
     if (folder) folder.unread += 1;
     this.paintFolders();

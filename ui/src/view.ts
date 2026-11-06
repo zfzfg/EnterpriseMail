@@ -1,7 +1,8 @@
 import type { AssistFlags } from "./assistant";
 import { iconClose, iconMenu } from "./icons";
 import { t } from "./i18n";
-import { applyAppearance, readAppearance, type Appearance } from "./theme";
+import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
+import { applyAppearance, type Appearance } from "./theme";
 
 export interface FolderRow {
   fullName: string;
@@ -95,6 +96,7 @@ export interface MailActions {
   closeCompose(): void;
   back(): void;
   assist?(name: string, data: Record<string, string | undefined>): void;
+  settings?(name: string, data: Record<string, string>): void | Promise<void>;
 }
 
 const CATEGORY: Record<string, string> = {
@@ -142,11 +144,16 @@ export interface MailView {
   setDraftBusy(busy: boolean, status: string): void;
   setSubjectHint(subject: string): void;
   showTranslation(search: string, explanation: string): void;
+  showSettings(snap: SettingsSnapshot): void;
+  settingsNotice(text: string): void;
 }
 
 export function createView(root: HTMLElement, actions: MailActions): MailView {
   let shell: HTMLElement | null = null;
   let opener: HTMLElement | null = null;
+  let section = "look";
+  let edit: DeskEdit | null = null;
+  let snap: SettingsSnapshot | null = null;
 
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
@@ -265,19 +272,24 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <button type="button" class="text-btn" data-action="pane-search">Suche</button>
           <button type="button" class="ink-btn" data-action="compose">${esc(t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
         </nav>
-        <dialog id="settings" aria-labelledby="settings-title">
+        <dialog id="settings" class="dialog-wide" aria-labelledby="settings-title">
           <div class="dialog-body">
-            <div class="sheet-head" style="padding:0;border:0;min-height:0">
-              <h2 id="settings-title" class="title title-md">Einstellungen</h2>
-              <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+            <div class="settings-sticky">
+              <div class="sheet-head" style="padding:0;border:0;min-height:0">
+                <h2 id="settings-title" class="title title-md">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <span class="spacer"></span>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+              </div>
+              <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+                <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${esc(t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${esc(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${esc(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${esc(t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
+              </nav>
             </div>
-            <fieldset class="choices">
-              <legend class="mono">Erscheinungsbild</legend>
-              <label><input type="radio" name="appearance" value="system"> System</label>
-              <label><input type="radio" name="appearance" value="light"> Hell</label>
-              <label><input type="radio" name="appearance" value="dark"> Dunkel</label>
-            </fieldset>
+            <div id="settings-panel"></div>
           </div>
         </dialog>
         <dialog id="keys" aria-labelledby="keys-title">
@@ -395,11 +407,43 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         accountBtn.setAttribute("aria-expanded", open ? "true" : "false");
       } else if (action === "settings") {
         closeMenu();
-        const current = readAppearance();
-        shell?.querySelectorAll<HTMLInputElement>("input[name='appearance']").forEach((input) => {
-          input.checked = input.value === current;
-        });
+        section = "look";
+        edit = null;
+        snap = null;
+        paintSettings();
         (shell?.querySelector("#settings") as HTMLDialogElement).showModal();
+        void actions.settings?.("open", {});
+      } else if (action === "settings-section") {
+        section = target.dataset.section || "look";
+        edit = null;
+        paintSettings();
+      } else if (action === "settings-edit") {
+        edit = { kind: target.dataset.kind || "", id: target.dataset.id || "", fresh: target.dataset.fresh === "1" };
+        paintSettings();
+      } else if (action === "settings-cancel") {
+        edit = null;
+        paintSettings();
+      } else if (action === "settings-delete" || action === "settings-switch" || action === "settings-activate") {
+        const name = action === "settings-delete"
+          ? `delete-${target.dataset.kind || ""}`
+          : action === "settings-switch" ? "switch-account" : "activate-script";
+        const payload = {
+          id: target.dataset.id || "",
+          email: target.dataset.email || "",
+          name: target.dataset.name || ""
+        };
+        void (async () => {
+          if (action === "settings-delete") {
+            const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
+            if (!dialog) return;
+            dialog.showModal();
+            const ok = await new Promise<boolean>((resolve) => {
+              dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+            });
+            if (!ok) return;
+          }
+          await actions.settings?.(name, payload);
+        })();
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") (target.closest("dialog") as HTMLDialogElement | null)?.close();
       else if (action === "search") { /* form */ }
@@ -464,6 +508,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const area = form.querySelector("textarea") as HTMLTextAreaElement;
         actions.assist?.("ask", { text: area.value });
         area.value = "";
+      } else if (form.dataset.action === "settings-form") {
+        event.preventDefault();
+        const data: Record<string, string> = {};
+        new FormData(form).forEach((value, key) => { data[key] = String(value); });
+        form.querySelectorAll<HTMLInputElement>("input[type='checkbox']").forEach((box) => {
+          data[box.name] = box.checked ? "1" : "";
+        });
+        void actions.settings?.(form.dataset.kind || "", data);
       }
     });
 
@@ -489,6 +541,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         return;
       }
       if (typing) return;
+      const focusedControl = event.target instanceof HTMLButtonElement
+        && !event.target.dataset.uid
+        && !event.target.dataset.folder;
+      if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
         event.preventDefault();
@@ -670,6 +726,22 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (button) consent.close(button.value);
     });
     shell.append(consent);
+  }
+
+  function paintSettings(): void {
+    const panel = shell?.querySelector("#settings-panel");
+    if (!panel) return;
+    shell?.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((button) => {
+      const id = button.dataset.section || "";
+      button.setAttribute("aria-pressed", id === section ? "true" : "false");
+      if (id === "contacts") button.hidden = !snap?.caps.contacts;
+      if (id === "filters") button.hidden = !snap?.caps.sieve;
+    });
+    panel.innerHTML = renderDesk(section, snap, edit);
+    if (edit) {
+      const field = panel.querySelector("input:not([type='hidden']), textarea") as HTMLElement | null;
+      field?.focus({ preventScroll: true });
+    }
   }
 
   function folderButton(row: FolderRow): string {
@@ -1059,6 +1131,17 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const span = hint.querySelector("span");
       if (span) span.textContent = subject ? `Betreff: ${subject}` : "";
       hint.dataset.subject = subject;
+    },
+    showSettings(next) {
+      snap = next;
+      edit = null;
+      paintSettings();
+    },
+    settingsNotice(text) {
+      const slot = shell?.querySelector("#settings-error") as HTMLElement | null;
+      if (!slot) return;
+      slot.hidden = !text;
+      slot.textContent = text;
     },
     showTranslation(search, explanation) {
       const box = shell?.querySelector("#translated") as HTMLElement | null;

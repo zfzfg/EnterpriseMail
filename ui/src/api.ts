@@ -49,8 +49,8 @@ export function explain(error: unknown): string {
   return error.detail ? `${text} ${error.detail}` : text;
 }
 
-export async function loadApp(): Promise<Record<string, unknown>> {
-  const response = await fetch(`${root()}?/AppData/0/${Math.random().toString().slice(2)}/`, {
+async function readApp(url: string): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
   });
@@ -61,8 +61,16 @@ export async function loadApp(): Promise<Record<string, unknown>> {
   return data;
 }
 
-export async function call<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
-  const response = await fetch(`${root()}?/Json/&q[]=/0/`, {
+export function loadApp(): Promise<Record<string, unknown>> {
+  return readApp(`${root()}?/AppData/0/${Math.random().toString().slice(2)}/`);
+}
+
+export function loadAdminApp(): Promise<Record<string, unknown>> {
+  return readApp(`${root()}?/AdminAppData/0/${Math.random().toString().slice(2)}/`);
+}
+
+async function postJson<T>(url: string, action: string, params: Record<string, unknown>): Promise<T> {
+  const response = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -81,6 +89,15 @@ export async function call<T>(action: string, params: Record<string, unknown> = 
     throw new ApiError(data.code || 999, data.message || "", data.messageAdditional || "");
   }
   return data.Result as T;
+}
+
+export function call<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+  return postJson<T>(`${root()}?/Json/&q[]=/0/`, action, params);
+}
+
+export function adminCall<T>(adminKey: string, action: string, params: Record<string, unknown> = {}): Promise<T> {
+  const key = /^[a-z0-9._-]+$/i.test(adminKey) && !adminKey.includes("..") ? adminKey : "admin";
+  return postJson<T>(`${root()}?/${key}/Json/&q[]=/0/`, action, params);
 }
 
 export async function plugin<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
