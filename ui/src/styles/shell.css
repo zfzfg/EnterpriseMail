@@ -280,6 +280,7 @@ h1, .title {
   min-width: var(--hit);
   padding: 0 10px;
 }
+.text-btn[hidden], .icon-btn[hidden], .ink-btn[hidden] { display: none; }
 
 .icon-btn { padding: 0; }
 .icon-btn svg { width: 16px; height: 16px; display: block; }
@@ -423,6 +424,76 @@ dialog {
   color: var(--popover-foreground);
 }
 
+.title-md { font-size: 1rem; letter-spacing: -0.01em; }
+
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(24rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.stay { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+
+.error { color: var(--destructive); margin: 0; }
+.danger {
+  min-height: var(--hit);
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--destructive);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.choices { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.msg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msg .who, .msg .subj, .msg .peek { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .peek { grid-column: 1 / -1; color: var(--text-quiet); }
+.msg .when { color: var(--text-quiet); font-variant-numeric: tabular-nums; }
+.msg.unseen .who, .msg.unseen .subj { font-weight: 500; }
+.msg[aria-current="true"] { background: var(--accent); }
+
+.letter-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.letter {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 240px;
+  border: 0;
+  background: var(--background);
+}
+.files { margin: 0 0 12px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.files a { color: inherit; }
+
 dialog::backdrop { background: color-mix(in srgb, var(--foreground) 32%, transparent); }
 
 .dialog-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
@@ -436,6 +507,7 @@ kbd {
 }
 
 @media (hover: hover) {
+  .msg:hover { background: var(--accent); }
   .folder:hover, .count-row:hover, .text-btn:hover, .icon-btn:hover, .filter:hover, .seg:hover, .prompt:hover {
     transition: background-color 150ms var(--ease), color 150ms var(--ease);
   }
