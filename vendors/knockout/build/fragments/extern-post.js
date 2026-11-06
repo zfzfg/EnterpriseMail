@@ -1,2 +1,0 @@
-    window['ko'] = ko;
-})(this);
