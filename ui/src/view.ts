@@ -1,3 +1,4 @@
+import type { AssistFlags } from "./assistant";
 import { iconClose, iconMenu } from "./icons";
 import { t } from "./i18n";
 import { applyAppearance, readAppearance, type Appearance } from "./theme";
@@ -19,6 +20,7 @@ export interface MessageRow {
   when: string;
   unseen: boolean;
   current: boolean;
+  category?: string;
 }
 
 export interface AttachmentRow {
@@ -37,12 +39,42 @@ export interface ReaderData {
   attachments: AttachmentRow[];
 }
 
+export interface StripState {
+  loading: string;
+  error: string;
+  tldr: string;
+  cached: boolean;
+  decisions: string[];
+  actions: string[];
+  next: string;
+  replies: { label: string; body: string }[];
+  model: string;
+  showSummarize: boolean;
+  showReplies: boolean;
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+  trace: string[];
+  actions: { label: string; state: string }[];
+}
+
+export interface DraftOptions {
+  mode: string;
+  tone: string;
+  instruction: string;
+  body: string;
+  subject: string;
+}
+
 export interface ComposeSeed {
   title: string;
   to: string;
   cc: string;
   subject: string;
   body: string;
+  mode?: string;
 }
 
 export interface MailActions {
@@ -62,6 +94,21 @@ export interface MailActions {
   send(values: ComposeSeed): void;
   closeCompose(): void;
   back(): void;
+  assist?(name: string, data: Record<string, string | undefined>): void;
+}
+
+const CATEGORY: Record<string, string> = {
+  needs_reply: "Antwort nötig",
+  personal: "Für mich",
+  newsletter: "Newsletter",
+  notification: "Benachrichtigungen",
+  invoice: "Rechnungen"
+};
+
+function categoryMark(category?: string): string {
+  if (!category || !CATEGORY[category]) return "";
+  const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
+  return `<span class="cat">${mark}${esc(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 
 function esc(value: string): string {
@@ -74,7 +121,7 @@ export interface MailView {
   showLogin(title: string): void;
   setLoginBusy(busy: boolean): void;
   setLoginError(text: string): void;
-  showMail(email: string, folderName: string): void;
+  showMail(email: string, folderName: string, assist?: AssistFlags | null): void;
   setFolders(rows: FolderRow[]): void;
   setList(rows: MessageRow[], empty: string, error: string, more: boolean, searching: boolean): void;
   setReader(data: ReaderData | null, loading: string, error: string): void;
@@ -83,6 +130,18 @@ export interface MailView {
   setSendState(busy: boolean, error: string): void;
   notice(text: string): void;
   confirmDelete(): Promise<boolean>;
+  confirmConsent(text: string): Promise<boolean>;
+  setAlerts(reply: number, follow: number, invoice: number, dues: string): void;
+  pressCategory(id: string): void;
+  setStrip(state: StripState | null): void;
+  setChat(turns: ChatTurn[], thinking: string, context?: string): void;
+  openSheet(): void;
+  closeSheet(): void;
+  draftOptions(): DraftOptions;
+  setDraftBody(text: string): void;
+  setDraftBusy(busy: boolean, status: string): void;
+  setSubjectHint(subject: string): void;
+  showTranslation(search: string, explanation: string): void;
 }
 
 export function createView(root: HTMLElement, actions: MailActions): MailView {
@@ -131,7 +190,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     slot.textContent = text;
   };
 
-  const showMail: MailView["showMail"] = (email, folderName) => {
+  const showMail: MailView["showMail"] = (email, folderName, assist) => {
     root.innerHTML = `
       <div class="shell" data-pane="list" data-sidebar="${docked() ? "open" : "closed"}">
         <button type="button" class="scrim" data-action="close-sidebar" aria-label="Ordner schließen"></button>
@@ -262,6 +321,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     const search = next.querySelector("#search") as HTMLInputElement;
     search.placeholder = `In ${folderName} suchen`;
     wireShell();
+    if (assist) installAssist(assist);
   };
 
   function pane(name: string): void {
@@ -361,7 +421,27 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         closeLayer(composer);
         if (!wide()) pane("list");
         actions.closeCompose();
-      }
+      } else if (action === "close-sheet") {
+        const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
+        if (sheet) closeLayer(sheet);
+      } else if (action === "open-sheet") {
+        if (!wide()) pane("reader");
+        const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
+        if (sheet) openLayer(sheet, target);
+      } else if (action === "cat") {
+        shell?.querySelectorAll<HTMLButtonElement>(".filter").forEach((button) => {
+          button.setAttribute("aria-pressed", button.dataset.cat === target.dataset.cat ? "true" : "false");
+        });
+        actions.assist?.("cat", target.dataset);
+      } else if (action === "mode" || action === "tone") {
+        target.parentElement?.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+          button.setAttribute("aria-pressed", button === target ? "true" : "false");
+        });
+      } else if (action === "prompt") {
+        const area = shell?.querySelector("#ask") as HTMLTextAreaElement | null;
+        if (area) area.value = target.textContent || "";
+        actions.assist?.("ask", { text: target.textContent || "" });
+      } else if (action) actions.assist?.(action, target.dataset);
     });
 
     shell.addEventListener("submit", (event) => {
@@ -378,7 +458,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         });
       } else if (form.dataset.action === "search") {
         event.preventDefault();
-        actions.search((form.querySelector("input") as HTMLInputElement).value.trim());
+        actions.search((form.querySelector("#search") as HTMLInputElement).value.trim());
+      } else if (form.dataset.action === "ask") {
+        event.preventDefault();
+        const area = form.querySelector("textarea") as HTMLTextAreaElement;
+        actions.assist?.("ask", { text: area.value });
+        area.value = "";
       }
     });
 
@@ -412,6 +497,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       } else if (event.key === "?") {
         event.preventDefault();
         (shell?.querySelector("#keys") as HTMLDialogElement).showModal();
+      } else if (event.key === "." && (event.ctrlKey || event.metaKey) && shell?.querySelector(".sheet")) {
+        event.preventDefault();
+        if (!wide()) pane("reader");
+        openLayer(shell.querySelector(".sheet") as HTMLElement, null);
       } else if (key === "c") actions.compose();
       else if (key === "r") actions.reply(false);
       else if (key === "e") actions.archive();
@@ -461,6 +550,128 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!wide()) pane("reader");
   }
 
+  function installAssist(flags: AssistFlags): void {
+    if (!shell) return;
+    if (flags.alerts) {
+      const block = document.createElement("div");
+      block.innerHTML = `
+        <p class="group-label mono">Heute</p>
+        <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>Offene Antworten</span><span class="count" data-count="reply">0</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
+        <p class="quiet" id="dues"></p>
+        <button type="button" class="text-btn" data-action="deadlines">Fristen lesen</button>`;
+      shell.querySelector(".account")?.after(block);
+    }
+    const searchForm = shell.querySelector(".search-wrap");
+    if (flags.triage && searchForm) {
+      const filters = document.createElement("div");
+      filters.className = "filters";
+      filters.setAttribute("role", "toolbar");
+      filters.setAttribute("aria-label", "Filter");
+      const cats = [["all", "Alle"], ...Object.entries(CATEGORY)] as [string, string][];
+      filters.innerHTML = cats.map(([id, label], index) =>
+        `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(id === "all" ? t("AI_COPILOT.TAB_ALL", label) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+      searchForm.after(filters);
+    }
+    if (flags.search && searchForm) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "text-btn";
+      button.dataset.action = "lang-search";
+      button.hidden = true;
+      button.textContent = "Als Sprache verstehen";
+      searchForm.append(button);
+      const hint = document.createElement("div");
+      hint.id = "translated";
+      hint.hidden = true;
+      hint.className = "translate";
+      hint.innerHTML = `<p class="quiet" id="translate-why"></p><input class="search" id="translate-q" aria-label="Übersetzte Suche"><button type="button" class="text-btn" data-action="run-search">Suchen</button>`;
+      searchForm.after(hint);
+      const input = shell.querySelector("#search") as HTMLInputElement;
+      input.addEventListener("input", () => { button.hidden = !input.value.trim(); });
+    }
+    if (flags.summarize || flags.replies) {
+      const strip = document.createElement("div");
+      strip.id = "strip";
+      shell.querySelector("#reader-body")?.before(strip);
+    }
+    if (flags.chat) {
+      const ask = document.createElement("button");
+      ask.type = "button";
+      ask.className = "text-btn";
+      ask.dataset.action = "open-sheet";
+      ask.textContent = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
+      shell.querySelector(".reader-bar")?.append(ask);
+      const sheet = document.createElement("aside");
+      sheet.className = "sheet";
+      sheet.hidden = true;
+      sheet.innerHTML = `
+        <div class="sheet-head">
+          <span class="title title-md">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc(flags.provider)}</span>
+          <span class="spacer"></span>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+        </div>
+        <div class="sheet-log" id="chat-log">
+          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <div class="prompts">
+            <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
+            <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
+            <button type="button" class="prompt" data-action="prompt">Fasse die geöffnete Mail zusammen</button>
+          </div>
+        </div>
+        <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
+        <form class="sheet-form" data-action="ask">
+          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
+        </form>
+        <p class="error" id="chat-error" hidden></p>`;
+      shell.querySelector(".reader")?.append(sheet);
+    }
+    if (flags.draft) {
+      const tools = document.createElement("div");
+      tools.className = "draft-tools";
+      const tones = [["professional", "Professionell"], ["friendly", "Freundlich"], ["casual", "Locker"], ["concise", "Knapp"], ["formal", "Förmlich"]];
+      tools.innerHTML = `
+        <div class="modes" role="toolbar" aria-label="Art">
+          <button type="button" class="seg" data-action="mode" data-mode="new" aria-pressed="true">Neue Mail</button>
+          <button type="button" class="seg" data-action="mode" data-mode="reply" aria-pressed="false">Antwort</button>
+          <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
+          <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
+        </div>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <div class="tones" role="toolbar" aria-label="Ton">
+          ${tones.map(([id, label], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label))}</button>`).join("")}
+        </div>
+        <div class="draft-actions">
+          <button type="button" class="text-btn" data-action="generate">${esc(t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
+          <button type="button" class="text-btn" data-action="stop-generate" hidden>${esc(t("AI_COPILOT.STOP", "Stopp"))}</button>
+          <button type="button" class="text-btn" data-action="revert-draft" hidden>Zurück</button>
+        </div>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc(t("AI_COPILOT.APPLY_SUBJECT", "Übernehmen"))}</button></p>
+        <p class="quiet" id="draft-status"></p>`;
+      shell.querySelector(".fields")?.prepend(tools);
+    }
+    const consent = document.createElement("dialog");
+    consent.id = "consent";
+    consent.innerHTML = `
+      <div class="dialog-body">
+        <h2 class="title title-md">Assistent</h2>
+        <p id="consent-text"></p>
+        <div class="dialog-actions">
+          <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="ink-btn" value="ok">Fortfahren</button>
+        </div>
+      </div>`;
+    consent.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest("button");
+      if (button) consent.close(button.value);
+    });
+    shell.append(consent);
+  }
+
   function folderButton(row: FolderRow): string {
     const count = row.unread > 0 ? `<span class="count">${row.unread}</span>` : "";
     return `<button type="button" class="folder" data-folder="${esc(row.fullName)}" aria-current="${row.current ? "page" : "false"}" style="padding-left:${8 + row.depth * 12}px"><span>${esc(row.name)}</span>${count}</button>`;
@@ -497,7 +708,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" aria-current="${row.current ? "true" : "false"}">
             <span class="who">${esc(row.who)}</span>
             <span class="when">${esc(row.when)}</span>
-            <span class="subj">${esc(row.subject || "(ohne Betreff)")}</span>
+            <span class="subj">${esc(row.subject || "(ohne Betreff)")}${categoryMark(row.category)}</span>
             <span class="peek">${esc(row.preview)}</span>
           </button>`).join("");
       }
@@ -588,6 +799,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       (form.elements.namedItem("cc") as HTMLInputElement).value = seed.cc;
       (form.elements.namedItem("subject") as HTMLInputElement).value = seed.subject;
       (form.elements.namedItem("body") as HTMLTextAreaElement).value = seed.body;
+      shell.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
+        button.setAttribute("aria-pressed", button.dataset.mode === (seed.mode || "new") ? "true" : "false");
+      });
       this.setSendState(false, "");
       if (!wide()) pane("compose");
       openLayer(composer, document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -620,6 +834,239 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       return new Promise((resolve) => {
         dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
       });
+    },
+    confirmConsent(text) {
+      const dialog = shell?.querySelector("#consent") as HTMLDialogElement | null;
+      const slot = shell?.querySelector("#consent-text");
+      if (!dialog || !slot) return Promise.resolve(true);
+      slot.textContent = text;
+      dialog.showModal();
+      return new Promise((resolve) => {
+        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+      });
+    },
+    pressCategory(id) {
+      shell?.querySelectorAll<HTMLButtonElement>(".filter").forEach((button) => {
+        button.setAttribute("aria-pressed", button.dataset.cat === id ? "true" : "false");
+      });
+    },
+    setAlerts(reply, follow, invoice, dues) {
+      const write = (name: string, value: number) => {
+        const slot = shell?.querySelector(`[data-count='${name}']`);
+        if (slot) slot.textContent = String(value);
+      };
+      write("reply", reply);
+      write("follow", follow);
+      write("invoice", invoice);
+      const line = shell?.querySelector("#dues");
+      if (line) line.textContent = dues;
+    },
+    setStrip(state) {
+      const strip = shell?.querySelector("#strip");
+      if (!strip) return;
+      strip.replaceChildren();
+      if (!state) return;
+      if (state.loading) {
+        const p = document.createElement("p");
+        p.className = "quiet";
+        p.textContent = state.loading;
+        strip.append(p);
+        return;
+      }
+      if (state.error) {
+        const p = document.createElement("p");
+        p.className = "error";
+        p.textContent = state.error;
+        strip.append(p);
+      }
+      const row = document.createElement("div");
+      row.className = "strip-row";
+      if (!state.tldr && state.showSummarize) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "text-btn";
+        button.dataset.action = "summarize";
+        button.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
+        row.append(button);
+      } else if (state.tldr) {
+        const label = document.createElement("span");
+        label.className = "mono";
+        label.textContent = "Zusammenfassung";
+        const text = document.createElement("p");
+        text.textContent = state.tldr;
+        const again = document.createElement("button");
+        again.type = "button";
+        again.className = "text-btn";
+        again.dataset.action = "summarize";
+        again.dataset.force = "1";
+        again.textContent = t("AI_COPILOT.REGENERATE", "Neu erzeugen");
+        row.append(label, text, again);
+        if (state.cached) {
+          const note = document.createElement("p");
+          note.className = "quiet";
+          note.textContent = "aus dem Zwischenspeicher";
+          row.append(note);
+        }
+        const caveat = document.createElement("p");
+        caveat.className = "quiet";
+        caveat.textContent = "Kann Angaben enthalten, die so nicht in der Mail stehen. Der Brief darunter ist die Quelle.";
+        row.append(caveat);
+      }
+      if (state.showReplies && !state.replies.length) {
+        const replies = document.createElement("button");
+        replies.type = "button";
+        replies.className = "text-btn";
+        replies.dataset.action = "replies";
+        replies.textContent = t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge");
+        row.append(replies);
+      }
+      state.replies.forEach((reply, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "prompt";
+        button.dataset.action = "use-reply";
+        button.dataset.index = String(index);
+        button.textContent = reply.label;
+        row.append(button);
+      });
+      if (state.model) {
+        const model = document.createElement("p");
+        model.className = "mono quiet";
+        model.textContent = state.model;
+        row.append(model);
+      }
+      strip.append(row);
+    },
+    setChat(turns, thinking, context = "") {
+      const log = shell?.querySelector("#chat-log");
+      const chip = shell?.querySelector("#context-chip") as HTMLButtonElement | null;
+      const error = shell?.querySelector("#chat-error") as HTMLElement | null;
+      if (chip) {
+        chip.hidden = !context;
+        chip.textContent = context ? `${context} · ohne Bezug` : "";
+      }
+      if (error) {
+        error.hidden = !thinking.startsWith("!");
+        error.textContent = thinking.startsWith("!") ? thinking.slice(1) : "";
+      }
+      if (!log) return;
+      log.replaceChildren();
+      if (!turns.length && !thinking) {
+        const p = document.createElement("p");
+        p.className = "quiet";
+        p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten.");
+        const prompts = document.createElement("div");
+        prompts.className = "prompts";
+        ["Welche Mails warten auf meine Antwort?", "Zeig mir Rechnungen vom letzten Monat", "Fasse die geöffnete Mail zusammen"].forEach((text) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "prompt";
+          button.dataset.action = "prompt";
+          button.textContent = text;
+          prompts.append(button);
+        });
+        log.append(p, prompts);
+      }
+      turns.forEach((turn) => {
+        const item = document.createElement("article");
+        item.className = turn.role === "user" ? "bubble" : "assistant";
+        if (turn.trace.length) {
+          const trace = document.createElement("p");
+          trace.className = "mono quiet";
+          trace.textContent = turn.trace.join(" · ");
+          item.append(trace);
+        }
+        const text = document.createElement("p");
+        text.textContent = turn.text;
+        item.append(text);
+        turn.actions.forEach((action, index) => {
+          const card = document.createElement("div");
+          card.className = "action";
+          const label = document.createElement("p");
+          label.textContent = action.label;
+          card.append(label);
+          if (!action.state) {
+            const run = document.createElement("button");
+            run.type = "button";
+            run.className = "text-btn";
+            run.dataset.action = "run-action";
+            run.dataset.index = String(index);
+            run.textContent = t("AI_COPILOT.RUN", "Ausführen");
+            const dismiss = document.createElement("button");
+            dismiss.type = "button";
+            dismiss.className = "text-btn";
+            dismiss.dataset.action = "dismiss-action";
+            dismiss.dataset.index = String(index);
+            dismiss.textContent = t("AI_COPILOT.DISMISS", "Verwerfen");
+            card.append(run, dismiss);
+          } else {
+            const state = document.createElement("p");
+            state.className = "quiet";
+            state.textContent = action.state;
+            card.append(state);
+          }
+          item.append(card);
+        });
+        log.append(item);
+      });
+      if (thinking && !thinking.startsWith("!")) {
+        const p = document.createElement("p");
+        p.className = "quiet";
+        p.textContent = thinking;
+        log.append(p);
+      }
+      log.scrollTop = log.scrollHeight;
+    },
+    openSheet() {
+      const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
+      if (!sheet) return;
+      if (!wide()) pane("reader");
+      openLayer(sheet, document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      (shell?.querySelector("#ask") as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
+    },
+    closeSheet() {
+      const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
+      if (sheet && !sheet.hidden) closeLayer(sheet);
+    },
+    draftOptions() {
+      const pressed = (selector: string) => shell?.querySelector<HTMLButtonElement>(`${selector}[aria-pressed="true"]`)?.dataset;
+      return {
+        mode: pressed("[data-mode]")?.mode || "new",
+        tone: pressed("[data-tone]")?.tone || "professional",
+        instruction: (shell?.querySelector("#instruction") as HTMLInputElement | null)?.value || "",
+        body: (shell?.querySelector("textarea[name='body']") as HTMLTextAreaElement | null)?.value || "",
+        subject: (shell?.querySelector("input[name='subject']") as HTMLInputElement | null)?.value || ""
+      };
+    },
+    setDraftBody(text) {
+      const area = shell?.querySelector("textarea[name='body']") as HTMLTextAreaElement | null;
+      if (area) area.value = text;
+    },
+    setDraftBusy(busy, status) {
+      const generate = shell?.querySelector("[data-action='generate']") as HTMLButtonElement | null;
+      const stop = shell?.querySelector("[data-action='stop-generate']") as HTMLButtonElement | null;
+      const revert = shell?.querySelector("[data-action='revert-draft']") as HTMLButtonElement | null;
+      const slot = shell?.querySelector("#draft-status");
+      if (generate) generate.hidden = busy;
+      if (stop) stop.hidden = !busy;
+      if (revert) revert.hidden = busy;
+      if (slot) slot.textContent = status;
+    },
+    setSubjectHint(subject) {
+      const hint = shell?.querySelector("#subject-hint") as HTMLElement | null;
+      if (!hint) return;
+      hint.hidden = !subject;
+      const span = hint.querySelector("span");
+      if (span) span.textContent = subject ? `Betreff: ${subject}` : "";
+      hint.dataset.subject = subject;
+    },
+    showTranslation(search, explanation) {
+      const box = shell?.querySelector("#translated") as HTMLElement | null;
+      if (!box) return;
+      box.hidden = false;
+      (box.querySelector("#translate-q") as HTMLInputElement).value = search;
+      const why = box.querySelector("#translate-why");
+      if (why) why.textContent = explanation;
     }
   };
 }

@@ -225,6 +225,7 @@ h1, .title {
 }
 
 .search-wrap, .filters { padding: 8px 12px 0; }
+.search-wrap .search { flex: 1; width: auto; }
 
 .filters {
   flex-wrap: wrap;
@@ -493,6 +494,45 @@ dialog {
 }
 .files { margin: 0 0 12px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
 .files a { color: inherit; }
+
+.wait {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  background: var(--primary);
+}
+.cat {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  color: var(--text-quiet);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.strip-row, .draft-tools { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px 12px 0; }
+.translate { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px 0; }
+.bubble {
+  align-self: flex-end;
+  max-width: 80%;
+  margin: 0 0 12px auto;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--secondary);
+}
+.assistant { margin: 0 0 16px; }
+.action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.subject-hint { display: flex; gap: 8px; align-items: center; }
 
 dialog::backdrop { background: color-mix(in srgb, var(--foreground) 32%, transparent); }
 

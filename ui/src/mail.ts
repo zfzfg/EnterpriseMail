@@ -1,5 +1,6 @@
-import { ApiError, call, downloadUrl, explain, loadApp } from "./api";
-import { createView, type ComposeSeed, type FolderRow, type MailView, type MessageRow, type ReaderData } from "./view";
+import { readAssist, type AssistFlags } from "./assistant";
+import { ApiError, call, downloadUrl, explain, loadApp, plugin, streamEvents } from "./api";
+import { createView, type ChatTurn, type ComposeSeed, type FolderRow, type MailView, type MessageRow, type ReaderData, type StripState } from "./view";
 
 interface Person { name: string; email: string }
 interface Folder {
@@ -26,6 +27,7 @@ interface Msg {
   html: string;
   plain: string;
   attachments: { name: string; size: number; href: string }[];
+  category: string;
 }
 
 interface ListResult {
@@ -113,6 +115,18 @@ class Session {
   private hasMore = false;
   private current: Msg | null = null;
   private replyKind: "" | "reply" | "reply-all" | "forward" = "";
+  private assistFlags: AssistFlags | null = null;
+  private noticeAck = false;
+  private useContext = true;
+  private chat: { role: "user" | "assistant"; content: string }[] = [];
+  private turns: ChatTurn[] = [];
+  private chatActions: Record<string, unknown>[] = [];
+  private replies: { label: string; body: string }[] = [];
+  private draftBackup = "";
+  private draftAbort: AbortController | null = null;
+  private tagged = new Set<string>();
+  private alertItems: { folder: string; uid: number; type: string; title: string }[] = [];
+  private category = "all";
 
   constructor(root: HTMLElement) {
     this.view = createView(root, {
@@ -131,7 +145,8 @@ class Session {
       askDelete: () => void this.remove(),
       send: (values) => void this.send(values),
       closeCompose: () => { this.replyKind = ""; },
-      back: () => undefined
+      back: () => undefined,
+      assist: (name, data) => void this.assist(name, data)
     });
   }
 
@@ -176,7 +191,13 @@ class Session {
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(50, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
-    this.view.showMail(this.email, "Posteingang");
+    this.assistFlags = await readAssist(data, async () => {
+      const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
+      return result.settings;
+    });
+    this.noticeAck = Boolean(this.assistFlags?.noticeAck);
+    this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
   }
 
@@ -236,7 +257,12 @@ class Session {
         folder: this.folder,
         offset: start,
         limit: this.pageSize,
-        search: this.search,
+        search: this.category === "needs_reply" ? "keyword:$ai_needs_reply is:unanswered"
+          : this.category === "personal" ? "keyword:$ai_personal"
+          : this.category === "newsletter" ? "keyword:$ai_newsletter"
+          : this.category === "notification" ? "keyword:$ai_notification"
+          : this.category === "invoice" ? "keyword:$ai_invoice"
+          : this.search,
         sort: "",
         uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
       });
@@ -292,7 +318,8 @@ class Session {
       references,
       html: String(item.html || ""),
       plain: String(item.plain || ""),
-      attachments
+      attachments,
+      category: String(item.aiCategory || "")
     };
   }
 
@@ -304,19 +331,23 @@ class Session {
       preview: message.preview,
       when: when(message.date),
       unseen: !seen(message.flags),
-      current: message.uid === this.selected
+      current: message.uid === this.selected,
+      category: message.category
     }));
   }
 
   private paintList(): void {
     const empty = this.messages.length
       ? ""
+      : this.category !== "all" ? "Keine Mails für diesen Filter."
       : this.search ? "Keine Mails für diese Suche." : "Dieser Ordner ist leer.";
-    this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search));
+    this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
 
   private async setSearch(query: string): Promise<void> {
     this.search = query;
+    this.category = "all";
+    this.view.pressCategory("all");
     this.offset = 0;
     this.selected = 0;
     this.current = null;
@@ -342,6 +373,8 @@ class Session {
         void call("MessageSetSeen", { folder: this.folder, uids: String(uid), setAction: 1 }).catch(() => undefined);
       }
       this.view.setReader(this.readerData(message), "", "");
+      this.paintStrip();
+      void this.loadCachedSummary();
     } catch (error) {
       this.view.setReader(null, "", explain(error));
     }
@@ -365,7 +398,7 @@ class Session {
 
   private openNew(): void {
     this.replyKind = "";
-    this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "" });
+    this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
   }
 
   private openReply(all: boolean): void {
@@ -378,6 +411,7 @@ class Session {
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
       title: all ? "Allen antworten" : "Antworten",
+      mode: "reply",
       to: author ? address(author) : "",
       cc: all ? others.map(address).join(", ") : "",
       subject,
@@ -469,6 +503,367 @@ class Session {
     this.view.setReader(null, "", "");
     this.offset = Math.max(0, this.offset - 1);
     await this.loadList(false);
+  }
+
+  private strip(): StripState {
+    return {
+      loading: "",
+      error: "",
+      tldr: this.tldr,
+      cached: this.summaryCached,
+      decisions: [],
+      actions: [],
+      next: "",
+      replies: this.replies,
+      model: this.summaryModel,
+      showSummarize: Boolean(this.assistFlags?.summarize),
+      showReplies: Boolean(this.assistFlags?.replies)
+    };
+  }
+
+  private tldr = "";
+  private summaryCached = false;
+  private summaryModel = "";
+
+  private paintStrip(): void {
+    if (!this.assistFlags?.summarize && !this.assistFlags?.replies) return;
+    this.view.setStrip(this.current ? this.strip() : null);
+  }
+
+  private async loadCachedSummary(): Promise<void> {
+    if (!this.assistFlags?.summarize || !this.current) return;
+    try {
+      const result = await plugin<{ summary: { tldr?: string; model?: string } | null; cached?: boolean }>("AiSummarize", {
+        folder: this.folder,
+        uids: [this.current.uid],
+        cacheOnly: true,
+        sent: this.sentFolder
+      });
+      this.tldr = result.summary?.tldr || "";
+      this.summaryCached = Boolean(result.cached);
+      this.summaryModel = result.summary?.model || "";
+      this.paintStrip();
+    } catch {
+      this.paintStrip();
+    }
+  }
+
+  private async consent(kind: "mail" | "query" = "mail"): Promise<boolean> {
+    if (this.noticeAck) return true;
+    const name = this.assistFlags?.providerName || "den Anbieter";
+    const text = kind === "query"
+      ? `Nur die Suchanfrage geht an ${name}. Die Mails selbst bleiben auf dem Server. Fortfahren?`
+      : `Diese KI-Funktion sendet den Inhalt der betroffenen Mails an ${name}. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?`;
+    const ok = await this.view.confirmConsent(text);
+    if (!ok) return false;
+    try {
+      await plugin("AiSaveSettings", { settings: { notice_ack: true } });
+    } catch { /* the choice still stands for this session */ }
+    this.noticeAck = true;
+    return true;
+  }
+
+  private async loadAlerts(): Promise<void> {
+    const inbox = this.folders.find((folder) => folder.role === "inbox")?.fullName || "INBOX";
+    try {
+      const result = await plugin<{ alerts: { type: string; folder: string; uid: number; title: string }[] }>("AiAlerts", {
+        inbox,
+        sent: this.sentFolder
+      });
+      this.alertItems = result.alerts || [];
+      const count = (type: string) => this.alertItems.filter((item) => item.type === type).length;
+      this.view.setAlerts(count("reply"), count("followup"), count("invoice"), "");
+    } catch {
+      /* Hinweise sind ergänzend */
+    }
+  }
+
+  private async assist(name: string, data: Record<string, string | undefined>): Promise<void> {
+    if (name === "cat") {
+      this.category = data.cat || "all";
+      if (this.category !== "all" && this.assistFlags?.triage && !this.tagged.has(this.folder)) {
+        try {
+          await plugin("AiTriageTag", { folder: this.folder, sent: this.sentFolder });
+          this.tagged.add(this.folder);
+        } catch (error) {
+          this.view.notice(explain(error));
+          return;
+        }
+      }
+      this.offset = 0;
+      await this.loadList(false);
+      return;
+    }
+    if (name === "alert") {
+      if (data.kind === "follow") {
+        const sent = this.folders.find((folder) => folder.role === "sent")?.fullName || this.sentFolder;
+        if (sent) await this.selectFolder(sent);
+        return;
+      }
+      await this.assist("cat", { cat: data.kind === "invoice" ? "invoice" : "needs_reply" });
+      this.view.pressCategory(data.kind === "invoice" ? "invoice" : "needs_reply");
+      return;
+    }
+    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines" || name === "ask") {
+      if (!await this.consent()) return;
+    }
+    if (name === "lang-search") {
+      if (!await this.consent("query")) return;
+      const query = data.text || "";
+      const input = document.querySelector("#search") as HTMLInputElement | null;
+      const text = query || input?.value.trim() || "";
+      if (!text) return;
+      try {
+        const result = await plugin<{ search: string; explanation?: string; folder?: string }>("AiSearch", {
+          query: text,
+          folders: this.folders.map((folder) => folder.fullName),
+          currentFolder: this.folder,
+          sent: this.sentFolder
+        });
+        if (result.folder && result.folder !== this.folder) await this.selectFolder(result.folder);
+        this.view.showTranslation(result.search, result.explanation || "");
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
+      return;
+    }
+    if (name === "run-search") {
+      const field = document.querySelector("#translate-q") as HTMLInputElement | null;
+      this.category = "all";
+      this.view.pressCategory("all");
+      await this.setSearch(field?.value.trim() || "");
+      return;
+    }
+    if (name === "summarize" && this.current) {
+      this.view.setStrip({ ...this.strip(), loading: "Verlauf wird zusammengefasst …", tldr: "" });
+      try {
+        const result = await plugin<{ summary: { tldr?: string; model?: string }; cached?: boolean }>("AiSummarize", {
+          folder: this.folder,
+          uids: [this.current.uid],
+          force: data.force === "1",
+          sent: this.sentFolder
+        });
+        this.tldr = result.summary?.tldr || "";
+        this.summaryCached = Boolean(result.cached);
+        this.summaryModel = result.summary?.model || this.assistFlags?.provider || "";
+        this.paintStrip();
+      } catch (error) {
+        this.view.setStrip({ ...this.strip(), error: explain(error) });
+      }
+      return;
+    }
+    if (name === "replies" && this.current) {
+      this.view.setStrip({ ...this.strip(), loading: "Antwortvorschläge werden erstellt …" });
+      try {
+        const result = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
+          folder: this.folder,
+          uids: [this.current.uid],
+          sent: this.sentFolder
+        });
+        this.replies = (result.replies || []).slice(0, 3);
+        this.paintStrip();
+      } catch (error) {
+        this.view.setStrip({ ...this.strip(), error: explain(error) });
+      }
+      return;
+    }
+    if (name === "use-reply") {
+      const reply = this.replies[Number(data.index || 0)];
+      if (!reply || !this.current) return;
+      this.replyKind = "reply";
+      const author = this.current.replyTo[0] || this.current.from[0];
+      this.view.openCompose({
+        title: reply.label || "Antworten",
+        mode: "reply",
+        to: author ? address(author) : "",
+        cc: "",
+        subject: /^re:/i.test(this.current.subject) ? this.current.subject : `Re: ${this.current.subject}`,
+        body: reply.body
+      });
+      return;
+    }
+    if (name === "triage") {
+      this.view.notice("Absender, Betreff und Vorschau dieser Seite gehen an das Modell.");
+      try {
+        const result = await plugin<{ stored?: number; warning?: string }>("AiTriageLlm", {
+          folder: this.folder,
+          items: this.messages.map((message) => ({
+            uid: message.uid,
+            from: message.from.map(label).join(", "),
+            subject: message.subject,
+            preview: message.preview
+          }))
+        });
+        this.view.notice(result.warning || `${result.stored || 0} Mails eingeordnet.`);
+        await this.loadList(false);
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
+      return;
+    }
+    if (name === "deadlines") {
+      const items = this.alertItems.filter((item) => item.type !== "followup").slice(0, 8);
+      if (!items.length) {
+        this.view.notice("Keine Mails für eine Frist.");
+        return;
+      }
+      try {
+        const result = await plugin<{ alerts: { title: string; due: string }[] }>("AiAlertsLlm", { items });
+        const dues = (result.alerts || []).filter((item) => item.due).map((item) => `${item.due} ${item.title}`).join(" · ");
+        this.view.setAlerts(
+          this.alertItems.filter((item) => item.type === "reply").length,
+          this.alertItems.filter((item) => item.type === "followup").length,
+          this.alertItems.filter((item) => item.type === "invoice").length,
+          dues
+        );
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
+      return;
+    }
+    if (name === "ask") {
+      const text = (data.text || "").trim();
+      if (!text) return;
+      this.chat.push({ role: "user", content: text });
+      this.turns.push({ role: "user", text, trace: [], actions: [] });
+      this.view.setChat(this.turns, "Copilot arbeitet …", this.contextLabel());
+      try {
+        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[] }>("AiChat", {
+          messages: this.chat,
+          context: this.useContext && this.current ? { folder: this.folder, uid: this.current.uid } : {},
+          folders: this.folders.map((folder) => folder.fullName),
+          sent: this.sentFolder
+        });
+        this.chat.push({ role: "assistant", content: result.reply || "" });
+        this.chatActions = result.actions || [];
+        this.turns.push({
+          role: "assistant",
+          text: result.reply || "",
+          trace: (result.trace || []).map((item) => item.summary || "").filter(Boolean),
+          actions: this.chatActions.map((action) => ({ label: String(action.label || action.type || ""), state: "" }))
+        });
+        this.view.setChat(this.turns, "", this.contextLabel());
+      } catch (error) {
+        this.view.setChat(this.turns, "!" + explain(error), this.contextLabel());
+      }
+      return;
+    }
+    if (name === "drop-context") {
+      this.useContext = false;
+      this.view.setChat(this.turns, "", "");
+      return;
+    }
+    if (name === "dismiss-action") {
+      const index = Number(data.index || 0);
+      const turn = [...this.turns].reverse().find((item) => item.role === "assistant");
+      if (turn?.actions[index]) turn.actions[index].state = "Verworfen";
+      this.view.setChat(this.turns, "", this.contextLabel());
+      return;
+    }
+    if (name === "run-action") {
+      await this.runChatAction(Number(data.index || 0));
+      return;
+    }
+    if (name === "generate") await this.generate();
+    if (name === "stop-generate") this.draftAbort?.abort();
+    if (name === "revert-draft") this.view.setDraftBody(this.draftBackup);
+    if (name === "apply-subject") {
+      const hint = document.querySelector("#subject-hint") as HTMLElement | null;
+      const subject = hint?.dataset.subject || "";
+      const field = document.querySelector("input[name='subject']") as HTMLInputElement | null;
+      if (field && subject) field.value = subject;
+    }
+  }
+
+  private contextLabel(): string {
+    if (!this.useContext || !this.current) return "";
+    return this.current.subject || "(ohne Betreff)";
+  }
+
+  private async generate(): Promise<void> {
+    const options = this.view.draftOptions();
+    this.draftBackup = options.body;
+    this.draftAbort = new AbortController();
+    this.view.setDraftBusy(true, "Entwurf wird geschrieben …");
+    let streamed = "";
+    try {
+      await streamEvents("AiStream", {
+        mode: options.mode,
+        tone: options.tone,
+        instruction: options.instruction,
+        current: options.body,
+        wantSubject: options.mode === "new" || options.mode === "reply",
+        folder: this.folder,
+        uids: this.current ? [this.current.uid] : [],
+        sent: this.sentFolder
+      }, (event, payload) => {
+        if (event === "delta") {
+          streamed += String(payload.text || "");
+          this.view.setDraftBody(streamed);
+        }
+        if (event === "done") {
+          this.view.setDraftBody(String(payload.body || streamed));
+          this.view.setSubjectHint(String(payload.subject || ""));
+          this.summaryModel = String(payload.model || "");
+        }
+        if (event === "error") throw new ApiError(1, String(payload.error || "Verbindung unterbrochen."));
+      }, this.draftAbort.signal);
+      this.view.setDraftBusy(false, this.summaryModel);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        this.view.setDraftBusy(false, "Abgebrochen.");
+        return;
+      }
+      this.view.setDraftBusy(false, explain(error));
+    }
+  }
+
+  private async runChatAction(index: number): Promise<void> {
+    const action = this.chatActions[index];
+    const turn = [...this.turns].reverse().find((item) => item.role === "assistant");
+    if (!action || !turn?.actions[index] || turn.actions[index].state) return;
+    const type = String(action.type || "");
+    const folder = String(action.folder || this.folder);
+    const uids = Array.isArray(action.uids) ? action.uids.map(String).join(",") : "";
+    try {
+      if (type === "delete") {
+        if (!await this.view.confirmDelete()) return;
+        await call("MessageDelete", { folder, uids });
+      } else if (type === "archive") {
+        if (!this.archiveFolder) throw new ApiError(1, "Kein Archiv-Ordner eingerichtet.");
+        await call("MessageMove", { fromFolder: folder, toFolder: this.archiveFolder, uids });
+      } else if (type === "move") {
+        await call("MessageMove", { fromFolder: folder, toFolder: String(action.to || ""), uids });
+      } else if (type === "mark_read" || type === "mark_unread") {
+        await call("MessageSetSeen", { folder, uids, setAction: type === "mark_read" ? 1 : 0 });
+      } else if (type === "flag" || type === "unflag") {
+        await call("MessageSetFlagged", { folder, uids, setAction: type === "flag" ? 1 : 0 });
+      } else if (type === "open" || type === "reply") {
+        await this.selectFolder(folder);
+        await this.selectMessage(Number(action.uid || 0));
+        if (type === "reply") this.openReply(false);
+        this.view.closeSheet();
+      } else if (type === "compose") {
+        this.openNew();
+        this.view.openCompose({
+          title: "Neue Nachricht",
+          mode: "new",
+          to: String(action.to || ""),
+          cc: "",
+          subject: String(action.subject || ""),
+          body: ""
+        });
+      } else if (type === "search") {
+        if (folder) await this.selectFolder(folder);
+        await this.setSearch(String(action.search || ""));
+      }
+      turn.actions[index].state = "Erledigt";
+      this.view.setChat(this.turns, "", this.contextLabel());
+      if (uids) await this.loadList(false);
+    } catch (error) {
+      turn.actions[index].state = explain(error);
+      this.view.setChat(this.turns, "", this.contextLabel());
+    }
   }
 
   private async markUnread(): Promise<void> {

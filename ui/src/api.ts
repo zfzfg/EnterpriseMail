@@ -83,6 +83,53 @@ export async function call<T>(action: string, params: Record<string, unknown> = 
   return data.Result as T;
 }
 
+export async function plugin<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+  const result = await call<T & { error?: string; status?: number }>("Plugin" + action, params);
+  if (result && typeof result === "object" && "error" in result && result.error) {
+    throw new ApiError(Number(result.status) || 999, String(result.error));
+  }
+  return result;
+}
+
+export async function streamEvents(
+  path: string,
+  params: Record<string, unknown>,
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(`${root()}?/${path}/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "X-SM-Token": token
+    },
+    body: JSON.stringify(params),
+    signal
+  });
+  if (!response.ok || !response.body) throw new ApiError(1, "Verbindung unterbrochen.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const chunk = await reader.read();
+    buffer += chunk.value ? decoder.decode(chunk.value, { stream: !chunk.done }) : "";
+    const blocks = buffer.split(/\n\n/);
+    buffer = blocks.pop() || "";
+    for (const block of blocks) {
+      let event = "message";
+      const data: string[] = [];
+      block.split(/\n/).forEach((line) => {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trim());
+      });
+      if (data.length) onEvent(event, JSON.parse(data.join("\n")) as Record<string, unknown>);
+    }
+    if (chunk.done) break;
+  }
+}
+
 export function downloadUrl(file: {
   folder: string;
   uid: number;
