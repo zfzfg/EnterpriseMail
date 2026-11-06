@@ -207,15 +207,11 @@ abstract class Service
 			if ($sResult) {
 				$sResult .= '<!--cached-->';
 			} else {
-				$aSri = $sAppCssMin ? \SnappyMail\Integrity::loadSriHashes() : [];
-				$sCssFile = ($bAdmin ? 'admin' : 'app').$sAppCssMin.'.css';
-				$aTemplateParameters['{{BaseAppBootCss}}'] = \file_get_contents(APP_VERSION_ROOT_PATH.'static/css/boot'.$sAppCssMin.'.css');
-				$aTemplateParameters['{{BaseAppBootScript}}'] = \file_get_contents(APP_VERSION_ROOT_PATH.'static/js'.($sAppJsMin ? '/min' : '').'/boot'.$sAppJsMin.'.js');
-				$aTemplateParameters['{{BaseAppMainCssLink}}'] = Utils::WebStaticPath('css/'.$sCssFile);
-				$aTemplateParameters['{{BaseAppMainCssSri}}'] = empty($aSri[$sCssFile]) ? '' : ' integrity="'.$aSri[$sCssFile].'"';
-				$aTemplateParameters['{{BaseAppThemeCss}}'] = \preg_replace('/\\s*([:;{},]+)\\s*/s', '$1', $oActions->compileCss($sThemeName, $bAdmin));
+				// Neues Frontend: static/css/{app|admin}.css und static/js/{app|admin}.js
+				$sEntry = $bAdmin ? 'admin' : 'app';
+				$aTemplateParameters['{{BaseAppMainCssLink}}'] = Utils::WebStaticPath("css/{$sEntry}.css");
+				$aTemplateParameters['{{BaseAppMainJsLink}}'] = Utils::WebStaticPath("js/{$sEntry}.js");
 				$aTemplateParameters['{{BaseLanguage}}'] = $oActions->compileLanguage($sLanguage, $bAdmin);
-				$aTemplateParameters['{{BaseTemplates}}'] = Utils::ClearHtmlOutput($oServiceActions->compileTemplates($bAdmin));
 				$aTemplateParameters['{{NO_SCRIPT_DESC}}'] = \nl2br($oActions->StaticI18N('NO_SCRIPT_TITLE') . "\n" . $oActions->StaticI18N('NO_SCRIPT_DESC'));
 				$aTemplateParameters['{{NO_COOKIE_TITLE}}'] = $oActions->StaticI18N('NO_COOKIE_TITLE');
 				$aTemplateParameters['{{NO_COOKIE_DESC}}'] = $oActions->StaticI18N('NO_COOKIE_DESC');

@@ -46,22 +46,6 @@ logs-mail:
 logs-tx:
 	@docker compose logs --tail=100 -f tx
 
-rl-lint:
-	@docker compose run --no-deps --rm node gulp lint
-rl-dev:
-	@docker compose run --no-deps --rm node npm run watch-js
-rl-compile:
-	@docker compose run --no-deps --rm node gulp build
-rl-compile-with-source:
-	@docker compose run --no-deps --rm node gulp build --source
-rl-watch-css:
-	@docker compose run --no-deps --rm node npm run watch-css
-rl-watch-js:
-	@docker compose run --no-deps --rm node npm run watch-js
-
-rl-build:
-	@docker compose run --no-deps --rm node gulp all
-
 yarn-install:
 	@docker compose run --no-deps --rm node yarn install
 yarn-outdated:
