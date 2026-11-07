@@ -1556,6 +1556,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     let tooltipEl: HTMLElement | null = null;
     let tooltipTimer = 0;
     let lastTooltipTime = 0;
+    let currentTooltipTarget: HTMLElement | null = null;
 
     const hideTooltip = () => {
       window.clearTimeout(tooltipTimer);
@@ -1570,18 +1571,22 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const warm = Date.now() - lastTooltipTime < 400;
       const delay = warm ? 0 : 250;
       tooltipTimer = window.setTimeout(() => {
+        if (!target.isConnected || currentTooltipTarget !== target) return;
         const rect = target.getBoundingClientRect();
         tooltipEl = document.createElement("div");
         tooltipEl.className = "sm-tooltip";
+        if (warm) tooltipEl.dataset.instant = "true";
         tooltipEl.textContent = text;
+        tooltipEl.style.top = "-9999px";
+        tooltipEl.style.left = "-9999px";
         document.body.append(tooltipEl);
         const tipRect = tooltipEl.getBoundingClientRect();
-        let top = rect.bottom + 6;
+        let top = Math.round(rect.bottom + 6);
         if (top + tipRect.height > window.innerHeight - 8) {
-          top = Math.max(8, rect.top - tipRect.height - 6);
+          top = Math.round(Math.max(8, rect.top - tipRect.height - 6));
         }
-        let left = rect.left + (rect.width - tipRect.width) / 2;
-        left = Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left));
+        let left = Math.round(rect.left + (rect.width - tipRect.width) / 2);
+        left = Math.round(Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left)));
         tooltipEl.style.top = `${top}px`;
         tooltipEl.style.left = `${left}px`;
         lastTooltipTime = Date.now();
@@ -1589,27 +1594,54 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     };
 
     shell.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") return;
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tooltip], [title]");
       if (!target || target.closest(".menu, .editor-tools, .sm-tooltip")) return;
+      if (currentTooltipTarget === target) return;
       const text = target.getAttribute("data-tooltip") || target.getAttribute("title");
       if (!text) return;
-      if (!target.hasAttribute("data-tooltip")) {
+      if (target.hasAttribute("title")) {
         target.setAttribute("data-tooltip", text);
         target.removeAttribute("title");
       }
+      currentTooltipTarget = target;
       showTooltip(target, text);
     });
 
     shell.addEventListener("pointerout", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tooltip]");
-      if (target) {
-        hideTooltip();
+      if (!target) return;
+      const related = event.relatedTarget as Node | null;
+      if (related && target.contains(related)) return;
+      if (currentTooltipTarget === target) {
+        currentTooltipTarget = null;
+      }
+      if (tooltipEl) {
         lastTooltipTime = Date.now();
+      }
+      hideTooltip();
+    });
+
+    shell.addEventListener("pointerdown", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
+    });
+
+    window.addEventListener("scroll", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
+    }, { passive: true, capture: true });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        currentTooltipTarget = null;
+        hideTooltip();
       }
     });
 
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") hideTooltip();
+    window.addEventListener("blur", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
     });
   }
 

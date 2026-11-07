@@ -6834,6 +6834,7 @@ function createView(root3, actions) {
     let tooltipEl = null;
     let tooltipTimer = 0;
     let lastTooltipTime = 0;
+    let currentTooltipTarget = null;
     const hideTooltip = () => {
       window.clearTimeout(tooltipTimer);
       if (tooltipEl) {
@@ -6846,43 +6847,71 @@ function createView(root3, actions) {
       const warm = Date.now() - lastTooltipTime < 400;
       const delay = warm ? 0 : 250;
       tooltipTimer = window.setTimeout(() => {
+        if (!target.isConnected || currentTooltipTarget !== target) return;
         const rect = target.getBoundingClientRect();
         tooltipEl = document.createElement("div");
         tooltipEl.className = "sm-tooltip";
+        if (warm) tooltipEl.dataset.instant = "true";
         tooltipEl.textContent = text2;
+        tooltipEl.style.top = "-9999px";
+        tooltipEl.style.left = "-9999px";
         document.body.append(tooltipEl);
         const tipRect = tooltipEl.getBoundingClientRect();
-        let top = rect.bottom + 6;
+        let top = Math.round(rect.bottom + 6);
         if (top + tipRect.height > window.innerHeight - 8) {
-          top = Math.max(8, rect.top - tipRect.height - 6);
+          top = Math.round(Math.max(8, rect.top - tipRect.height - 6));
         }
-        let left = rect.left + (rect.width - tipRect.width) / 2;
-        left = Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left));
+        let left = Math.round(rect.left + (rect.width - tipRect.width) / 2);
+        left = Math.round(Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left)));
         tooltipEl.style.top = `${top}px`;
         tooltipEl.style.left = `${left}px`;
         lastTooltipTime = Date.now();
       }, delay);
     };
     shell.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") return;
       const target = event.target.closest("[data-tooltip], [title]");
       if (!target || target.closest(".menu, .editor-tools, .sm-tooltip")) return;
+      if (currentTooltipTarget === target) return;
       const text2 = target.getAttribute("data-tooltip") || target.getAttribute("title");
       if (!text2) return;
-      if (!target.hasAttribute("data-tooltip")) {
+      if (target.hasAttribute("title")) {
         target.setAttribute("data-tooltip", text2);
         target.removeAttribute("title");
       }
+      currentTooltipTarget = target;
       showTooltip(target, text2);
     });
     shell.addEventListener("pointerout", (event) => {
       const target = event.target.closest("[data-tooltip]");
-      if (target) {
-        hideTooltip();
+      if (!target) return;
+      const related = event.relatedTarget;
+      if (related && target.contains(related)) return;
+      if (currentTooltipTarget === target) {
+        currentTooltipTarget = null;
+      }
+      if (tooltipEl) {
         lastTooltipTime = Date.now();
       }
+      hideTooltip();
     });
+    shell.addEventListener("pointerdown", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
+    });
+    window.addEventListener("scroll", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
+    }, { passive: true, capture: true });
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") hideTooltip();
+      if (event.key === "Escape") {
+        currentTooltipTarget = null;
+        hideTooltip();
+      }
+    });
+    window.addEventListener("blur", () => {
+      currentTooltipTarget = null;
+      hideTooltip();
     });
   }
   function moveSelection(delta) {
