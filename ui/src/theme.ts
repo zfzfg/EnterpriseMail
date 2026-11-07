@@ -18,6 +18,7 @@ export function applyAppearance(mode: Appearance): void {
   root.dataset.appearance = mode;
   root.classList.toggle("dark", dark);
   root.style.colorScheme = dark ? "dark" : "light";
+  window.dispatchEvent(new CustomEvent("sm-appearance", { detail: { dark } }));
   try {
     localStorage.setItem(KEY, mode);
   } catch {

@@ -141,24 +141,651 @@ async function streamEvents(path, params, onEvent, signal) {
     for (const block of blocks) {
       let event = "message";
       const data = [];
-      block.split(/\n/).forEach((line) => {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).trim());
+      block.split(/\n/).forEach((line2) => {
+        if (line2.startsWith("event:")) event = line2.slice(6).trim();
+        else if (line2.startsWith("data:")) data.push(line2.slice(5).trim());
       });
       if (data.length) onEvent(event, JSON.parse(data.join("\n")));
     }
     if (chunk.done) break;
   }
 }
-function downloadUrl(file) {
-  const json = JSON.stringify(file);
-  const bytes = new TextEncoder().encode(json);
+function b64Json(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
   let binary = "";
   bytes.forEach((byte) => {
     binary += String.fromCharCode(byte);
   });
-  const hash = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `${root()}?/Raw/&q[]=/0/Download/&q[]=/${hash}`;
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function rawUrl(type, hash) {
+  return `${root()}?/Raw/&q[]=/0/${type}/&q[]=/${hash}`;
+}
+function fileHash(file) {
+  return b64Json(file);
+}
+function messageHash(folder, uid, subject, hash, accountHash) {
+  return b64Json({
+    folder,
+    uid,
+    mimeType: "message/rfc822",
+    fileName: `${(subject || "message").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80)}-${hash}.eml`,
+    accountHash
+  });
+}
+function proxyUrl(url) {
+  const encoded = btoa(url.replace(/ /g, "%20")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${root()}?/ProxyExternal/${encoded}`;
+}
+async function fetchDataUrl(url, limit = 8 * 1024 * 1024) {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+  const blob = await response.blob();
+  if (blob.size > limit) throw new ApiError(1, "Datei zu gro\xDF.");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new ApiError(1, "Datei nicht lesbar."));
+    reader.readAsDataURL(blob);
+  });
+}
+async function fetchText(url) {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+  return response.text();
+}
+
+// src/clean.ts
+var ALLOWED_TAGS = [
+  "blockquote",
+  "br",
+  "div",
+  "figcaption",
+  "figure",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hgroup",
+  "hr",
+  "p",
+  "wbr",
+  "article",
+  "aside",
+  "header",
+  "footer",
+  "main",
+  "section",
+  "details",
+  "summary",
+  "nav",
+  "dd",
+  "dl",
+  "dt",
+  "li",
+  "ol",
+  "ul",
+  "a",
+  "abbr",
+  "address",
+  "b",
+  "bdi",
+  "bdo",
+  "cite",
+  "code",
+  "del",
+  "dfn",
+  "em",
+  "i",
+  "ins",
+  "kbd",
+  "mark",
+  "pre",
+  "q",
+  "rp",
+  "rt",
+  "ruby",
+  "s",
+  "samp",
+  "small",
+  "span",
+  "strong",
+  "sub",
+  "sup",
+  "time",
+  "u",
+  "var",
+  "acronym",
+  "big",
+  "center",
+  "dir",
+  "font",
+  "marquee",
+  "nobr",
+  "plaintext",
+  "rb",
+  "rtc",
+  "strike",
+  "tt",
+  "img",
+  "caption",
+  "col",
+  "colgroup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "style",
+  "xmp"
+].join(",");
+var ALLOWED_ATTRS = /* @__PURE__ */ new Set([
+  "data-x-src",
+  "name",
+  "dir",
+  "lang",
+  "style",
+  "title",
+  "background",
+  "bgcolor",
+  "alt",
+  "height",
+  "width",
+  "src",
+  "href",
+  "border",
+  "bordercolor",
+  "charset",
+  "direction",
+  "download",
+  "hreflang",
+  "alink",
+  "bottommargin",
+  "leftmargin",
+  "link",
+  "rightmargin",
+  "text",
+  "topmargin",
+  "vlink",
+  "align",
+  "valign",
+  "color",
+  "face",
+  "size",
+  "noshade",
+  "hspace",
+  "vspace",
+  "low",
+  "high",
+  "optimum",
+  "value",
+  "reversed",
+  "start",
+  "cols",
+  "rows",
+  "frame",
+  "rules",
+  "summary",
+  "cellpadding",
+  "cellspacing",
+  "abbr",
+  "scope",
+  "colspan",
+  "rowspan",
+  "headers"
+]);
+var SCHEMES = /^(http|https|geo|irc|nntp|mailto|sms|tel|intent|itms-apps|msteams|slack|spotify|steam|zoommtg):/i;
+var HTTP = /^(https?:)?\/\//i;
+var NON_EMPTY = ["A", "B", "EM", "I", "SPAN", "STRONG"];
+var TRACKERS = ["email.microsoftemail.com/open", "github.com/notifications/beacon/", "/track/open", "google-analytics.com"];
+var STRIP_PARAMS = /^(utm_|ec_|fbclid|mc_eid|mkt_tok|_hsenc|vero_id|oly_enc_id|oly_anon_id|__s|Referrer|mailing|elq|bch|trc|ref|correlation_id|pd_|pf_|email_hash)/i;
+var px = (value) => parseInt(value, 10) || 0;
+function urlParam(url, name) {
+  try {
+    return new URL(url).searchParams.get(name) || url;
+  } catch {
+    return url;
+  }
+}
+function base64Url(data) {
+  return atob(data.replace(/_/g, "/").replace(/-/g, "+"));
+}
+function stripTracking(url) {
+  try {
+    const decode = decodeURIComponent;
+    let next = url.replace(/^.+\/(https%253A[^/?&]+).*$/i, (...m) => decode(decode(String(m[1])))).replace(/^.+(awstrack\.me|redditmail\.com)\/.+(https:%2F%2F[^/]+).*/i, (...m) => decode(String(m[2]))).replace(/^.+(www\.google|safelinks\.protection\.outlook\.com|mailchimp\.com).+url=.+$/i, () => urlParam(url, "url")).replace(/^.+click\.godaddy\.com.+$/i, () => urlParam(url, "redir")).replace(/^.+delivery-status\.com.+$/i, () => urlParam(url, "fb")).replace(/^.+go\.dhlparcel\.nl.+\/([A-Za-z0-9_-]+)$/i, (...m) => base64Url(String(m[1]))).replace(/^.+sellercentral\.amazon\.com\/nms\/redirect.+$/i, () => base64Url(urlParam(url, "u"))).replace(/^.+amazon\.com\/gp\/r\.html.+$/i, () => urlParam(url, "U")).replace(/[\s<>]+/g, "");
+    const parsed = new URL(next);
+    [...parsed.searchParams.keys()].forEach((key) => {
+      if (STRIP_PARAMS.test(key)) parsed.searchParams.delete(key);
+    });
+    next = parsed.toString();
+    return next;
+  } catch {
+    return url;
+  }
+}
+function cleanCss(source) {
+  return source.trim().replace(/;\s*-[^;]+/g, "").replace(/^\s*-[^;]+(;|$)/g, "").replace(/white-space[^;]+/g, "");
+}
+function scopeCss(source) {
+  const css = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<[\s\S]*/g, "");
+  const out = [];
+  const rule = /(?:(\s*?@media[\s\S]*?){([\s\S]*?)}\s*?})|(?:([\s\S]*?){([\s\S]*?)})/gi;
+  let match;
+  while (match = rule.exec(css)) {
+    if (match[2] !== void 0) {
+      out.push(`${match[1].trim()} {
+${scopeCss(match[2] + "\n}")}}
+`);
+      continue;
+    }
+    const selector = (match[3] || "").trim().replace(/\s+/g, " ").split(" ").map((item) => item.replace(/^(:root|html)$/, "")).join(" ").trim();
+    if (!selector || selector.includes("@")) continue;
+    const scoped = selector.split(",").map((item) => `.mail-body ${item.trim().replace(/\./g, ".msg-")}`.replace(/\sbody/gi, "")).join(",");
+    out.push(`${scoped} {${cleanCss(match[4] || "")}}
+`);
+  }
+  return out.join("");
+}
+function cleanHtml(source, options) {
+  const result = { html: "", externals: 0, tracking: false, linked: [] };
+  const tmpl = document.createElement("template");
+  let linkColor = "";
+  tmpl.innerHTML = source.replace(/<(\/?)x-html(\s[^>]*)?>/gi, "").replace(/<(\/?)head(\s[^>]*)?>/gi, "").replace(/<body(\s[^>]*)?>/i, '<div class="mail-body"$1>').replace(/<(\/?)body(\s[^>]*)?>/gi, "<$1div$2>").replace(/<span class="preview-text"[\s\S]+?<\/span>/, "").replace(/\u2028/g, " ").replace(/<br>\s*<\/p>/gi, "</p>").trim();
+  const root3 = tmpl.content;
+  const comments = document.createNodeIterator(root3, NodeFilter.SHOW_COMMENT);
+  const dead = [];
+  while (comments.nextNode()) dead.push(comments.referenceNode);
+  dead.forEach((node) => node.parentNode?.removeChild(node));
+  root3.querySelectorAll("form,button,data").forEach((node) => node.replaceWith(...node.childNodes));
+  const depth = options.maxBlockquotes > 0 ? "," + new Array(options.maxBlockquotes + 1).fill("blockquote").join(" ") : "";
+  root3.querySelectorAll(`:not(${ALLOWED_TAGS}),a:empty,span:empty${depth}`).forEach((node) => node.remove());
+  [...root3.querySelectorAll("*")].forEach((node) => {
+    if (!node.isConnected && !root3.contains(node)) return;
+    const name = node.tagName;
+    const style = node.style;
+    if (name === "STYLE") {
+      if (options.allowStyles) {
+        let css = scopeCss(node.textContent || "");
+        if (options.removeColors) css = css.replace(/(background-)?color:[^};]+;?/g, "");
+        if (css) node.textContent = css;
+        else node.remove();
+      } else node.remove();
+      return;
+    }
+    if (name === "XMP") {
+      const pre = document.createElement("pre");
+      pre.textContent = node.innerHTML;
+      node.replaceWith(pre);
+      return;
+    }
+    if (style.display === "none" || style.visibility === "hidden") {
+      node.remove();
+      return;
+    }
+    const className = node.getAttribute("class") || "";
+    const get = (attr) => (node.getAttribute(attr) || "").trim();
+    const take = (attr) => {
+      const value = get(attr);
+      node.removeAttribute(attr);
+      return value;
+    };
+    if (className === "mail-body") {
+      if (node.hasAttribute("link")) linkColor = take("link");
+      if (node.hasAttribute("text")) style.color = take("text");
+      ["topmargin", "leftmargin", "bottommargin", "rightmargin"].forEach((attr) => {
+        if (!node.hasAttribute(attr)) return;
+        const value = px(take(attr)) + "px";
+        if (attr === "topmargin") style.marginTop = value;
+        if (attr === "leftmargin") style.marginLeft = value;
+        if (attr === "bottommargin") style.marginBottom = value;
+        if (attr === "rightmargin") style.marginRight = value;
+      });
+    } else if (options.allowStyles && className) {
+      node.setAttribute("class", className.replace(/(^|\s+)/g, "$1msg-"));
+    }
+    for (let i = node.attributes.length - 1; i >= 0; i--) {
+      const attr = node.attributes[i].name.toLowerCase();
+      const keepClass = attr === "class" && (className === "mail-body" || options.allowStyles);
+      if (!ALLOWED_ATTRS.has(attr) && !keepClass) node.removeAttribute(attr);
+    }
+    if (!style.backgroundImage && name !== "TD" && name !== "TH") {
+      ["width", "height"].forEach((key) => {
+        if (!node.hasAttribute(key)) return;
+        const value = take(key);
+        if (!style[key]) style[key] = value.includes("%") ? value : value + "px";
+      });
+      if (px(style.width) > 100 && !style.maxWidth) {
+        style.maxWidth = style.width;
+        style.width = "100%";
+      }
+      const height = style.getPropertyValue("height");
+      if (height) {
+        style.removeProperty("height");
+        if (!style.maxHeight) style.maxHeight = height;
+      }
+    }
+    if (name === "A") {
+      const value = get("href");
+      if (!/^([a-z]+):/i.test(value) || !SCHEMES.test(value)) {
+        node.removeAttribute("href");
+      } else {
+        const clean = stripTracking(value);
+        node.setAttribute("href", clean);
+        if (clean !== value) {
+          result.tracking = true;
+          node.setAttribute("data-x-href-tracking", value);
+        }
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+      if (linkColor && !style.color) style.color = linkColor;
+    }
+    if (NON_EMPTY.includes(name) && !(node.textContent || "").trim()) {
+      if (name !== "A" || !node.querySelector("img")) {
+        node.replaceWith(...node.childNodes);
+        return;
+      }
+    }
+    let skipStyle = false;
+    const src = take("src");
+    if (src) {
+      if (name === "IMG") {
+        node.setAttribute("loading", "lazy");
+        const cid = src.toLowerCase().startsWith("cid:") ? src.slice(4) : "";
+        const local = cid ? options.inline(cid) : options.inline(src);
+        if (local) {
+          node.setAttribute("data-x-inline", local);
+          result.linked.push(local);
+        } else if (style.maxHeight && px(style.maxHeight) < 3 || style.maxWidth && px(style.maxWidth) < 3 || style.width && px(style.width) < 2 || TRACKERS.some((uri) => src.toLowerCase().includes(uri))) {
+          skipStyle = true;
+          style.display = "none";
+          result.tracking = true;
+        } else if (HTTP.test(src)) {
+          const clean = stripTracking(src.startsWith("//") ? "https:" + src : src);
+          if (clean !== src) result.tracking = true;
+          node.setAttribute("data-x-src", clean);
+          result.externals += 1;
+          if (!node.getAttribute("alt")) node.setAttribute("alt", clean.replace(/^.+\/([^/?]+).*$/, "$1").slice(-20));
+        } else if (src.startsWith("data:image/")) {
+          node.setAttribute("src", src);
+        }
+      }
+    }
+    if (node.hasAttribute("background")) style.backgroundImage = `url("${take("background")}")`;
+    if (node.hasAttribute("bgcolor")) style.backgroundColor = take("bgcolor");
+    if (node.hasAttribute("color")) style.color = take("color");
+    for (let i = style.length - 1; i >= 0; i--) {
+      const property = style[i];
+      if (!["background-image", "list-style-image", "content"].includes(property) && /url\s*\(/i.test(style.getPropertyValue(property))) {
+        style.removeProperty(property);
+      }
+    }
+    if (!skipStyle) {
+      style.removeProperty("behavior");
+      style.removeProperty("cursor");
+      style.removeProperty("min-width");
+      style.removeProperty("position");
+      const remote = [];
+      ["background-image", "list-style-image", "content"].forEach((property) => {
+        const value = style.getPropertyValue(property);
+        const found = value.match(/url\s*\(([^)]+)\)/i);
+        if (!found) return;
+        style.removeProperty(property);
+        const url = found[1].replace(/^["'\s]+|["'\s]+$/g, "");
+        const lower = url.toLowerCase();
+        if (lower.startsWith("cid:")) {
+          const local = options.inline(url.slice(4));
+          if (local) {
+            node.setAttribute("data-x-style-inline", JSON.stringify([property, local]));
+            result.linked.push(local);
+          }
+        } else if (HTTP.test(lower)) {
+          result.externals += 1;
+          remote.push([property, url]);
+        } else if (lower.startsWith("data:image/")) {
+          style.setProperty(property, value);
+        }
+      });
+      if (remote.length) node.setAttribute("data-x-style-url", JSON.stringify(remote));
+      if (style.fontSize && px(style.fontSize) < options.minFontSize) style.fontSize = options.minFontSize + "px";
+      if (options.removeColors) {
+        style.removeProperty("background-color");
+        style.removeProperty("background-image");
+        style.removeProperty("color");
+      }
+      if (style.cssText) style.cssText = cleanCss(style.cssText);
+    }
+  });
+  if (options.collapseBlockquotes) {
+    [...root3.querySelectorAll("blockquote")].reverse().forEach((node) => {
+      const details = document.createElement("details");
+      details.className = "sm-bq";
+      details.innerHTML = "<summary>Zitat</summary>";
+      node.replaceWith(details);
+      details.append(node);
+    });
+  }
+  result.html = tmpl.innerHTML.trim();
+  return result;
+}
+function revealExternals(html, allow, rewrite) {
+  const tmpl = document.createElement("template");
+  tmpl.innerHTML = html;
+  let blocked = 0;
+  tmpl.content.querySelectorAll("img[data-x-src]").forEach((node) => {
+    const url = node.getAttribute("data-x-src") || "";
+    if (allow(url)) {
+      node.setAttribute("src", rewrite(url));
+      node.removeAttribute("data-x-src");
+    } else blocked += 1;
+  });
+  tmpl.content.querySelectorAll("[data-x-style-url]").forEach((node) => {
+    let list = [];
+    try {
+      list = JSON.parse(node.getAttribute("data-x-style-url") || "[]");
+    } catch {
+    }
+    const rest = list.filter(([property, url]) => {
+      if (!allow(url)) {
+        blocked += 1;
+        return true;
+      }
+      node.style.setProperty(property, `url("${rewrite(url)}")`);
+      return false;
+    });
+    if (rest.length) node.setAttribute("data-x-style-url", JSON.stringify(rest));
+    else node.removeAttribute("data-x-style-url");
+  });
+  return { html: tmpl.innerHTML, blocked };
+}
+function fillInline(html, urls) {
+  const tmpl = document.createElement("template");
+  tmpl.innerHTML = html;
+  tmpl.content.querySelectorAll("[data-x-inline]").forEach((node) => {
+    const url = urls.get(node.getAttribute("data-x-inline") || "");
+    if (url) node.setAttribute("src", url);
+    node.removeAttribute("data-x-inline");
+  });
+  tmpl.content.querySelectorAll("[data-x-style-inline]").forEach((node) => {
+    try {
+      const [property, key] = JSON.parse(node.getAttribute("data-x-style-inline") || "[]");
+      const url = urls.get(key);
+      if (url) node.style.setProperty(property, `url("${url}")`);
+    } catch {
+    }
+    node.removeAttribute("data-x-style-inline");
+  });
+  return tmpl.innerHTML;
+}
+function originalLinks(html) {
+  const tmpl = document.createElement("template");
+  tmpl.innerHTML = html;
+  tmpl.content.querySelectorAll("a[data-x-href-tracking]").forEach((node) => {
+    node.setAttribute("href", node.getAttribute("data-x-href-tracking") || node.href);
+  });
+  return tmpl.innerHTML;
+}
+function externalUrls(html) {
+  const tmpl = document.createElement("template");
+  tmpl.innerHTML = html;
+  const urls = /* @__PURE__ */ new Set();
+  tmpl.content.querySelectorAll("img[data-x-src]").forEach((node) => urls.add(node.getAttribute("data-x-src") || ""));
+  tmpl.content.querySelectorAll("[data-x-style-url]").forEach((node) => {
+    try {
+      JSON.parse(node.getAttribute("data-x-style-url") || "[]").forEach(([, url]) => urls.add(url));
+    } catch {
+    }
+  });
+  urls.delete("");
+  return [...urls];
+}
+function plainToHtml(text2, collapse) {
+  const esc5 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+  const linkify = (value) => esc5(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
+    const clean = stripTracking(url.replace(/&amp;/g, "&")).replace(/&/g, "&amp;");
+    return `<a href="${clean}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+  const lines = text2.replace(/\r\n?/g, "\n").split("\n");
+  let level = 0;
+  let out = "";
+  const open = () => collapse ? '<details class="sm-bq"><summary>Zitat</summary><blockquote>' : "<blockquote>";
+  const close = () => collapse ? "</blockquote></details>" : "</blockquote>";
+  for (const line2 of lines) {
+    const match = line2.match(/^((?:>\s?)+)/);
+    const depth = match ? (match[1].match(/>/g) || []).length : 0;
+    while (level < depth) {
+      out += open();
+      level += 1;
+    }
+    while (level > depth) {
+      out += close();
+      level -= 1;
+    }
+    out += linkify(match ? line2.slice(match[1].length) : line2) + "\n";
+  }
+  while (level > 0) {
+    out += close();
+    level -= 1;
+  }
+  return out;
+}
+
+// src/letter.ts
+function esc(value) {
+  return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+}
+function srcdoc(body, kind, look) {
+  const img = look.remote ? "data: https: http:" : "data:";
+  const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:; media-src 'none'; form-action 'none'`;
+  const followScheme = kind === "plain" || look.removeColors;
+  const scheme = followScheme ? look.dark ? "dark" : "light" : "light";
+  const paper = followScheme ? "background:Canvas;color:CanvasText" : "background:#fff;color:#1c1917";
+  const swap = look.swap ? "html{filter:invert(1) hue-rotate(180deg)}img,[style*='background-image']{filter:invert(1) hue-rotate(180deg)}" : "";
+  const base = [
+    `html{color-scheme:${scheme}}`,
+    `body{margin:0;padding:16px;${paper};font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
+    kind === "plain" ? "body{white-space:pre-wrap}" : "",
+    "img{max-width:100%;height:auto}",
+    "table{max-width:100%}",
+    "a{color:inherit}",
+    "a[href]{text-decoration:underline;text-underline-offset:2px}",
+    "pre{white-space:pre-wrap}",
+    "blockquote{margin:8px 0;padding-left:12px;border-left:2px solid color-mix(in srgb,currentColor 25%,transparent)}",
+    "details.sm-bq>summary{cursor:pointer;list-style:none;display:inline-block;padding:0 6px;border-radius:4px;font:12px/18px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;opacity:.7;background:color-mix(in srgb,currentColor 10%,transparent)}",
+    "details.sm-bq>summary::-webkit-details-marker{display:none}",
+    swap
+  ].join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"><meta name="color-scheme" content="${scheme}"><base target="_blank"><style>${base}</style></head><body>${body}</body></html>`;
+}
+function openLetterWindow(data, print) {
+  const win = window.open("", "_blank");
+  if (!win) return false;
+  const files = data.attachments.length ? `<p class="files">${data.attachments.map((file) => `<a href="${esc(file.href)}">${esc(file.name)}</a>`).join(" \xB7 ")}</p>` : "";
+  const content = data.kind === "plain" ? `<div style="white-space:pre-wrap">${data.body}</div>` : data.body;
+  win.document.open();
+  win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(data.subject || "Mail")}</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'">
+<style>
+  body{margin:24px;font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:#1c1917;background:#fff}
+  header{border-bottom:1px solid #27272a33;padding-bottom:12px;margin-bottom:16px}
+  h1{font-size:20px;margin:0 0 8px}
+  header p{margin:2px 0;color:color-mix(in srgb,#1c1917 68%,transparent)}
+  .files{margin-top:16px;border-top:1px solid #27272a33;padding-top:8px}
+  img{max-width:100%;height:auto}
+  details.sm-bq>summary{display:none}
+  details.sm-bq{display:block}
+  @media print{body{margin:0}a{color:inherit}}
+</style></head><body>
+<header><h1>${esc(data.subject || "(ohne Betreff)")}</h1>
+<p>Von: ${esc(data.from)}</p><p>An: ${esc(data.to)}</p>${data.cc ? `<p>Cc: ${esc(data.cc)}</p>` : ""}<p>${esc(data.when)}</p></header>
+${content}${files}
+</body></html>`);
+  win.document.close();
+  win.document.querySelectorAll("details").forEach((node) => node.setAttribute("open", ""));
+  if (print) setTimeout(() => {
+    win.focus();
+    win.print();
+  }, 150);
+  return true;
+}
+function icsDate(value) {
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/);
+  if (!m) return value;
+  if (!m[4]) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+  }
+  const args = [Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)];
+  const date = m[7] ? new Date(Date.UTC(...args)) : new Date(...args);
+  return date.toLocaleString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function parseIcs(text2) {
+  const lines = text2.replace(/\r\n[ \t]/g, "").replace(/\n[ \t]/g, "").split(/\r?\n/);
+  const event = { summary: "", start: "", end: "", location: "", organizer: "", method: "" };
+  let inside = false;
+  let found = false;
+  const unescape = (value) => value.replace(/\\n/gi, "\n").replace(/\\([,;\\])/g, "$1");
+  for (const line2 of lines) {
+    const index = line2.indexOf(":");
+    if (index < 0) continue;
+    const key = line2.slice(0, index).split(";")[0].toUpperCase();
+    const value = line2.slice(index + 1);
+    if (key === "METHOD") event.method = value.trim();
+    if (key === "BEGIN" && value.trim() === "VEVENT") {
+      inside = true;
+      found = true;
+      continue;
+    }
+    if (key === "END" && value.trim() === "VEVENT") break;
+    if (!inside) continue;
+    if (key === "SUMMARY") event.summary = unescape(value);
+    if (key === "DTSTART") event.start = icsDate(value.trim());
+    if (key === "DTEND") event.end = icsDate(value.trim());
+    if (key === "LOCATION") event.location = unescape(value);
+    if (key === "ORGANIZER") event.organizer = (line2.match(/CN=([^;:]+)/i)?.[1] || value.replace(/^mailto:/i, "")).replace(/^"|"$/g, "");
+  }
+  return found ? event : null;
+}
+function parseUnsubscribe(header, post) {
+  if (!header) return null;
+  const links = [...header.matchAll(/<([^>]+)>/g)].map((m) => m[1].trim());
+  const mailto = links.find((link) => /^mailto:/i.test(link)) || "";
+  const http = links.find((link) => /^https:/i.test(link)) || links.find((link) => /^http:/i.test(link)) || "";
+  if (!mailto && !http) return null;
+  return { mailto, http, oneClick: Boolean(http) && /List-Unsubscribe=One-Click/i.test(post) };
+}
+function parseMailto(link) {
+  const [address2, query = ""] = link.replace(/^mailto:/i, "").split("?");
+  const params = new URLSearchParams(query);
+  return {
+    to: decodeURIComponent(address2 || ""),
+    subject: params.get("subject") || "",
+    body: params.get("body") || ""
+  };
 }
 
 // src/icons.ts
@@ -311,6 +938,7 @@ function applyAppearance(mode) {
   root3.dataset.appearance = mode;
   root3.classList.toggle("dark", dark);
   root3.style.colorScheme = dark ? "dark" : "light";
+  window.dispatchEvent(new CustomEvent("sm-appearance", { detail: { dark } }));
   try {
     localStorage.setItem(KEY, mode);
   } catch {
@@ -552,7 +1180,7 @@ async function applyDesk(name, data, snap) {
   }
   return "reload";
 }
-function esc(value) {
+function esc2(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -562,11 +1190,11 @@ function esc(value) {
   })[char] ?? char);
 }
 function field(label2, name, value, type = "text", extra = "") {
-  const control = type === "area" ? `<textarea name="${name}" class="${extra}">${esc(value)}</textarea>` : `<input name="${name}" type="${type}" value="${esc(value)}" ${extra}>`;
-  return `<label class="field"><span>${esc(label2)}</span>${control}</label>`;
+  const control = type === "area" ? `<textarea name="${name}" class="${extra}">${esc2(value)}</textarea>` : `<input name="${name}" type="${type}" value="${esc2(value)}" ${extra}>`;
+  return `<label class="field"><span>${esc2(label2)}</span>${control}</label>`;
 }
 function check(name, label2, on2) {
-  return `<label class="check"><input type="checkbox" name="${name}"${on2 ? " checked" : ""}> ${esc(label2)}</label>`;
+  return `<label class="check"><input type="checkbox" name="${name}"${on2 ? " checked" : ""}> ${esc2(label2)}</label>`;
 }
 var BUTTON_ICON = {
   "settings-edit": "compose",
@@ -575,23 +1203,23 @@ var BUTTON_ICON = {
   "settings-activate": "check"
 };
 function button(action, label2, attrs, danger = false) {
-  const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${esc(value)}"`).join("");
+  const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${esc2(value)}"`).join("");
   const name = attrs.fresh ? "plus" : BUTTON_ICON[action] || "chevron-right";
-  return `<button type="button" class="${danger ? "danger" : "text-btn"}" data-action="${action}"${extra}>${icon(name)}<span class="btn-label">${esc(label2)}</span></button>`;
+  return `<button type="button" class="${danger ? "danger" : "text-btn"}" data-action="${action}"${extra}>${icon(name)}<span class="btn-label">${esc2(label2)}</span></button>`;
 }
 function row(title, meta, actions) {
-  return `<li class="set-row"><span class="grow"><strong title="${esc(title)}">${esc(title)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span>${actions}</li>`;
+  return `<li class="set-row"><span class="grow"><strong title="${esc2(title)}">${esc2(title)}</strong>${meta ? `<span class="quiet">${esc2(meta)}</span>` : ""}</span>${actions}</li>`;
 }
 function form(kind, inner, submit, cancel) {
-  const back = cancel ? `<button type="button" class="text-btn" data-action="settings-cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>` : "";
-  return `<form class="fields" data-action="settings-form" data-kind="${kind}">${inner}<div class="dialog-actions">${back}<button type="submit" class="ink-btn">${icon(kind === "search-contacts" ? "search" : kind.startsWith("import") ? "upload" : kind === "save-account" ? "account-add" : "save")}<span class="btn-label">${esc(submit)}</span></button></div></form>`;
+  const back = cancel ? `<button type="button" class="text-btn" data-action="settings-cancel">${esc2(t("GLOBAL.CANCEL", "Abbrechen"))}</button>` : "";
+  return `<form class="fields" data-action="settings-form" data-kind="${kind}">${inner}<div class="dialog-actions">${back}<button type="submit" class="ink-btn">${icon(kind === "search-contacts" ? "search" : kind.startsWith("import") ? "upload" : kind === "save-account" ? "account-add" : "save")}<span class="btn-label">${esc2(submit)}</span></button></div></form>`;
 }
 function note(textValue, error = false) {
   if (!textValue) return "";
-  return `<p class="${error ? "error" : "quiet"}">${esc(textValue)}</p>`;
+  return `<p class="${error ? "error" : "quiet"}">${esc2(textValue)}</p>`;
 }
 function loading() {
-  return `<p class="quiet">${esc(t("GLOBAL.LOADING", "Wird geladen"))} \u2026</p>`;
+  return `<p class="quiet">${esc2(t("GLOBAL.LOADING", "Wird geladen"))} \u2026</p>`;
 }
 var blankIdentity = () => ({
   id: "",
@@ -613,7 +1241,7 @@ function identityForm(item, caps) {
   const crypto = caps.openpgp || caps.gnupg ? `${check("pgpSign", t("CRYPTO.SIGN", "Unterschreiben"), item.pgpSign)}${check("pgpEncrypt", t("CRYPTO.ENCRYPT", "Verschl\xFCsseln"), item.pgpEncrypt)}` : "";
   const smimeOpen = item.smimeCertificate || item.smimeKey || item.smimeCertificateChain ? " open" : "";
   return form("save-identity", `
-    <input type="hidden" name="id" value="${esc(item.id)}">
+    <input type="hidden" name="id" value="${esc2(item.id)}">
     ${field(t("POPUPS_IDENTITY.LABEL", "Label"), "label", item.label)}
     ${field(t("GLOBAL.NAME", "Name"), "name", item.name)}
     ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", item.email, "email", 'autocomplete="email" required')}
@@ -624,7 +1252,7 @@ function identityForm(item, caps) {
     ${check("signatureInsertBefore", t("POPUPS_IDENTITY.LABEL_SIGNATURE_INSERT_BEFORE", "Diese Signatur in Antworten vor dem zitierten Text einf\xFCgen"), item.signatureInsertBefore)}
     ${crypto}
     <details${smimeOpen}>
-      <summary>${esc(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</summary>
+      <summary>${esc2(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</summary>
       ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "smimeCertificate", item.smimeCertificate, "area", "code")}
       ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schl\xFCssel"), "smimeKey", item.smimeKey, "area", "code")}
       ${field(t("SMIME.CERTIFICATECHAIN", "Zwischenzertifikat(e)"), "smimeCertificateChain", item.smimeCertificateChain, "area", "code")}
@@ -635,7 +1263,7 @@ function lookSection() {
   const current = readAppearance();
   const choice = (value, label2) => `<label class="check"><input type="radio" name="appearance" value="${value}"${current === value ? " checked" : ""}> ${label2}</label>`;
   return `
-    <p class="mono">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
+    <p class="mono">${esc2(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
     <fieldset class="choices">
       ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
       ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
@@ -660,7 +1288,7 @@ function renderDesk(section, snap, edit) {
           ${field(t("GLOBAL.PASSWORD", "Passwort"), "password", "", "password", 'autocomplete="current-password" required')}
           ${field(t("GLOBAL.NAME", "Name"), "name", "")}
         `, t("POPUPS_ADD_ACCOUNT.BUTTON_ADD_ACCOUNT", "Hinzuf\xFCgen"), false) : "";
-    return `${error}<p class="mono">${esc(t("SETTINGS_ACCOUNTS.LEGEND_ACCOUNTS", "Konten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows}</ul>${add}`;
+    return `${error}<p class="mono">${esc2(t("SETTINGS_ACCOUNTS.LEGEND_ACCOUNTS", "Konten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows}</ul>${add}`;
   }
   if (section === "identities") {
     const rows = snap.identities.map((item) => row(
@@ -675,7 +1303,7 @@ function renderDesk(section, snap, edit) {
     const current = edit?.kind === "identity" ? edit.fresh ? blankIdentity() : snap.identities.find((item) => item.id === edit.id) || blankIdentity() : null;
     const editor = current ? identityForm(current, snap.caps) : "";
     const add = snap.caps.identities && !adding ? button("settings-edit", t("SETTINGS_ACCOUNTS.BUTTON_ADD_IDENTITY", "Identit\xE4t hinzuf\xFCgen"), { kind: "identity", fresh: "1" }) : "";
-    return `${error}<p class="mono">${esc(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows || ""}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+    return `${error}<p class="mono">${esc2(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows || ""}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
   if (section === "contacts") {
     if (!snap.contacts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
@@ -691,13 +1319,13 @@ function renderDesk(section, snap, edit) {
     const adding = edit?.kind === "contact";
     const current = edit?.kind === "contact" && !edit.fresh ? snap.contacts.find((item) => item.id === edit.id) : null;
     const editor = adding ? form("save-contact", `
-      <input type="hidden" name="id" value="${esc(current?.id || "")}">
+      <input type="hidden" name="id" value="${esc2(current?.id || "")}">
       ${field(t("CONTACTS.DISPLAY_NAME", "Anzeigename"), "name", current?.name || "")}
       ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", current?.email || "", "email", 'autocomplete="email"')}
     `, t("GLOBAL.SAVE", "Speichern"), true) : "";
     const more = snap.contactCount > snap.contacts.length ? note(`${snap.contacts.length} / ${snap.contactCount}`) : "";
     const add = adding ? "" : button("settings-edit", t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"), { kind: "contact", fresh: "1" });
-    return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</p>${note(snap.notes.contacts, true)}${search}<ul class="set-list">${rows}</ul>${rows ? "" : note(snap.contactSearch ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte"))}${more}${add}${editor}`;
+    return `${error}<p class="mono">${esc2(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</p>${note(snap.notes.contacts, true)}${search}<ul class="set-list">${rows}</ul>${rows ? "" : note(snap.contactSearch ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte"))}${more}${add}${editor}`;
   }
   if (section === "filters") {
     if (!snap.scripts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
@@ -717,7 +1345,7 @@ function renderDesk(section, snap, edit) {
       ${field(t("SETTINGS_DESK.SCRIPT", "Skript"), "body", current?.body || "", "area", "code")}
     `, t("GLOBAL.SAVE", "Speichern"), true) : "";
     const add = adding ? "" : button("settings-edit", t("SETTINGS_FILTERS.BUTTON_ADD_SCRIPT", "Skript hinzuf\xFCgen"), { kind: "script", fresh: "1" });
-    return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+    return `${error}<p class="mono">${esc2(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
   const keyRows = snap.keys.map((item) => row(item.kind, item.preview, "")).join("");
   const certRows = snap.certs.map((item) => row(
@@ -735,17 +1363,171 @@ function renderDesk(section, snap, edit) {
     ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "pem", "", "area", "code")}
   `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
   return `${error}
-    <p class="mono">${esc(t("SETTINGS_DESK.KEYS", "Schl\xFCssel"))}</p>
-    <p class="quiet">${esc(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschl\xFCsseln stehen an der Identit\xE4t."))}</p>
+    <p class="mono">${esc2(t("SETTINGS_DESK.KEYS", "Schl\xFCssel"))}</p>
+    <p class="quiet">${esc2(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschl\xFCsseln stehen an der Identit\xE4t."))}</p>
     ${note(snap.notes.keys, true)}
     <ul class="set-list">${keyRows}</ul>
     ${keyRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
-    <details><summary>${esc(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schl\xFCssel importieren"))}</summary>${keyImport}</details>
-    <p class="mono">${esc(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</p>
+    <details><summary>${esc2(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schl\xFCssel importieren"))}</summary>${keyImport}</details>
+    <p class="mono">${esc2(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</p>
     ${note(snap.notes.certs, true)}
     <ul class="set-list">${certRows}</ul>
     ${certRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
-    <details><summary>${esc(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
+    <details><summary>${esc2(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
+}
+
+// src/reader.ts
+function esc3(value) {
+  return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+}
+function person(item) {
+  const text2 = item.name ? `${item.name} <${item.email}>` : item.email;
+  return `<button type="button" class="addr" data-action="m-address" data-email="${esc3(item.email)}" data-name="${esc3(item.name)}" title="${esc3(item.email)}">${esc3(item.name || item.email)}</button><span class="sr">${esc3(text2)}</span>`;
+}
+function people(list) {
+  return list.map(person).join('<span class="sep">, </span>');
+}
+function line(label2, list) {
+  if (!list.length) return "";
+  return `<div class="head-line"><span class="head-key mono">${esc3(label2)}</span><span class="head-val">${people(list)}</span></div>`;
+}
+var FILE_ICON = {
+  image: "image",
+  pdf: "drafts",
+  calendar: "calendar",
+  text: "drafts",
+  archive: "download-zip",
+  other: "attachment"
+};
+function bar(kind, iconName, text2, actions) {
+  return `<div class="note-bar" data-kind="${kind}" role="status">${icon(iconName)}<span class="grow">${esc3(text2)}</span>${actions}</div>`;
+}
+function textButton(action, label2, extra = "") {
+  return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc3(label2)}</button>`;
+}
+function renderReader(body, data, expanded) {
+  const tags = data.keywords.map(
+    (tag) => `<span class="tag">${icon("tag")}<span>${esc3(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc3(tag)}" aria-label="Schlagwort ${esc3(tag)} entfernen">${icon("close")}</button></span>`
+  ).join("");
+  const from = data.from[0];
+  const summary = `
+    <div class="head-line head-main">
+      <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
+      <span class="spacer"></span>
+      <time class="quiet" title="${esc3(data.whenFull)}">${esc3(data.when)}</time>
+      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
+    </div>`;
+  const details = expanded ? `
+    <div class="head-details">
+      ${line("Von", data.from)}
+      ${line("An", data.to)}
+      ${line("Cc", data.cc)}
+      ${line("Bcc", data.bcc)}
+      ${line("Antwort an", data.replyTo)}
+      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc3(data.whenFull)}</span></div>
+      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc3(data.size)}</span></div>` : ""}
+    </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
+  const bars = [];
+  if (data.deleted) bars.push(bar("deleted", "trash", "Als gel\xF6scht markiert.", textButton("m-restore", "Wiederherstellen")));
+  if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
+  if (data.blocked) {
+    bars.push(bar(
+      "images",
+      "image-blocked",
+      data.blocked === 1 ? "Ein externes Bild wurde blockiert." : `${data.blocked} externe Bilder wurden blockiert.`,
+      textButton("m-images", "Anzeigen") + (from ? textButton("m-images-always", "Immer f\xFCr diesen Absender") : "")
+    ));
+  }
+  if (data.failed) {
+    bars.push(bar(
+      "images",
+      "image-blocked",
+      data.failed === 1 ? "Ein externes Bild ist nicht erreichbar." : `${data.failed} externe Bilder sind nicht erreichbar.`,
+      ""
+    ));
+  }
+  if (data.tracking) {
+    bars.push(bar(
+      "tracking",
+      "shield-check",
+      data.originalLinks ? "Links zeigen auf die Originaladressen mit Tracking." : "Tracking in Links und Bildern wurde entfernt.",
+      textButton("m-links", data.originalLinks ? "Bereinigte Links" : "Originallinks")
+    ));
+  }
+  if (data.receipt) {
+    bars.push(bar(
+      "receipt",
+      "receipt",
+      `Der Absender bittet um eine Lesebest\xE4tigung an ${data.receipt}.`,
+      textButton("m-receipt", "Best\xE4tigung senden") + textButton("m-receipt-skip", "Nicht senden")
+    ));
+  }
+  const cal = data.calendar ? `
+    <section class="cal-card" aria-label="Termin">
+      ${icon("calendar", "Termin")}
+      <div class="grow">
+        <p class="cal-title">${esc3(data.calendar.summary || "Termin")}</p>
+        <p class="quiet">${esc3([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
+        ${data.calendar.location ? `<p class="quiet">${esc3(data.calendar.location)}</p>` : ""}
+        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc3(data.calendar.organizer)}</p>` : ""}
+      </div>
+    </section>` : "";
+  const files = data.files.length ? `
+    <section class="files" aria-label="Anh\xE4nge">
+      <div class="files-head"><span class="mono">${data.files.length === 1 ? "1 Anhang" : `${data.files.length} Anh\xE4nge`}</span><span class="spacer"></span>
+        ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">Alle als ZIP</span></button>` : ""}
+      </div>
+      <ul class="file-list">
+        ${data.files.map((file) => `
+          <li class="file">
+            ${file.thumb ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc3(file.name)} ansehen"><img src="${esc3(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
+            <span class="file-meta">
+              ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc3(file.name)}">${esc3(file.name)}</button>` : `<span class="file-name" title="${esc3(file.name)}">${esc3(file.name)}</span>`}
+              <span class="quiet">${esc3(file.size)}</span>
+            </span>
+            <a class="icon-btn" href="${esc3(file.href)}" download="${esc3(file.name)}" aria-label="${esc3(file.name)} laden" title="Laden">${icon("download")}</a>
+          </li>`).join("")}
+      </ul>
+    </section>` : "";
+  body.innerHTML = `
+    <header class="letter-head">
+      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc3(data.subject || "(ohne Betreff)")}</h2>
+      ${summary}
+      ${details}
+      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
+    </header>
+    ${bars.join("")}
+    ${cal}
+    ${files}`;
+  const frame = document.createElement("iframe");
+  frame.className = "letter";
+  frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
+  frame.referrerPolicy = "no-referrer";
+  frame.title = "Brief";
+  frame.srcdoc = data.srcdoc;
+  body.append(frame);
+}
+function renderBulk(body, data) {
+  const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc3(label2)}</span></button>`;
+  body.innerHTML = `
+    <div class="bulk">
+      <p class="title title-md">${data.count} Mails ausgew\xE4hlt</p>
+      <div class="bulk-grid">
+        ${b("m-read", "mark-read", "Als gelesen markieren")}
+        ${b("m-unread-all", "mark-unread", "Als ungelesen markieren")}
+        ${b("m-flag-all", "flag-filled", "Markieren")}
+        ${b("m-unflag-all", "flag", "Markierung entfernen")}
+        ${b("m-move", "move", "Verschieben \u2026")}
+        ${b("m-copy", "copy", "Kopieren \u2026")}
+        ${data.place.archive ? b("m-archive", "archive", "Archivieren") : ""}
+        ${data.place.inSpam ? b("m-notspam", "not-spam", "Kein Spam") : data.place.spam ? b("m-spam", "spam", "Spam") : ""}
+        ${b("m-forward-att", "forward-attachment", "Als Anhang weiterleiten")}
+        ${data.zip ? b("m-zip-mails", "download-zip", "Als ZIP laden") : ""}
+        ${b("delete", "delete", data.place.inTrash ? "Endg\xFCltig l\xF6schen" : "L\xF6schen", true)}
+        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", "Endg\xFCltig l\xF6schen", true)}
+      </div>
+      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">Auswahl aufheben</span></button>
+    </div>`;
 }
 
 // src/view.ts
@@ -759,7 +1541,7 @@ var CATEGORY = {
 function categoryMark(category) {
   if (!category || !CATEGORY[category]) return "";
   const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
-  return `<span class="cat">${mark}${esc2(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
+  return `<span class="cat">${mark}${esc4(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 function rowMarks(row2) {
   const marks = [
@@ -771,7 +1553,7 @@ function rowMarks(row2) {
   const html = marks.filter(([on2]) => on2).map(([, name, label2]) => icon(name, label2)).join("");
   return html ? `<span class="marks">${html}</span>` : "";
 }
-function esc2(value) {
+function esc4(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -781,7 +1563,7 @@ function esc2(value) {
   })[char] ?? char);
 }
 function withIcon(name, label2) {
-  return `${icon(name)}<span class="btn-label">${esc2(label2)}</span>`;
+  return `${icon(name)}<span class="btn-label">${esc4(label2)}</span>`;
 }
 var ROLE_ICON = {
   inbox: "inbox",
@@ -805,18 +1587,18 @@ function createView(root3, actions) {
     root3.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
-          <h1 class="title">${esc2(title)}</h1>
-          <label class="field"><span>${esc2(t("GLOBAL.EMAIL", "E-Mail"))}</span>
+          <h1 class="title">${esc4(title)}</h1>
+          <label class="field"><span>${esc4(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
           <p class="error" data-for="email" hidden></p>
-          <label class="field"><span>${esc2(t("GLOBAL.PASSWORD", "Passwort"))}</span>
+          <label class="field"><span>${esc4(t("GLOBAL.PASSWORD", "Passwort"))}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
-          <label class="stay"><input name="stay" type="checkbox"> ${esc2(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
+          <label class="stay"><input name="stay" type="checkbox"> ${esc4(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
-          <button type="submit" class="ink-btn">${esc2(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
+          <button type="submit" class="ink-btn">${esc4(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
         </form>
       </main>`;
     const form2 = root3.querySelector("form");
@@ -844,11 +1626,12 @@ function createView(root3, actions) {
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc2(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
+              <div id="account-list"></div>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc4(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
-          <p class="group-label mono">${esc2(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
+          <p class="group-label mono">${esc4(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
           <div id="folder-inbox"></div>
           <p class="group-label mono">Ordner</p>
           <div id="folder-rest"></div>
@@ -857,6 +1640,9 @@ function createView(root3, actions) {
           <div class="pane-head">
             <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
+            <span class="spacer"></span>
+            <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle ausw\xE4hlen" title="Alle ausw\xE4hlen (Strg+A)">${icon("select-all")}</button>
+            <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
@@ -873,15 +1659,46 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc2(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc4(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn" data-action="reply" title="${esc2(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="reply-all" title="${esc2(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc2(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc2(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc2(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc4(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc4(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc4(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc4(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc4(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-notspam" data-one="1" title="Kein Spam" hidden>${withIcon("not-spam", "Kein Spam")}</button>
+            <div class="bar-more">
+              <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
+              <div class="menu menu-right" id="more-menu" role="menu" hidden>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc4(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben \u2026</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-spam" data-narrow="spam">${icon("spam")}<span>Spam</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-notspam" data-narrow="notspam">${icon("not-spam")}<span>Kein Spam</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>Entwurf bearbeiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>Als neu bearbeiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>Als Anhang weiterleiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>Kopieren nach \u2026</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>Schlagwort hinzuf\xFCgen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>Nur Text anzeigen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>Farben umkehren</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>Vom Verteiler abmelden</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>Drucken</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>In neuem Fenster</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>Vollbild</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>Quelltext anzeigen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>Als .eml laden</span></button>
+                <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>Endg\xFCltig l\xF6schen</span></button>
+              </div>
+            </div>
+            <button type="button" class="icon-btn wide-only" data-action="m-prev" data-one="1" aria-label="Vorige Mail (K)" title="Vorige Mail (K)" hidden>${icon("chevron-up")}</button>
+            <button type="button" class="icon-btn wide-only" data-action="m-next" data-one="1" aria-label="N\xE4chste Mail (J)" title="N\xE4chste Mail (J)" hidden>${icon("chevron-down")}</button>
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
@@ -891,16 +1708,17 @@ function createView(root3, actions) {
         <section class="composer" hidden aria-label="Neue Mail">
           <form class="composer-form">
             <div class="composer-bar">
-              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
               <span class="title title-md" id="compose-title">Neue Mail</span>
               <span class="spacer"></span>
               <button type="submit" class="ink-btn">${withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
             </div>
             <div class="fields">
               <p class="quiet" id="compose-from"></p>
-              <label class="field"><span>${esc2(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc2(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc2(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+              <label class="field"><span>${esc4(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
+              <label class="field"><span>${esc4(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
+              <label class="field"><span>${esc4(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+              <ul class="compose-files" id="compose-files" aria-label="Anh\xE4nge" hidden></ul>
               <label class="field"><span>Text</span><textarea name="body"></textarea></label>
               <p class="error" id="send-error" hidden></p>
             </div>
@@ -915,11 +1733,11 @@ function createView(root3, actions) {
           <div class="dialog-body">
             <div class="settings-sticky">
               <div class="sheet-head" style="padding:0;border:0;min-height:0">
-                <h2 id="settings-title" class="title title-md">${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <h2 id="settings-title" class="title title-md">${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
                 <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
               </div>
-              <nav class="settings-nav" aria-label="${esc2(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+              <nav class="settings-nav" aria-label="${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</button>
@@ -936,15 +1754,24 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
               <li><span>N\xE4chste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
               <li><span>\xD6ffnen</span><kbd>Enter</kbd></li>
               <li><span>Schreiben</span><kbd>C</kbd></li>
               <li><span>Antworten</span><kbd>R</kbd></li>
+              <li><span>Allen antworten</span><kbd>A</kbd></li>
+              <li><span>Weiterleiten</span><kbd>F</kbd></li>
               <li><span>Archivieren</span><kbd>E</kbd></li>
-              <li><span>L\xF6schen</span><kbd>#</kbd></li>
+              <li><span>Markieren</span><kbd>I</kbd></li>
+              <li><span>Gelesen / ungelesen</span><kbd>U</kbd></li>
+              <li><span>Verschieben</span><kbd>M</kbd></li>
+              <li><span>L\xF6schen</span><kbd>#</kbd> <kbd>Entf</kbd></li>
+              <li><span>Endg\xFCltig l\xF6schen</span><kbd>Umschalt</kbd> <kbd>Entf</kbd></li>
+              <li><span>Alle ausw\xE4hlen</span><kbd>Strg</kbd> <kbd>A</kbd></li>
+              <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
+              <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
               <li><span>Seitenleiste</span><kbd>\\</kbd></li>
               <li><span>Schlie\xDFen</span><kbd>Esc</kbd></li>
               <li><span>Diese Liste</span><kbd>?</kbd></li>
@@ -954,12 +1781,51 @@ function createView(root3, actions) {
         <dialog id="confirm" aria-labelledby="confirm-title">
           <div class="dialog-body">
             <h2 id="confirm-title" class="title title-md">Wirklich l\xF6schen?</h2>
+            <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" value="cancel">${esc2(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-              <button type="button" class="danger" value="ok">${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+              <button type="button" class="text-btn" value="cancel">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             </div>
           </div>
         </dialog>
+        <dialog id="picker" aria-labelledby="picker-title">
+          <form class="dialog-body" method="dialog" data-action="picker">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+            </div>
+            <label class="sr" for="picker-q">Ordner suchen</label>
+            <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
+            <div class="picker-list" id="picker-list" role="listbox" aria-label="Ordner"></div>
+          </form>
+        </dialog>
+        <dialog id="prompt-dlg" aria-labelledby="prompt-title">
+          <form class="dialog-body" data-action="prompt-form">
+            <h2 id="prompt-title" class="title title-md"></h2>
+            <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
+            <div class="dialog-actions">
+              <button type="button" class="text-btn" data-action="close-dialog">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="submit" class="ink-btn">${withIcon("check", "\xDCbernehmen")}</button>
+            </div>
+          </form>
+        </dialog>
+        <dialog id="lightbox" class="dialog-wide lightbox" aria-labelledby="lightbox-title">
+          <div class="dialog-body">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="lightbox-title" class="title title-md"></h2>
+              <span class="spacer"></span>
+              <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab \xF6ffnen" title="In neuem Tab \xF6ffnen">${icon("external")}</a>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+            </div>
+            <div class="lightbox-body" id="lightbox-body"></div>
+          </div>
+        </dialog>
+        <ul class="menu addr-menu" id="addr-menu" role="menu" hidden>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
+        </ul>
       </div>`;
     const next = root3.querySelector(".shell");
     if (!next) return;
@@ -980,15 +1846,80 @@ function createView(root3, actions) {
     const back = shell.querySelector("[data-action='back']");
     back.hidden = wide() || name !== "reader";
   }
+  let expanded = false;
+  let keyHandler = null;
+  let lastReader = null;
+  function paintBar(data) {
+    lastReader = data;
+    if (!shell) return;
+    const show = (name, on2) => {
+      shell?.querySelectorAll(`.reader-bar > [data-action='${name}'], .reader-bar > .bar-more > [data-action='${name}']`).forEach((button2) => {
+        button2.hidden = !on2;
+      });
+    };
+    const one = Boolean(data);
+    ["reply", "reply-all", "forward", "delete", "m-flag", "m-move", "m-more", "m-prev", "m-next", "unread"].forEach((name) => show(name, one));
+    show("archive", one && Boolean(data?.place.archive));
+    show("m-spam", one && Boolean(data?.place.spam) && !data?.place.inSpam);
+    show("m-notspam", one && Boolean(data?.place.inSpam));
+    if (!data) return;
+    const flag = shell.querySelector(".reader-bar > [data-action='m-flag']");
+    if (flag) {
+      flag.setAttribute("aria-pressed", data.flagged ? "true" : "false");
+      flag.innerHTML = withIcon(data.flagged ? "flag-filled" : "flag", data.flagged ? "Markiert" : "Markieren");
+    }
+    const unread = shell.querySelector(".reader-bar > [data-action='unread']");
+    if (unread) {
+      unread.innerHTML = withIcon(data.seen ? "mark-unread" : "mark-read", data.seen ? "Ungelesen" : "Gelesen");
+      unread.title = data.seen ? "Als ungelesen markieren (U)" : "Als gelesen markieren (U)";
+    }
+    const del = shell.querySelector(".reader-bar > [data-action='delete']");
+    if (del) del.title = data.place.inTrash ? "Endg\xFCltig l\xF6schen" : t("GLOBAL.DELETE", "L\xF6schen");
+    const menuShow = (name, on2) => {
+      const item = shell?.querySelector(`#more-menu [data-action='${name}']`);
+      if (item) item.hidden = !on2;
+    };
+    menuShow("m-edit-draft", data.place.inDrafts);
+    shell.querySelectorAll("#more-menu [data-narrow='spam']").forEach((item) => {
+      item.hidden = !(data.place.spam && !data.place.inSpam);
+    });
+    shell.querySelectorAll("#more-menu [data-narrow='notspam']").forEach((item) => {
+      item.hidden = !data.place.inSpam;
+    });
+    menuShow("m-unsubscribe", data.unsubscribe);
+    menuShow("m-mode", data.canToggleMode);
+    menuShow("m-delete-forever", !data.place.inTrash);
+    const mode = shell.querySelector("#more-menu [data-action='m-mode']");
+    if (mode) mode.innerHTML = `${icon("source")}<span>${data.mode === "html" ? "Nur Text anzeigen" : "HTML anzeigen"}</span>`;
+    const swap = shell.querySelector("#more-menu [data-action='m-swap']");
+    if (swap) swap.innerHTML = `${icon("eye")}<span>${data.swap ? "Originalfarben" : "Farben umkehren"}</span>`;
+  }
   function setSidebar(open) {
     if (shell) shell.dataset.sidebar = open ? "open" : "closed";
   }
   function closeMenu() {
-    const menu = shell?.querySelector("#account-menu");
-    const button2 = shell?.querySelector("[data-action='account']");
-    if (!menu || !button2) return;
-    menu.hidden = true;
-    button2.setAttribute("aria-expanded", "false");
+    shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu").forEach((menu) => {
+      menu.hidden = true;
+    });
+    shell?.querySelectorAll("[data-action='account'], [data-action='m-more']").forEach((button2) => {
+      button2.setAttribute("aria-expanded", "false");
+    });
+  }
+  function anyMenuOpen() {
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden])"));
+  }
+  let addrTarget = { email: "", name: "" };
+  function openAddrMenu(target) {
+    const menu = shell?.querySelector("#addr-menu");
+    if (!menu || !shell) return;
+    closeMenu();
+    addrTarget = { email: target.dataset.email || "", name: target.dataset.name || "" };
+    const box = shell.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(rect.left - box.left, box.width - 240))}px`;
+    menu.style.top = `${rect.bottom - box.top + 4}px`;
+    menu.hidden = false;
+    menu.querySelector("button")?.focus({ preventScroll: true });
   }
   function openLayer(layer, from) {
     opener = from;
@@ -1008,6 +1939,14 @@ function createView(root3, actions) {
     opener?.focus();
     opener = null;
   }
+  function toggleFullscreen(force) {
+    if (!shell) return;
+    const on2 = force ?? shell.dataset.full !== "true";
+    shell.dataset.full = on2 ? "true" : "false";
+    const button2 = shell.querySelector("[data-action='m-fullscreen']");
+    if (button2) button2.innerHTML = `${icon(on2 ? "fullscreen-exit" : "fullscreen")}<span>${on2 ? "Vollbild beenden" : "Vollbild"}</span>`;
+    if (on2 && !wide()) pane("reader");
+  }
   function wireShell() {
     if (!shell) return;
     const menu = shell.querySelector("#account-menu");
@@ -1015,21 +1954,28 @@ function createView(root3, actions) {
     const list = shell.querySelector(".list-pane");
     const separator = shell.querySelector(".splitter");
     const composer = shell.querySelector(".composer");
-    const setListWidth = (px) => {
-      const next = Math.min(640, Math.max(288, Math.round(px)));
+    const setListWidth = (px2) => {
+      const next = Math.min(640, Math.max(288, Math.round(px2)));
       shell?.style.setProperty("--list-w", `${next}px`);
       separator.setAttribute("aria-valuenow", String(next));
     };
     shell.addEventListener("click", (event) => {
       const target = event.target.closest("[data-action], [data-folder], [data-uid]");
-      if (!menu.hidden && !target?.closest(".account")) closeMenu();
+      if (anyMenuOpen() && !target?.closest(".account, .bar-more, #addr-menu")) closeMenu();
       if (!target) return;
       const action = target.dataset.action;
+      if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
       if (target.dataset.folder) {
         actions.selectFolder(target.dataset.folder);
         if (!wide()) pane("list");
         if (!docked()) setSidebar(false);
       } else if (target.dataset.uid) {
+        const mouse = event;
+        if (mouse.shiftKey || mouse.ctrlKey || mouse.metaKey) {
+          event.preventDefault();
+          actions.act("select", { uid: target.dataset.uid, mode: mouse.shiftKey ? "range" : "toggle" });
+          return;
+        }
         actions.selectMessage(Number(target.dataset.uid));
         if (!wide()) pane("reader");
       } else if (action === "toggle-sidebar") {
@@ -1038,8 +1984,45 @@ function createView(root3, actions) {
       } else if (action === "close-sidebar") setSidebar(false);
       else if (action === "account") {
         const open = menu.hidden;
+        closeMenu();
         menu.hidden = !open;
         accountBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) actions.act("accounts", {});
+      } else if (action === "m-more") {
+        const more = shell?.querySelector("#more-menu");
+        const open = more.hidden;
+        closeMenu();
+        more.hidden = !open;
+        target.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) more.querySelector(".menu-item:not([hidden])")?.focus({ preventScroll: true });
+      } else if (action === "m-address") {
+        openAddrMenu(target);
+      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search") {
+        closeMenu();
+        actions.act(action.slice(2), addrTarget);
+      } else if (action === "m-check") {
+        event.stopPropagation();
+        const mouse = event;
+        actions.act("select", { uid: target.dataset.ref || "", mode: mouse.shiftKey ? "range" : "toggle" });
+      } else if (action === "m-details") {
+        expanded = !expanded;
+        const body = shell?.querySelector("#reader-body");
+        if (body && lastReader) {
+          const top = body.scrollTop;
+          renderReader(body, lastReader, expanded);
+          body.scrollTop = top;
+          body.querySelector("[data-action='m-details']")?.focus({ preventScroll: true });
+        }
+      } else if (action === "m-fullscreen") {
+        closeMenu();
+        toggleFullscreen();
+      } else if (action?.startsWith("m-")) {
+        if (target.closest(".menu")) closeMenu();
+        const data = {};
+        Object.entries(target.dataset).forEach(([key, value]) => {
+          if (value != null) data[key] = value;
+        });
+        actions.act(action.slice(2), data);
       } else if (action === "settings") {
         closeMenu();
         section = "look";
@@ -1069,6 +2052,12 @@ function createView(root3, actions) {
           if (action === "settings-delete") {
             const dialog = shell?.querySelector("#confirm");
             if (!dialog) return;
+            dialog.querySelector("#confirm-title").textContent = "Wirklich l\xF6schen?";
+            dialog.querySelector("#confirm-text").hidden = true;
+            const ok_ = dialog.querySelector("#confirm-ok");
+            ok_.className = "danger";
+            ok_.innerHTML = withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"));
+            dialog.returnValue = "";
             dialog.showModal();
             const ok = await new Promise((resolve) => {
               dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
@@ -1156,12 +2145,18 @@ function createView(root3, actions) {
       const input = event.target;
       if (input.name === "appearance") applyAppearance(input.value);
     });
-    shell.addEventListener("keydown", (event) => {
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLElement && event.target.isContentEditable;
+    if (keyHandler) document.removeEventListener("keydown", keyHandler);
+    keyHandler = (event) => {
+      if (!shell?.isConnected) return;
+      const typing = event.target instanceof HTMLInputElement && !["checkbox", "radio", "button"].includes(event.target.type) || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLElement && event.target.isContentEditable;
       if (event.key === "Escape") {
         if (shell?.querySelector("dialog[open]")) return;
-        if (!menu.hidden) {
+        if (anyMenuOpen()) {
           closeMenu();
+          return;
+        }
+        if (shell?.dataset.full === "true") {
+          toggleFullscreen(false);
           return;
         }
         if (!composer.hidden) {
@@ -1173,7 +2168,7 @@ function createView(root3, actions) {
         if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
         return;
       }
-      if (typing) return;
+      if (typing || shell.querySelector("dialog[open]")) return;
       const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid && !event.target.dataset.folder;
       if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
       const key = event.key.toLowerCase();
@@ -1188,14 +2183,71 @@ function createView(root3, actions) {
         event.preventDefault();
         if (!wide()) pane("reader");
         openLayer(shell.querySelector(".sheet"), null);
-      } else if (key === "c") actions.compose();
-      else if (key === "r") actions.reply(false);
-      else if (key === "e") actions.archive();
-      else if (event.key === "#") actions.askDelete();
-      else if (key === "j" || key === "k" || event.key === "Enter") {
+      } else if (key === "a" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        actions.act("select-all", {});
+      } else if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      } else if (key === "r" && event.shiftKey) actions.act("refresh", {});
+      else if (event.key === "Delete" && event.shiftKey) actions.act("delete-forever", {});
+      else if (event.key === "Delete" || event.key === "#") actions.askDelete();
+      else if (event.key === "*") actions.act("select-all", {});
+      else if (key === "c") {
+        event.preventDefault();
+        actions.compose();
+      } else if (key === "r") {
+        event.preventDefault();
+        actions.reply(false);
+      } else if (key === "a") {
+        event.preventDefault();
+        actions.reply(true);
+      } else if (key === "f") {
+        event.preventDefault();
+        actions.forward();
+      } else if (key === "e") actions.archive();
+      else if (key === "i") actions.act("flag", {});
+      else if (key === "u") actions.unread();
+      else if (key === "m") {
+        event.preventDefault();
+        actions.act("move", {});
+      } else if (key === "j" || key === "k" || event.key === "Enter") {
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
       }
+    };
+    document.addEventListener("keydown", keyHandler);
+    shell.addEventListener("dragstart", (event) => {
+      const row2 = event.target.closest("[data-uid]");
+      if (!row2 || !event.dataTransfer) return;
+      event.dataTransfer.setData("application/x-sm-uid", row2.dataset.uid || "");
+      event.dataTransfer.effectAllowed = "copyMove";
+      shell?.classList.add("dragging");
+    });
+    shell.addEventListener("dragend", () => {
+      shell?.classList.remove("dragging");
+      shell?.querySelectorAll(".folder.drop").forEach((node) => node.classList.remove("drop"));
+    });
+    shell.addEventListener("dragover", (event) => {
+      const folder = event.target.closest(".folder[data-folder]");
+      if (!folder || !event.dataTransfer?.types.includes("application/x-sm-uid")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = event.ctrlKey || event.altKey ? "copy" : "move";
+      shell?.querySelectorAll(".folder.drop").forEach((node) => {
+        if (node !== folder) node.classList.remove("drop");
+      });
+      folder.classList.add("drop");
+    });
+    shell.addEventListener("dragleave", (event) => {
+      const folder = event.target.closest(".folder[data-folder]");
+      if (folder && !folder.contains(event.relatedTarget)) folder.classList.remove("drop");
+    });
+    shell.addEventListener("drop", (event) => {
+      const folder = event.target.closest(".folder[data-folder]");
+      const uid = event.dataTransfer?.getData("application/x-sm-uid");
+      if (!folder || !uid) return;
+      event.preventDefault();
+      folder.classList.remove("drop");
+      actions.act("drop", { uid, folder: folder.dataset.folder || "", copy: event.ctrlKey || event.altKey ? "1" : "" });
     });
     separator.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -1254,8 +2306,8 @@ function createView(root3, actions) {
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
       filters.innerHTML = cats.map(
-        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc2(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc2(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc4(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc4(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
@@ -1288,7 +2340,7 @@ function createView(root3, actions) {
       ask.className = "text-btn";
       ask.dataset.action = "open-sheet";
       ask.innerHTML = withIcon("assist", t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
-      ask.classList.add("bar-btn");
+      ask.classList.add("bar-btn", "primary");
       ask.title = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
       shell.querySelector(".reader-bar")?.append(ask);
       const sheet = document.createElement("aside");
@@ -1296,13 +2348,13 @@ function createView(root3, actions) {
       sheet.hidden = true;
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc2(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc2(flags.provider)}</span>
+          <span class="title title-md">${esc4(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc4(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc2(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc2(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc4(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
             <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
             <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
@@ -1311,8 +2363,8 @@ function createView(root3, actions) {
         </div>
         <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <textarea id="ask" rows="2" placeholder="${esc2(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
-          <button type="submit" class="ink-btn">${esc2(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <textarea id="ask" rows="2" placeholder="${esc4(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc4(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
         <p class="error" id="chat-error" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -1328,16 +2380,16 @@ function createView(root3, actions) {
           <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
           <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc2(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc4(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
         <div class="tones" role="toolbar" aria-label="Ton">
-          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc2(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
+          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc4(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
           <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
         </div>
-        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc2(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc4(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
         <p class="quiet" id="draft-status"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
@@ -1348,7 +2400,7 @@ function createView(root3, actions) {
         <h2 class="title title-md">Assistent</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
-          <button type="button" class="text-btn" value="cancel">${esc2(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="text-btn" value="cancel">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
           <button type="button" class="ink-btn" value="ok">Fortfahren</button>
         </div>
       </div>`;
@@ -1375,7 +2427,7 @@ function createView(root3, actions) {
   }
   function folderButton(row2) {
     const count = row2.unread > 0 ? `<span class="count">${row2.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc2(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px">${icon(ROLE_ICON[row2.role] || (row2.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc2(row2.name)}</span>${count}</button>`;
+    return `<button type="button" class="folder" data-folder="${esc4(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px">${icon(ROLE_ICON[row2.role] || (row2.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc4(row2.name)}</span>${count}</button>`;
   }
   return {
     showLogin,
@@ -1404,13 +2456,20 @@ function createView(root3, actions) {
       const moreBtn = shell?.querySelector("[data-action='more']");
       const clearBtn = shell?.querySelector("[data-action='clear-search']");
       if (box) {
-        box.innerHTML = rows.map((row2) => `
-          <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" aria-current="${row2.current ? "true" : "false"}">
-            <span class="who">${esc2(row2.who)}</span>
-            <span class="when">${rowMarks(row2)}${esc2(row2.when)}</span>
-            <span class="subj">${esc2(row2.subject || "(ohne Betreff)")}${categoryMark(row2.category)}</span>
-            <span class="peek">${esc2(row2.preview)}</span>
-          </button>`).join("");
+        box.innerHTML = rows.map((row2) => {
+          const subject = row2.subject || "(ohne Betreff)";
+          return `
+          <div class="msg-row${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc4(subject)}">
+            <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
+              <span class="who">${esc4(row2.who)}</span>
+              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc4(row2.when)}</span>
+              <span class="subj">${esc4(subject)}${categoryMark(row2.category)}</span>
+              <span class="peek">${esc4(row2.preview)}</span>
+            </button>
+            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc4(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+          </div>`;
+        }).join("");
       }
       if (emptyEl) {
         emptyEl.hidden = !empty;
@@ -1425,68 +2484,150 @@ function createView(root3, actions) {
     },
     setReader(data, loading2, error) {
       const body = shell?.querySelector("#reader-body");
-      const buttons = ["reply", "reply-all", "forward", "archive", "unread", "delete"];
-      buttons.forEach((name) => {
-        const button2 = shell?.querySelector(`[data-action='${name}']`);
-        if (button2) button2.hidden = !data;
-      });
+      paintBar(data);
       if (!body) return;
       body.replaceChildren();
-      if (loading2) {
+      const say = (className, text2) => {
         const p = document.createElement("p");
-        p.className = "quiet";
-        p.textContent = loading2;
+        p.className = className;
+        p.textContent = text2;
         body.append(p);
-        return;
+      };
+      if (loading2) return say("quiet", loading2);
+      if (error) return say("error", error);
+      if (!data) return say("empty", "W\xE4hlen Sie eine Mail.");
+      renderReader(body, data, expanded);
+      body.scrollTop = 0;
+    },
+    setBulk(data) {
+      const body = shell?.querySelector("#reader-body");
+      paintBar(null);
+      if (body) renderBulk(body, data);
+      if (!wide()) pane("reader");
+    },
+    setChecks(visible) {
+      shell?.classList.toggle("with-checks", visible);
+    },
+    setRefreshing(busy) {
+      const button2 = shell?.querySelector("[data-action='m-refresh']");
+      if (!button2) return;
+      button2.disabled = busy;
+      button2.innerHTML = icon(busy ? "loading" : "refresh");
+    },
+    setAccounts(items) {
+      const box = shell?.querySelector("#account-list");
+      if (!box) return;
+      const others = items.filter((item) => !item.current);
+      box.innerHTML = others.length ? `<p class="menu-label mono">Konten</p>` + others.map(
+        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc4(item.email)}">${icon("user")}<span class="grow">${esc4(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
+      ).join("") + `<hr class="menu-sep">` : "";
+    },
+    pickFolder(title, folders, exclude) {
+      const dialog = shell?.querySelector("#picker");
+      if (!dialog) return Promise.resolve(null);
+      const list = dialog.querySelector("#picker-list");
+      const query = dialog.querySelector("#picker-q");
+      dialog.querySelector("#picker-title").textContent = title;
+      const paint = () => {
+        const q = query.value.trim().toLowerCase();
+        const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
+        list.innerHTML = rows.map(
+          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc4(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc4(q ? folder.fullName : folder.name)}</span></button>`
+        ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
+      };
+      query.value = "";
+      paint();
+      dialog.returnValue = "";
+      dialog.showModal();
+      query.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onInput = () => paint();
+        const onClick = (event) => {
+          const button2 = event.target.closest("[data-pick]");
+          if (button2) dialog.close(button2.dataset.pick || "");
+        };
+        const onKey = (event) => {
+          if (event.key === "Enter" && event.target === query) {
+            event.preventDefault();
+            const first = list.querySelector("[data-pick]");
+            if (first) dialog.close(first.dataset.pick || "");
+          }
+          if (event.key === "ArrowDown" && event.target === query) {
+            event.preventDefault();
+            list.querySelector("[data-pick]")?.focus();
+          }
+        };
+        query.addEventListener("input", onInput);
+        list.addEventListener("click", onClick);
+        dialog.addEventListener("keydown", onKey);
+        dialog.addEventListener("close", () => {
+          query.removeEventListener("input", onInput);
+          list.removeEventListener("click", onClick);
+          dialog.removeEventListener("keydown", onKey);
+          resolve(dialog.returnValue || null);
+        }, { once: true });
+      });
+    },
+    ask(title, label2, value = "") {
+      const dialog = shell?.querySelector("#prompt-dlg");
+      if (!dialog) return Promise.resolve(null);
+      const input = dialog.querySelector("#prompt-input");
+      const form2 = dialog.querySelector("form");
+      dialog.querySelector("#prompt-title").textContent = title;
+      dialog.querySelector("#prompt-label").textContent = label2;
+      input.value = value;
+      dialog.returnValue = "";
+      dialog.showModal();
+      input.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onSubmit = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dialog.close("ok");
+        };
+        form2.addEventListener("submit", onSubmit);
+        dialog.addEventListener("close", () => {
+          form2.removeEventListener("submit", onSubmit);
+          resolve(dialog.returnValue === "ok" ? input.value.trim() : null);
+        }, { once: true });
+      });
+    },
+    confirm(title, text2, ok, danger = true) {
+      const dialog = shell?.querySelector("#confirm");
+      if (!dialog) return Promise.resolve(false);
+      dialog.querySelector("#confirm-title").textContent = title;
+      const p = dialog.querySelector("#confirm-text");
+      p.hidden = !text2;
+      p.textContent = text2;
+      const button2 = dialog.querySelector("#confirm-ok");
+      button2.className = danger ? "danger" : "ink-btn";
+      button2.innerHTML = withIcon(danger ? "delete" : "check", ok);
+      dialog.returnValue = "";
+      dialog.showModal();
+      return new Promise((resolve) => {
+        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+      });
+    },
+    preview(name, url, kind) {
+      const dialog = shell?.querySelector("#lightbox");
+      if (!dialog) return;
+      dialog.querySelector("#lightbox-title").textContent = name;
+      dialog.querySelector("#lightbox-open").href = url;
+      const box = dialog.querySelector("#lightbox-body");
+      box.replaceChildren();
+      if (kind === "image") {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = name;
+        box.append(img);
+      } else {
+        const frame = document.createElement("iframe");
+        frame.src = url;
+        frame.title = name;
+        if (kind === "text") frame.setAttribute("sandbox", "");
+        box.append(frame);
       }
-      if (error) {
-        const p = document.createElement("p");
-        p.className = "error";
-        p.textContent = error;
-        body.append(p);
-        return;
-      }
-      if (!data) {
-        const p = document.createElement("p");
-        p.className = "empty";
-        p.textContent = "W\xE4hlen Sie eine Mail.";
-        body.append(p);
-        return;
-      }
-      const head = document.createElement("header");
-      head.className = "letter-head";
-      const title = document.createElement("h2");
-      title.className = "title title-md";
-      title.textContent = data.subject || "(ohne Betreff)";
-      const meta = document.createElement("p");
-      meta.className = "quiet";
-      meta.textContent = `${data.from} \xB7 ${data.when}`;
-      const to = document.createElement("p");
-      to.className = "quiet";
-      to.textContent = data.to ? `An ${data.to}` : "";
-      head.append(title, meta, to);
-      body.append(head);
-      if (data.attachments.length) {
-        const list = document.createElement("ul");
-        list.className = "files";
-        data.attachments.forEach((file) => {
-          const item = document.createElement("li");
-          const link = document.createElement("a");
-          link.href = file.href;
-          link.textContent = file.size ? `${file.name} (${file.size})` : file.name;
-          item.append(link);
-          list.append(item);
-        });
-        body.append(list);
-      }
-      const frame = document.createElement("iframe");
-      frame.className = "letter";
-      frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
-      frame.referrerPolicy = "no-referrer";
-      frame.title = "Brief";
-      const scheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-      frame.srcdoc = data.html ? /<html[\s>]/i.test(data.html) ? data.html : `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${data.html}</body></html>` : `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"><style>body{margin:0;background:Canvas;color:CanvasText;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 sans-serif}</style>${esc2(data.plain || "")}`;
-      body.append(frame);
+      dialog.showModal();
     },
     openCompose(seed) {
       if (!shell) return;
@@ -1497,6 +2638,7 @@ function createView(root3, actions) {
       form2.elements.namedItem("cc").value = seed.cc;
       form2.elements.namedItem("subject").value = seed.subject;
       form2.elements.namedItem("body").value = seed.body;
+      this.setComposeFiles(seed.files || []);
       shell.querySelectorAll("[data-mode]").forEach((button2) => {
         button2.setAttribute("aria-pressed", button2.dataset.mode === (seed.mode || "new") ? "true" : "false");
       });
@@ -1508,6 +2650,14 @@ function createView(root3, actions) {
     closeCompose() {
       const composer = shell?.querySelector(".composer");
       if (composer && !composer.hidden) closeLayer(composer);
+    },
+    setComposeFiles(files) {
+      const box = shell?.querySelector("#compose-files");
+      if (!box) return;
+      box.hidden = !files.length;
+      box.innerHTML = files.map(
+        (file, index) => `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc4(file.name)}">${esc4(file.name)}</span><span class="quiet">${esc4(file.state === "error" ? "Fehler" : file.size)}</span><button type="button" class="icon-btn" data-action="m-compose-drop" data-index="${index}" aria-label="${esc4(file.name)} entfernen" title="Entfernen">${icon("close")}</button></li>`
+      ).join("");
     },
     setSendState(busy, error) {
       const button2 = shell?.querySelector(".composer-form button[type='submit']");
@@ -1526,12 +2676,7 @@ function createView(root3, actions) {
       if (slot) slot.textContent = text2;
     },
     confirmDelete() {
-      const dialog = shell?.querySelector("#confirm");
-      if (!dialog) return Promise.resolve(false);
-      dialog.showModal();
-      return new Promise((resolve) => {
-        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
-      });
+      return this.confirm("Wirklich l\xF6schen?", "", t("GLOBAL.DELETE", "L\xF6schen"));
     },
     confirmConsent(text2) {
       const dialog = shell?.querySelector("#consent");
@@ -1556,8 +2701,8 @@ function createView(root3, actions) {
       write("reply", reply);
       write("follow", follow);
       write("invoice", invoice);
-      const line = shell?.querySelector("#dues");
-      if (line) line.textContent = dues;
+      const line2 = shell?.querySelector("#dues");
+      if (line2) line2.textContent = dues;
     },
     setStrip(state) {
       const strip = shell?.querySelector("#strip");
@@ -1782,20 +2927,29 @@ function createView(root3, actions) {
 
 // src/mail.ts
 var PAGE_FALLBACK = 20;
-function people(value) {
-  const list = value && typeof value === "object" ? value["@Collection"] : null;
+var SYSTEM_FLAGS = /^(\\|\$ai_|\$forwarded$|\$mdnsent$|\$junk$|\$notjunk$|\$label|nonjunk$|junk$|\$phishing$|\$submitpending$|\$submitted$|\$hasattachment$|\$hasnoattachment$|\$important$|\$muted$|\$followed$)/i;
+function people2(value) {
+  const list = Array.isArray(value) ? value : value && typeof value === "object" ? value["@Collection"] : null;
   if (!Array.isArray(list)) return [];
-  return list.map((item) => ({
-    name: String(item.name || ""),
-    email: String(item.email || "")
-  })).filter((item) => item.email || item.name);
+  return list.map((item) => {
+    const row2 = item || {};
+    return { name: String(row2.name || ""), email: String(row2.email || "") };
+  }).filter((item) => item.email || item.name);
 }
-function label(person) {
-  return person.name || person.email;
+function collection(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const list = value["@Collection"];
+    if (Array.isArray(list)) return list;
+  }
+  return [];
 }
-function address(person) {
-  if (!person.email) return person.name;
-  return person.name ? `${person.name} <${person.email}>` : person.email;
+function label(person2) {
+  return person2.name || person2.email;
+}
+function address(person2) {
+  if (!person2.email) return person2.name;
+  return person2.name ? `${person2.name} <${person2.email}>` : person2.email;
 }
 function when(stamp) {
   if (!stamp) return "";
@@ -1805,6 +2959,10 @@ function when(stamp) {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+function whenFull(stamp) {
+  if (!stamp) return "";
+  return new Date(stamp * 1e3).toLocaleString([], { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 function hasFlag(flags, name) {
   return flags.some((flag) => flag.toLowerCase() === name);
@@ -1816,13 +2974,27 @@ function plainFromHtml(html) {
   return new DOMParser().parseFromString(html, "text/html").body.textContent || "";
 }
 function quote(body) {
-  return body.replace(/\r\n/g, "\n").split("\n").map((line) => `> ${line}`).join("\n");
+  return body.replace(/\r\n/g, "\n").split("\n").map((line2) => `> ${line2}`).join("\n");
 }
 function sizeLabel(bytes) {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fileKind(file) {
+  const type = file.mimeType.toLowerCase();
+  const name = file.name.toLowerCase();
+  if (type.startsWith("image/")) return "image";
+  if (type === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+  if (type === "text/calendar" || name.endsWith(".ics")) return "calendar";
+  if (type.startsWith("text/") || /\.(txt|csv|log|md)$/.test(name)) return "text";
+  if (/zip|compressed|tar|rar|7z/.test(type) || /\.(zip|rar|7z|tgz|gz)$/.test(name)) return "archive";
+  return "other";
+}
+function authStatus(value) {
+  const first = Array.isArray(value) ? value[0] : null;
+  return Array.isArray(first) ? String(first[0] || "") : "";
 }
 async function boot(root3) {
   const session = new Session(root3);
@@ -1868,7 +3040,56 @@ var Session = class {
   caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
   desk = null;
   contactSearch = "";
+  prefs = {
+    viewImages: "ask",
+    whitelist: "",
+    proxy: false,
+    removeColors: false,
+    allowStyles: false,
+    minFontSize: 5,
+    maxBlockquotes: 0,
+    collapseBlockquotes: true,
+    viewHtml: true,
+    hideDeleted: true,
+    showNext: false,
+    readAuto: true,
+    readDelay: 5,
+    checkInterval: 15,
+    showUnreadCount: false,
+    desktop: true,
+    sound: true,
+    soundName: "new-mail",
+    useChecks: true,
+    listInline: false,
+    newWindow: false,
+    zip: false,
+    thumbs: false,
+    webPath: ""
+  };
+  trashFolder = "";
+  junkFolder = "";
+  draftsFolder = "";
+  checked = /* @__PURE__ */ new Set();
+  anchor = 0;
+  readTimer = 0;
+  pollTimer = 0;
+  lastPoll = 0;
+  inboxUid = 0;
+  inboxUnread = -1;
+  letter = { uid: 0, mode: "html", images: false, links: false, swap: false };
+  inlineCache = /* @__PURE__ */ new Map();
+  calendarCache = /* @__PURE__ */ new Map();
+  receiptSkipped = /* @__PURE__ */ new Set();
+  composeFiles = [];
+  draftRef = null;
+  renderToken = 0;
   constructor(root3) {
+    window.addEventListener("sm-appearance", () => {
+      if (this.current) void this.paintLetter();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && this.email && Date.now() - this.lastPoll > 6e4) void this.poll(false);
+    });
     this.view = createView(root3, {
       login: (email, password, stay) => void this.login(email, password, stay),
       logout: () => void this.logout(),
@@ -1889,7 +3110,8 @@ var Session = class {
       },
       back: () => void 0,
       assist: (name, data) => void this.assist(name, data),
-      settings: (name, data) => this.settings(name, data)
+      settings: (name, data) => this.settings(name, data),
+      act: (name, data) => void this.act(name, data)
     });
   }
   async start(data) {
@@ -1923,7 +3145,68 @@ var Session = class {
       await call("Logout");
     } catch {
     }
+    window.clearInterval(this.pollTimer);
+    window.clearTimeout(this.readTimer);
+    this.email = "";
     this.view.showLogin(document.title || "SnappyMail");
+  }
+  readPrefs(data) {
+    const num = (value, fallback) => Number.isFinite(Number(value)) && value !== "" && value != null ? Number(value) : fallback;
+    const bool = (value, fallback) => value == null ? fallback : Boolean(value);
+    const capa = data.Capa || {};
+    const system = data.System || {};
+    const minInterval = Math.max(1, num(data.minRefreshInterval, 5));
+    this.prefs = {
+      viewImages: String(data.ViewImages || "ask"),
+      whitelist: String(data.ViewImagesWhitelist || ""),
+      proxy: Boolean(data.proxyExternalImages),
+      removeColors: bool(data.RemoveColors, false),
+      allowStyles: bool(data.AllowStyles, false),
+      minFontSize: num(data.minFontSize, 5),
+      maxBlockquotes: num(data.MaxBlockquotesLevel, 0),
+      collapseBlockquotes: bool(data.CollapseBlockquotes, true),
+      viewHtml: bool(data.ViewHTML, true),
+      hideDeleted: bool(data.HideDeleted, true),
+      showNext: bool(data.showNextMessage, false),
+      readAuto: bool(data.messageReadAuto, true),
+      readDelay: Math.max(0, num(data.MessageReadDelay, 5)),
+      checkInterval: Math.max(minInterval, num(data.CheckMailInterval, 15)),
+      showUnreadCount: bool(data.ShowUnreadCount, false),
+      desktop: bool(data.DesktopNotifications, true),
+      sound: bool(data.SoundNotification, true),
+      soundName: String(data.NotificationSound || "new-mail"),
+      useChecks: bool(data.UseCheckboxesInList, true),
+      listInline: bool(data.ListInlineAttachments, false),
+      newWindow: bool(data.messageNewWindow, false),
+      zip: Boolean(capa.AttachmentsActions),
+      thumbs: Boolean(capa.AttachmentThumbnails),
+      webPath: String(system.webVersionPath || "snappymail/v/0.0.0/")
+    };
+  }
+  /** System-Ordner: Einstellung des Kontos, sonst Rolle vom Server, sonst üblicher Name. */
+  resolveSystemFolders(data) {
+    const known = (name) => Boolean(name) && this.folders.some((folder) => folder.fullName === name);
+    const byRole = (...roles) => this.folders.find((folder) => roles.includes(folder.role.toLowerCase()))?.fullName || "";
+    const byName = (...names) => this.folders.find((folder) => names.includes(folder.fullName.toLowerCase()) || names.includes(folder.name.toLowerCase()))?.fullName || "";
+    const pick = (setting, roles, names) => {
+      const value = String(setting || "");
+      return known(value) ? value : byRole(...roles) || byName(...names);
+    };
+    const src = data || {};
+    this.sentFolder = pick(src.SentFolder ?? this.sentFolder, ["sent"], ["sent", "gesendet", "sent items", "gesendete elemente"]);
+    this.draftsFolder = pick(src.DraftsFolder ?? this.draftsFolder, ["drafts"], ["drafts", "entw\xFCrfe", "entwurf"]);
+    this.trashFolder = pick(src.TrashFolder ?? this.trashFolder, ["trash"], ["trash", "papierkorb", "deleted items", "gel\xF6schte elemente"]);
+    this.junkFolder = pick(src.JunkFolder ?? this.junkFolder, ["junk", "spam"], ["junk", "spam", "junk-e-mail"]);
+    this.archiveFolder = pick(src.ArchiveFolder ?? this.archiveFolder, ["archive", "all"], ["archive", "archiv"]);
+  }
+  place() {
+    return {
+      inSpam: Boolean(this.junkFolder) && this.folder === this.junkFolder,
+      inTrash: !this.trashFolder || this.folder === this.trashFolder,
+      inDrafts: Boolean(this.draftsFolder) && this.folder === this.draftsFolder,
+      archive: Boolean(this.archiveFolder) && this.folder !== this.archiveFolder,
+      spam: Boolean(this.junkFolder)
+    };
   }
   async enter(data) {
     this.email = String(data.Email || "");
@@ -1932,6 +3215,13 @@ var Session = class {
     this.accountHash = String(data.accountHash || "");
     this.sentFolder = String(data.SentFolder || "");
     this.archiveFolder = String(data.ArchiveFolder || "");
+    this.draftsFolder = String(data.DraftsFolder || "");
+    this.trashFolder = String(data.TrashFolder || "");
+    this.junkFolder = String(data.JunkFolder || "");
+    this.readPrefs(data);
+    this.checked.clear();
+    this.inboxUid = 0;
+    this.inboxUnread = -1;
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(50, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
@@ -1941,8 +3231,13 @@ var Session = class {
     });
     this.noticeAck = Boolean(this.assistFlags?.noticeAck);
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    this.view.setChecks(this.prefs.useChecks);
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
+    window.clearInterval(this.pollTimer);
+    this.pollTimer = window.setInterval(() => {
+      if (!document.hidden) void this.poll(false);
+    }, this.prefs.checkInterval * 6e4);
   }
   async settings(name, data) {
     try {
@@ -1977,18 +3272,26 @@ var Session = class {
         total: Number(item.totalEmails || 0),
         uidNext: Number(item.uidNext || 0)
       })).filter((folder) => folder.fullName);
+      this.resolveSystemFolders(null);
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
+      if (inbox) {
+        this.inboxUid = inbox.uidNext;
+        this.inboxUnread = inbox.unread;
+      }
+      this.paintTitle();
       await this.selectFolder(inbox?.fullName || this.folders[0]?.fullName || "INBOX");
     } catch (error) {
       this.view.setList([], "", explain(error), false, false);
     }
   }
   async selectFolder(fullName) {
+    window.clearTimeout(this.readTimer);
     this.folder = fullName;
     this.offset = 0;
     this.search = "";
     this.selected = 0;
     this.current = null;
+    this.checked.clear();
     this.view.setReader(null, "", "");
     this.paintFolders();
     await this.loadList(false);
@@ -2003,19 +3306,36 @@ var Session = class {
         unread: folder.unread,
         current: folder.fullName === this.folder,
         inbox: folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX",
-        role: folder.role
+        role: this.roleOf(folder)
       };
     });
     this.view.setFolders(rows);
+    this.paintTitle();
   }
-  async loadList(append) {
+  /** Rolle für das Symbol: Server-Rolle oder die erkannten System-Ordner. */
+  roleOf(folder) {
+    if (folder.role) return folder.role;
+    if (folder.fullName === this.archiveFolder) return "archive";
+    if (folder.fullName === this.sentFolder) return "sent";
+    if (folder.fullName === this.draftsFolder) return "drafts";
+    if (folder.fullName === this.trashFolder) return "trash";
+    if (folder.fullName === this.junkFolder) return "junk";
+    return "";
+  }
+  paintTitle() {
+    if (!this.email) return;
+    const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
+    const count = this.prefs.showUnreadCount && inbox?.unread ? `(${inbox.unread}) ` : "";
+    document.title = `${count}${this.email}`;
+  }
+  async loadList(append, quiet = false) {
     const start = append ? this.offset : 0;
-    if (!append) this.view.setList([], "Mails werden geladen \u2026", "", false, Boolean(this.search));
+    if (!append && !quiet) this.view.setList([], "Mails werden geladen \u2026", "", false, Boolean(this.search));
     try {
       const result = await call("MessageList", {
         folder: this.folder,
         offset: start,
-        limit: this.pageSize,
+        limit: quiet && !append ? Math.max(this.pageSize, this.messages.length) : this.pageSize,
         search: this.category === "needs_reply" ? "keyword:$ai_needs_reply is:unanswered" : this.category === "personal" ? "keyword:$ai_personal" : this.category === "newsletter" ? "keyword:$ai_newsletter" : this.category === "notification" ? "keyword:$ai_notification" : this.category === "invoice" ? "keyword:$ai_invoice" : this.search,
         sort: "",
         uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
@@ -2030,6 +3350,10 @@ var Session = class {
         if (result.folder.uidNext) known.uidNext = Number(result.folder.uidNext);
         this.paintFolders();
       }
+      const present = new Set(this.messages.map((message) => message.uid));
+      [...this.checked].forEach((uid) => {
+        if (!present.has(uid)) this.checked.delete(uid);
+      });
       this.hasMore = this.search ? batch.length >= this.pageSize : this.offset < this.total;
       this.paintList();
     } catch (error) {
@@ -2039,59 +3363,91 @@ var Session = class {
     }
   }
   parseMessage(item, full = false) {
-    const flags = Array.isArray(item.flags) ? item.flags.map(String) : [];
-    const attachments = full && item.attachments && typeof item.attachments === "object" ? (item.attachments["@Collection"] || []).filter((file) => !file.isInline).map((file) => ({
-      name: String(file.fileName || "Anhang"),
-      size: Number(file.estimatedSize || 0),
-      href: downloadUrl({
-        folder: String(item.folder || this.folder),
-        uid: Number(item.uid || 0),
+    const flags = Array.isArray(item.flags) ? item.flags.map((flag) => String(flag)) : [];
+    const folder = String(item.folder || this.folder);
+    const uid = Number(item.uid || 0);
+    const rawFiles = collection(item.attachments);
+    const attachments = full ? rawFiles.map((file) => {
+      const key = {
+        folder,
+        uid,
         mimeIndex: String(file.mimeIndex || ""),
         mimeType: String(file.mimeType || "application/octet-stream"),
         fileName: String(file.fileName || "anhang"),
         accountHash: this.accountHash
-      })
-    })) : [];
+      };
+      const hash = fileHash(key);
+      return {
+        name: String(file.fileName || "Anhang"),
+        size: Number(file.estimatedSize || 0),
+        mimeType: key.mimeType,
+        mimeIndex: key.mimeIndex,
+        cid: String(file.cId || "").replace(/^<|>$/g, ""),
+        location: String(file.contentLocation || ""),
+        inline: Boolean(file.isInline),
+        hash,
+        href: rawUrl("Download", hash)
+      };
+    }) : [];
+    const headers = {};
+    collection(item.headers).forEach((header) => {
+      const name = String(header.name || "").toLowerCase();
+      if (name && !(name in headers)) headers[name] = String(header.value || "");
+    });
+    const contentType = (headers["content-type"] || "").toLowerCase();
     const references = Array.isArray(item.references) ? item.references.map(String).join(" ") : String(item.references || "");
     return {
-      uid: Number(item.uid || 0),
+      uid,
+      folder,
+      hash: String(item.hash || ""),
       subject: String(item.subject || ""),
       preview: String(item.preview || ""),
-      from: people(item.from),
-      to: people(item.to),
-      cc: people(item.cc),
-      replyTo: people(item.replyTo),
+      from: people2(item.from),
+      to: people2(item.to),
+      cc: people2(item.cc),
+      bcc: people2(item.bcc),
+      replyTo: people2(item.replyTo),
       date: Number(item.dateTimestamp || 0),
+      size: Number(item.size || 0),
       flags,
       messageId: String(item.messageId || ""),
       references,
       html: String(item.html || ""),
       plain: String(item.plain || ""),
       attachments,
-      hasAttachment: attachments.length > 0 || Boolean(
-        item.attachments && typeof item.attachments === "object" && (item.attachments["@Collection"] || []).some((file) => !file.isInline)
-      ),
-      category: String(item.aiCategory || "")
+      hasAttachment: rawFiles.some((file) => !file.isInline) || contentType.startsWith("multipart/mixed"),
+      category: String(item.aiCategory || ""),
+      spamScore: Number(item.spamScore || 0),
+      spamResult: String(item.spamResult || ""),
+      isSpam: Boolean(item.isSpam),
+      readReceipt: String(item.readReceipt || ""),
+      headers,
+      auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
     };
   }
+  visible() {
+    return this.prefs.hideDeleted ? this.messages.filter((message) => !hasFlag(message.flags, "\\deleted")) : this.messages;
+  }
   rows() {
-    return this.messages.map((message) => ({
+    return this.visible().map((message) => ({
       uid: message.uid,
       who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
       subject: message.subject,
       preview: message.preview,
       when: when(message.date),
       unseen: !seen(message.flags),
-      current: message.uid === this.selected,
+      current: message.uid === this.selected && !this.checked.size,
       category: message.category,
       flagged: hasFlag(message.flags, "\\flagged"),
       answered: hasFlag(message.flags, "\\answered"),
       forwarded: hasFlag(message.flags, "$forwarded"),
-      attachment: message.hasAttachment
+      attachment: message.hasAttachment,
+      checked: this.checked.has(message.uid),
+      deleted: hasFlag(message.flags, "\\deleted")
     }));
   }
   paintList() {
-    const empty = this.messages.length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Mails f\xFCr diese Suche." : "Dieser Ordner ist leer.";
+    const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Mails f\xFCr diese Suche." : "Dieser Ordner ist leer.";
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
   async setSearch(query) {
@@ -2101,58 +3457,209 @@ var Session = class {
     this.offset = 0;
     this.selected = 0;
     this.current = null;
+    this.checked.clear();
     this.view.setReader(null, "", "");
     await this.loadList(false);
   }
   async selectMessage(uid) {
+    window.clearTimeout(this.readTimer);
     this.selected = uid;
+    this.checked.clear();
     this.paintList();
     this.view.setReader(null, "Brief wird geladen \u2026", "");
     try {
       const result = await call("Message", { folder: this.folder, uid });
+      if (this.selected !== uid) return;
       const message = this.parseMessage(result, true);
       this.current = message;
+      this.letter = { uid, mode: this.prefs.viewHtml && message.html ? "html" : "plain", images: false, links: false, swap: false };
       const row2 = this.messages.find((item) => item.uid === uid);
-      if (row2 && !seen(row2.flags)) {
-        row2.flags.push("\\seen");
-        const folder = this.folders.find((item) => item.fullName === this.folder);
-        if (folder && folder.unread > 0) folder.unread -= 1;
-        this.paintFolders();
-        this.paintList();
-        void call("MessageSetSeen", { folder: this.folder, uids: String(uid), setAction: 1 }).catch(() => void 0);
-      }
-      this.view.setReader(this.readerData(message), "", "");
+      if (row2) row2.flags = message.flags.slice();
+      this.scheduleSeen(message);
+      await this.paintLetter();
       this.paintStrip();
       void this.loadCachedSummary();
     } catch (error) {
-      this.view.setReader(null, "", explain(error));
+      if (this.selected === uid) this.view.setReader(null, "", explain(error));
     }
   }
-  readerData(message) {
-    return {
-      subject: message.subject,
-      from: message.from.map(label).join(", "),
-      to: message.to.map(label).join(", "),
-      when: when(message.date),
-      html: message.html || null,
-      plain: message.plain || null,
-      attachments: message.attachments.map((file) => ({
+  /** Gelesen nach `MessageReadDelay` Sekunden, nur wenn `messageReadAuto` an ist. */
+  scheduleSeen(message) {
+    if (seen(message.flags) || !this.prefs.readAuto) return;
+    const mark = () => {
+      if (this.selected !== message.uid || this.current?.uid !== message.uid) return;
+      void this.setSeen([message.uid], true);
+    };
+    if (this.prefs.readDelay <= 0) mark();
+    else this.readTimer = window.setTimeout(mark, this.prefs.readDelay * 1e3);
+  }
+  whitelisted(message) {
+    const sender = (message.from[0]?.email || "").toLowerCase();
+    if (!sender) return false;
+    return this.prefs.whitelist.split(/[\s,;]+/).some((raw) => {
+      const [rule, ...checks] = raw.trim().toLowerCase().split("+");
+      if (!rule || !sender.includes(rule)) return false;
+      return checks.every((check2) => {
+        if (check2 === "spf") return message.auth.spf === "pass";
+        if (check2 === "dkim") return message.auth.dkim === "pass";
+        if (check2 === "dmarc") return message.auth.dmarc === "pass";
+        return true;
+      });
+    });
+  }
+  imagesAllowed(message) {
+    if (this.letter.images) return true;
+    if (message.isSpam || this.junkFolder && this.folder === this.junkFolder) return false;
+    if (this.prefs.viewImages === "always") return true;
+    if (this.prefs.viewImages === "match") return this.whitelisted(message);
+    return false;
+  }
+  /** Brief neu aufbauen: säubern, Inline-Bilder holen, freigegebene externe Bilder einsetzen, srcdoc bauen. */
+  async paintLetter() {
+    const message = this.current;
+    if (!message || this.checked.size) return;
+    const token2 = ++this.renderToken;
+    const dark = document.documentElement.classList.contains("dark");
+    let body = "";
+    let blocked = 0;
+    let failed = 0;
+    let tracking = false;
+    let remote = false;
+    const linked = /* @__PURE__ */ new Set();
+    if (this.letter.mode === "html" && message.html) {
+      const byCid = /* @__PURE__ */ new Map();
+      message.attachments.forEach((file) => {
+        if (file.cid) byCid.set(file.cid.toLowerCase(), file.hash);
+        if (file.location) byCid.set(file.location.toLowerCase(), file.hash);
+      });
+      const cleaned = cleanHtml(message.html, {
+        allowStyles: this.prefs.allowStyles,
+        removeColors: this.prefs.removeColors,
+        minFontSize: this.prefs.minFontSize,
+        maxBlockquotes: this.prefs.maxBlockquotes,
+        collapseBlockquotes: this.prefs.collapseBlockquotes,
+        inline: (ref) => byCid.get(ref.replace(/^<|>$/g, "").toLowerCase()) || null
+      });
+      tracking = cleaned.tracking;
+      cleaned.linked.forEach((hash) => linked.add(hash));
+      body = cleaned.html;
+      if (cleaned.linked.length) {
+        await Promise.all(cleaned.linked.map(async (hash) => {
+          if (this.inlineCache.has(hash)) return;
+          try {
+            this.inlineCache.set(hash, await fetchDataUrl(rawUrl("View", hash)));
+          } catch {
+          }
+        }));
+        body = fillInline(body, this.inlineCache);
+      }
+      if (cleaned.externals) {
+        if (this.imagesAllowed(message)) {
+          if (this.prefs.proxy) {
+            const loaded = /* @__PURE__ */ new Map();
+            const urls = externalUrls(body).slice(0, 40);
+            await Promise.all(urls.map(async (url) => {
+              try {
+                loaded.set(url, await fetchDataUrl(proxyUrl(url), 4 * 1024 * 1024));
+              } catch {
+              }
+            }));
+            failed = urls.length - loaded.size;
+            const shown = revealExternals(body, (url) => loaded.has(url), (url) => loaded.get(url) || "");
+            body = shown.html;
+          } else {
+            body = revealExternals(body, () => true, (url) => url).html;
+            remote = true;
+          }
+        } else {
+          blocked = cleaned.externals;
+        }
+      }
+      if (this.letter.links) body = originalLinks(body);
+    } else {
+      body = plainToHtml(message.plain || plainFromHtml(message.html), this.prefs.collapseBlockquotes);
+    }
+    if (token2 !== this.renderToken || this.current !== message) return;
+    const files = message.attachments.map((file, index) => ({ file, index })).filter(({ file }) => !file.inline || this.prefs.listInline || !linked.has(file.hash)).filter(({ file }) => this.prefs.listInline || !(file.inline && linked.has(file.hash))).map(({ file, index }) => {
+      const kind = fileKind(file);
+      return {
+        index,
         name: file.name,
         size: sizeLabel(file.size),
-        href: file.href
-      }))
+        href: file.href,
+        view: rawUrl(kind === "text" || kind === "calendar" ? "ViewAsPlain" : "View", file.hash),
+        thumb: kind === "image" && this.prefs.thumbs ? rawUrl("ViewThumbnail", file.hash) : "",
+        kind
+      };
+    });
+    const ics = message.attachments.find((file) => fileKind(file) === "calendar");
+    let calendar = null;
+    if (ics) {
+      if (!this.calendarCache.has(ics.hash)) {
+        try {
+          this.calendarCache.set(ics.hash, parseIcs(await fetchText(rawUrl("ViewAsPlain", ics.hash))));
+        } catch {
+          this.calendarCache.set(ics.hash, null);
+        }
+      }
+      calendar = this.calendarCache.get(ics.hash) || null;
+      if (token2 !== this.renderToken || this.current !== message) return;
+    }
+    const virus = /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "") && !/clean|no/i.test(message.headers["x-virus-status"] || "clean");
+    const spam = virus ? "Virenwarnung: Der Server hat in dieser Mail einen Virus gemeldet." : message.isSpam ? `Als Spam erkannt${message.spamScore ? ` (Wert ${message.spamScore})` : ""}${message.spamResult ? ` \xB7 ${message.spamResult}` : ""}.` : message.spamScore > 0 ? `Spam-Wert ${message.spamScore}${message.spamResult ? ` \xB7 ${message.spamResult}` : ""}.` : "";
+    const receiptKey = `${message.folder}:${message.uid}`;
+    const data = {
+      uid: message.uid,
+      subject: message.subject,
+      from: message.from,
+      to: message.to,
+      cc: message.cc,
+      bcc: message.bcc,
+      replyTo: message.replyTo.filter((person2) => !message.from.some((sender) => sender.email === person2.email)),
+      when: when(message.date),
+      whenFull: whenFull(message.date),
+      size: sizeLabel(message.size),
+      flagged: hasFlag(message.flags, "\\flagged"),
+      seen: seen(message.flags),
+      deleted: hasFlag(message.flags, "\\deleted"),
+      keywords: message.flags.filter((flag) => !SYSTEM_FLAGS.test(flag)),
+      srcdoc: srcdoc(body, this.letter.mode === "html" && message.html ? "html" : "plain", {
+        dark,
+        swap: this.letter.swap,
+        removeColors: this.prefs.removeColors,
+        remote
+      }),
+      mode: this.letter.mode,
+      canToggleMode: Boolean(message.html),
+      blocked,
+      failed,
+      tracking,
+      originalLinks: this.letter.links,
+      swap: this.letter.swap,
+      spam,
+      receipt: message.readReceipt && !hasFlag(message.flags, "$mdnsent") && !this.receiptSkipped.has(receiptKey) && message.folder !== this.sentFolder ? message.readReceipt : "",
+      unsubscribe: Boolean(parseUnsubscribe(message.headers["list-unsubscribe"] || "", message.headers["list-unsubscribe-post"] || "")),
+      files,
+      zip: this.prefs.zip,
+      calendar,
+      place: this.place()
     };
+    this.view.setReader(data, "", "");
   }
   openNew() {
     this.replyKind = "";
+    this.draftRef = null;
+    this.composeFiles = [];
     this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
   }
   openReply(all) {
     const message = this.current;
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
+    this.draftRef = null;
+    this.composeFiles = [];
     const author = message.replyTo[0] || message.from[0];
-    const others = [...message.to, ...message.cc].filter((person) => person.email.toLowerCase() !== this.email.toLowerCase());
+    const others = [...message.to, ...message.cc].filter((person2) => person2.email.toLowerCase() !== this.email.toLowerCase());
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
@@ -2171,8 +3678,10 @@ ${quote(body)}`
     const message = this.current;
     if (!message) return;
     this.replyKind = "forward";
+    this.draftRef = null;
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
+    this.composeFiles = [];
     this.view.openCompose({
       title: "Weiterleiten",
       to: "",
@@ -2186,14 +3695,48 @@ Betreff: ${message.subject}
 
 ${body}`
     });
+    void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+  }
+  /** Dateien vom Server als Anhänge in den Editor holen (Original-Anhänge oder ganze Mails als .eml). */
+  async attachFrom(items) {
+    if (!items.length) return;
+    const added = items.map((item) => ({ name: item.name, size: sizeLabel(item.size), state: "busy", tempName: "", type: "" }));
+    this.composeFiles = this.composeFiles.concat(added);
+    this.view.setComposeFiles(this.composeFiles);
+    try {
+      const result = await call("MessageUploadAttachments", {
+        attachments: items.map((item) => item.key)
+      });
+      added.forEach((file, index) => {
+        const row2 = Array.isArray(result) ? result[index] : null;
+        if (row2 && row2.tempName) {
+          file.tempName = row2.tempName;
+          file.type = String(row2.mimeType || "");
+          file.state = "";
+        } else file.state = "error";
+      });
+    } catch {
+      added.forEach((file) => {
+        file.state = "error";
+      });
+    }
+    this.view.setComposeFiles(this.composeFiles);
   }
   async send(values2) {
     if (!values2.to.trim()) {
       this.view.setSendState(false, "Geben Sie bitte mindestens einen Empf\xE4nger an.");
       return;
     }
+    if (this.composeFiles.some((file) => file.state === "busy")) {
+      this.view.setSendState(false, "Anh\xE4nge werden noch vorbereitet.");
+      return;
+    }
     this.view.setSendState(true, "");
     const message = this.current;
+    const attachments = {};
+    this.composeFiles.filter((file) => file.tempName && file.state !== "error").forEach((file) => {
+      attachments[file.tempName] = { name: file.name, inline: false, cId: "", location: "", type: file.type };
+    });
     const params = {
       from: this.email,
       to: values2.to,
@@ -2202,12 +3745,17 @@ ${body}`
       subject: values2.subject,
       plain: values2.body,
       html: "",
-      saveFolder: this.sentFolder
+      saveFolder: this.sentFolder,
+      attachments
     };
     if (message && this.replyKind) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
       params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, this.folder];
+    }
+    if (this.draftRef) {
+      params.messageFolder = this.draftRef.folder;
+      params.messageUid = this.draftRef.uid;
     }
     try {
       await call("SendMessage", params);
@@ -2215,44 +3763,594 @@ ${body}`
       this.view.setSendState(false, "");
       this.view.notice("Gesendet.");
       this.replyKind = "";
+      this.composeFiles = [];
+      const wasDraft = Boolean(this.draftRef);
+      this.draftRef = null;
       this.offset = 0;
-      await this.loadList(false);
+      if (wasDraft && this.current) {
+        this.current = null;
+        this.selected = 0;
+        this.view.setReader(null, "", "");
+      }
+      await this.loadList(false, true);
     } catch (error) {
       this.view.setSendState(false, explain(error));
     }
   }
+  /** Ziel der Aktion: die angehakten Mails, sonst die offene. */
+  targets() {
+    if (this.checked.size) return [...this.checked];
+    return this.selected ? [this.selected] : [];
+  }
   async archive() {
-    if (!this.selected) return;
+    const uids = this.targets();
+    if (!uids.length) return;
     if (!this.archiveFolder) {
       this.view.notice("Kein Archiv-Ordner eingerichtet.");
       return;
     }
+    if (this.folder === this.archiveFolder) {
+      this.view.notice("Die Mail liegt schon im Archiv.");
+      return;
+    }
+    await this.moveTo(uids, this.archiveFolder, false, uids.length === 1 ? "Archiviert." : `${uids.length} Mails archiviert.`);
+  }
+  /** Löschen: in den Papierkorb verschieben. Im Papierkorb oder ohne Papierkorb endgültig, dann mit Bestätigung. */
+  async remove(forever = false) {
+    const uids = this.targets();
+    if (!uids.length) return;
+    const permanent = forever || !this.trashFolder || this.folder === this.trashFolder;
+    if (permanent) {
+      const what = uids.length === 1 ? "diese Mail" : `diese ${uids.length} Mails`;
+      const ok = await this.view.confirm("Endg\xFCltig l\xF6schen?", `Damit wird ${what} sofort entfernt. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.`, "Endg\xFCltig l\xF6schen");
+      if (!ok) return;
+      try {
+        await call("MessageDelete", { folder: this.folder, uids: uids.join(",") });
+        this.view.notice(uids.length === 1 ? "Endg\xFCltig gel\xF6scht." : `${uids.length} Mails endg\xFCltig gel\xF6scht.`);
+        await this.afterRemoval(uids);
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
+      return;
+    }
+    await this.moveTo(uids, this.trashFolder, false, uids.length === 1 ? "In den Papierkorb verschoben." : `${uids.length} Mails in den Papierkorb verschoben.`);
+  }
+  async moveTo(uids, target, copy, done) {
+    if (!target || !copy && target === this.folder) return;
     try {
-      await call("MessageMove", { fromFolder: this.folder, toFolder: this.archiveFolder, uids: String(this.selected) });
-      this.view.notice("Archiviert.");
-      await this.afterRemoval();
+      await call(copy ? "MessageCopy" : "MessageMove", { fromFolder: this.folder, toFolder: target, uids: uids.join(",") });
+      this.view.notice(done);
+      const unread = this.messages.filter((message) => uids.includes(message.uid) && !seen(message.flags)).length;
+      const to = this.folders.find((folder) => folder.fullName === target);
+      if (to) to.unread += unread;
+      if (copy) {
+        this.paintFolders();
+        return;
+      }
+      const from = this.folders.find((folder) => folder.fullName === this.folder);
+      if (from) from.unread = Math.max(0, from.unread - unread);
+      await this.afterRemoval(uids);
     } catch (error) {
       this.view.notice(explain(error));
     }
   }
-  async remove() {
-    if (!this.selected) return;
-    if (!await this.view.confirmDelete()) return;
+  async afterRemoval(uids) {
+    const order = this.visible().map((message) => message.uid);
+    const openGone = uids.includes(this.selected);
+    let next = 0;
+    if (openGone && this.prefs.showNext && !this.checked.size) {
+      const index = order.indexOf(this.selected);
+      next = order.slice(index + 1).find((uid) => !uids.includes(uid)) || order.slice(0, index).reverse().find((uid) => !uids.includes(uid)) || 0;
+    }
+    this.messages = this.messages.filter((message) => !uids.includes(message.uid));
+    uids.forEach((uid) => this.checked.delete(uid));
+    this.offset = Math.max(0, this.offset - uids.length);
+    if (openGone) {
+      this.selected = 0;
+      this.current = null;
+      this.view.setReader(null, "", "");
+    }
+    this.paintFolders();
+    await this.loadList(false, true);
+    if (next) await this.selectMessage(next);
+    else if (this.checked.size) this.paintBulk();
+  }
+  async setSeen(uids, value) {
+    let delta = 0;
+    this.messages.forEach((message) => {
+      if (!uids.includes(message.uid)) return;
+      const was = seen(message.flags);
+      if (was === value) return;
+      delta += value ? -1 : 1;
+      message.flags = value ? message.flags.concat("\\seen") : message.flags.filter((flag) => flag.toLowerCase() !== "\\seen");
+    });
+    if (this.current && uids.includes(this.current.uid)) {
+      this.current.flags = value ? [...new Set(this.current.flags.concat("\\seen"))] : this.current.flags.filter((flag) => flag.toLowerCase() !== "\\seen");
+    }
+    const folder = this.folders.find((item) => item.fullName === this.folder);
+    if (folder) folder.unread = Math.max(0, folder.unread + delta);
+    this.paintFolders();
+    this.paintList();
+    if (this.current && uids.includes(this.current.uid) && !this.checked.size) void this.paintLetter();
     try {
-      await call("MessageDelete", { folder: this.folder, uids: String(this.selected) });
-      this.view.notice("Gel\xF6scht.");
-      await this.afterRemoval();
+      await call("MessageSetSeen", { folder: this.folder, uids: uids.join(","), setAction: value ? 1 : 0 });
     } catch (error) {
       this.view.notice(explain(error));
     }
   }
-  async afterRemoval() {
-    this.messages = this.messages.filter((message) => message.uid !== this.selected);
-    this.selected = 0;
-    this.current = null;
-    this.view.setReader(null, "", "");
-    this.offset = Math.max(0, this.offset - 1);
-    await this.loadList(false);
+  async markUnread() {
+    const uids = this.targets();
+    if (!uids.length) return;
+    if (this.checked.size) {
+      await this.setSeen(uids, false);
+      return;
+    }
+    window.clearTimeout(this.readTimer);
+    const message = this.messages.find((item) => item.uid === uids[0]) || this.current;
+    await this.setSeen(uids, !(message && seen(message.flags)) ? true : false);
+  }
+  async setFlag(uids, flag, value, action) {
+    const apply = (list) => value ? [...new Set(list.concat(flag))] : list.filter((item) => item.toLowerCase() !== flag.toLowerCase());
+    this.messages.forEach((message) => {
+      if (uids.includes(message.uid)) message.flags = apply(message.flags);
+    });
+    if (this.current && uids.includes(this.current.uid)) this.current.flags = apply(this.current.flags);
+    this.paintList();
+    if (this.current && uids.includes(this.current.uid) && !this.checked.size) void this.paintLetter();
+    try {
+      const params = { folder: this.folder, uids: uids.join(","), setAction: value ? 1 : 0 };
+      if (action === "MessageSetKeyword") params.keyword = flag;
+      await call(action, params);
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+  pickerFolders() {
+    return this.folders.slice().sort((a, b) => Number(b.role === "inbox") - Number(a.role === "inbox") || a.fullName.localeCompare(b.fullName)).map((folder) => {
+      const parts = folder.delimiter ? folder.fullName.split(folder.delimiter).filter(Boolean) : [folder.fullName];
+      return { fullName: folder.fullName, name: folder.name, depth: Math.min(4, parts.length - 1), role: this.roleOf(folder) };
+    });
+  }
+  paintBulk() {
+    if (!this.checked.size) {
+      if (this.current) void this.paintLetter();
+      else this.view.setReader(null, "", "");
+      return;
+    }
+    this.view.setBulk({ count: this.checked.size, place: this.place(), zip: this.prefs.zip });
+  }
+  letterPrint() {
+    const message = this.current;
+    if (!message) return null;
+    let body;
+    let kind = "plain";
+    if (this.letter.mode === "html" && message.html) {
+      kind = "html";
+      const cleaned = cleanHtml(message.html, {
+        allowStyles: false,
+        removeColors: false,
+        minFontSize: this.prefs.minFontSize,
+        maxBlockquotes: 0,
+        collapseBlockquotes: false,
+        inline: (ref) => message.attachments.find((file) => file.cid.toLowerCase() === ref.replace(/^<|>$/g, "").toLowerCase())?.hash || null
+      });
+      body = fillInline(cleaned.html, this.inlineCache);
+      if (this.imagesAllowed(message) && !this.prefs.proxy) body = revealExternals(body, () => true, (url) => url).html;
+    } else {
+      body = plainToHtml(message.plain || plainFromHtml(message.html), false);
+    }
+    return {
+      subject: message.subject,
+      from: message.from.map(address).join(", "),
+      to: message.to.map(address).join(", "),
+      cc: message.cc.map(address).join(", "),
+      when: whenFull(message.date),
+      body,
+      kind,
+      attachments: message.attachments.filter((file) => !file.inline).map((file) => ({ name: file.name, href: new URL(file.href, location.href).href }))
+    };
+  }
+  messageKey(message) {
+    return messageHash(message.folder, message.uid, message.subject, message.hash, this.accountHash);
+  }
+  /** Neue Mails prüfen: Ordnerzahlen, Liste des offenen Ordners, Hinweis und Ton bei neuer Mail im Posteingang. */
+  async poll(manual) {
+    if (!this.email) return;
+    this.lastPoll = Date.now();
+    if (manual) this.view.setRefreshing(true);
+    try {
+      const result = await call("Folders");
+      const fresh = new Map((result["@Collection"] || []).map((item) => [String(item.fullName || ""), item]));
+      let changed = manual;
+      this.folders.forEach((folder) => {
+        const item = fresh.get(folder.fullName);
+        if (!item) return;
+        const uidNext = Number(item.uidNext || 0);
+        if (folder.fullName === this.folder && uidNext && uidNext !== folder.uidNext) changed = true;
+        folder.unread = Number(item.unreadEmails || 0);
+        folder.total = Number(item.totalEmails || 0);
+      });
+      const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
+      if (inbox) {
+        const item = fresh.get(inbox.fullName);
+        const uidNext = Number(item?.uidNext || inbox.uidNext);
+        if (this.inboxUid && uidNext > this.inboxUid && inbox.unread > this.inboxUnread && this.inboxUnread >= 0) {
+          this.announce(Math.max(1, inbox.unread - this.inboxUnread));
+        }
+        this.inboxUid = uidNext;
+        this.inboxUnread = inbox.unread;
+      }
+      this.paintFolders();
+      if (changed) await this.loadList(false, true);
+    } catch (error) {
+      if (manual) this.view.notice(explain(error));
+    } finally {
+      if (manual) this.view.setRefreshing(false);
+    }
+  }
+  announce(count) {
+    if (this.prefs.sound && this.prefs.soundName) {
+      try {
+        const audio = new Audio(`${location.pathname.replace(/\/+$/, "")}/${this.prefs.webPath.replace(/^\/+/, "")}static/sounds/${encodeURIComponent(this.prefs.soundName)}.mp3`);
+        void audio.play().catch(() => void 0);
+      } catch {
+      }
+    }
+    if (this.prefs.desktop && "Notification" in window && Notification.permission === "granted" && document.hidden) {
+      try {
+        const note2 = new Notification(count === 1 ? "Eine neue Mail" : `${count} neue Mails`, { body: this.email, tag: "sm-new-mail" });
+        note2.onclick = () => {
+          window.focus();
+          note2.close();
+        };
+      } catch {
+      }
+    }
+  }
+  async loadAccounts() {
+    try {
+      const result = await call("AccountsAndIdentities");
+      const list = Array.isArray(result.Accounts) ? result.Accounts : Object.values(result.Accounts || {});
+      const main = this.mainEmail || this.email;
+      const emails = [main, ...list.map((item) => String(item.email || ""))].filter((email, index, all) => email && all.indexOf(email) === index);
+      const items = emails.map((email) => ({ email, unread: 0, current: email === this.email }));
+      this.view.setAccounts(items);
+      await Promise.all(items.filter((item) => !item.current && item.email !== main).map(async (item) => {
+        try {
+          const info = await call("AccountUnread", { email: item.email });
+          item.unread = Number(info.unreadEmails || 0);
+        } catch {
+        }
+      }));
+      this.view.setAccounts(items);
+    } catch {
+      this.view.setAccounts([]);
+    }
+  }
+  /** Mail-Aktionen aus der Oberfläche (Phase 1). */
+  async act(name, data) {
+    const message = this.current;
+    const ref = Number(data.ref || data.uid || 0);
+    switch (name) {
+      case "select": {
+        const uid = Number(data.uid || 0);
+        if (!uid) return;
+        const order = this.visible().map((item) => item.uid);
+        if (!this.checked.size && this.selected && this.selected !== uid && data.mode !== "range") this.checked.add(this.selected);
+        if (data.mode === "range" && (this.anchor || this.selected)) {
+          const from = order.indexOf(this.anchor || this.selected);
+          const to = order.indexOf(uid);
+          if (from >= 0 && to >= 0) order.slice(Math.min(from, to), Math.max(from, to) + 1).forEach((item) => this.checked.add(item));
+        } else if (this.checked.has(uid)) this.checked.delete(uid);
+        else this.checked.add(uid);
+        this.anchor = uid;
+        window.clearTimeout(this.readTimer);
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "select-all": {
+        const order = this.visible().map((item) => item.uid);
+        if (order.length && order.every((uid) => this.checked.has(uid))) this.checked.clear();
+        else order.forEach((uid) => this.checked.add(uid));
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "clear-selection":
+        this.checked.clear();
+        this.paintList();
+        this.paintBulk();
+        return;
+      case "refresh":
+        await this.poll(true);
+        return;
+      case "flag": {
+        const uids = ref ? [ref] : this.targets();
+        if (!uids.length) return;
+        const all = uids.every((uid) => hasFlag((this.messages.find((item) => item.uid === uid) || message)?.flags || [], "\\flagged"));
+        await this.setFlag(uids, "\\flagged", !all, "MessageSetFlagged");
+        return;
+      }
+      case "flag-all":
+      case "unflag-all":
+        await this.setFlag(this.targets(), "\\flagged", name === "flag-all", "MessageSetFlagged");
+        return;
+      case "read":
+        await this.setSeen(this.targets(), true);
+        return;
+      case "unread-all":
+        await this.setSeen(this.targets(), false);
+        return;
+      case "move":
+      case "copy": {
+        const uids = this.targets();
+        if (!uids.length) return;
+        const copy = name === "copy";
+        const target = await this.view.pickFolder(copy ? "Kopieren nach" : "Verschieben nach", this.pickerFolders(), copy ? "" : this.folder);
+        if (!target) return;
+        const n = uids.length === 1 ? "Mail" : `${uids.length} Mails`;
+        await this.moveTo(uids, target, copy, `${n} ${copy ? "kopiert" : "verschoben"} nach ${target}.`);
+        return;
+      }
+      case "drop": {
+        const uid = Number(data.uid || 0);
+        const uids = this.checked.has(uid) ? [...this.checked] : [uid];
+        const copy = data.copy === "1";
+        if (!data.folder || !copy && data.folder === this.folder) return;
+        const n = uids.length === 1 ? "Mail" : `${uids.length} Mails`;
+        await this.moveTo(uids, data.folder, copy, `${n} ${copy ? "kopiert" : "verschoben"} nach ${data.folder}.`);
+        return;
+      }
+      case "archive":
+        await this.archive();
+        return;
+      case "spam":
+      case "notspam": {
+        const uids = this.targets();
+        const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX")?.fullName || "INBOX";
+        const target = name === "spam" ? this.junkFolder : inbox;
+        if (!uids.length || !target) return;
+        await this.moveTo(uids, target, false, name === "spam" ? "Als Spam verschoben." : "In den Posteingang verschoben.");
+        return;
+      }
+      case "delete-forever":
+        await this.remove(true);
+        return;
+      case "restore": {
+        const uids = this.targets();
+        await this.setFlag(uids, "\\deleted", false, "MessageSetDeleted");
+        this.view.notice("Wiederhergestellt.");
+        return;
+      }
+      case "tag": {
+        if (!message) return;
+        const value = await this.view.ask("Schlagwort hinzuf\xFCgen", "Schlagwort");
+        const keyword = (value || "").replace(/[\s\\()"{}%*\]]+/g, "");
+        if (!keyword) return;
+        await this.setFlag([message.uid], keyword, true, "MessageSetKeyword");
+        return;
+      }
+      case "untag":
+        if (message && data.tag) await this.setFlag([message.uid], data.tag, false, "MessageSetKeyword");
+        return;
+      case "images":
+        this.letter.images = true;
+        await this.paintLetter();
+        return;
+      case "images-always": {
+        const sender = message?.from[0]?.email;
+        if (!sender) return;
+        this.letter.images = true;
+        const list = this.prefs.whitelist.split(/[\s,;]+/).filter(Boolean);
+        if (!list.includes(sender)) list.push(sender);
+        this.prefs.whitelist = list.join("\n");
+        if (this.prefs.viewImages === "ask") this.prefs.viewImages = "match";
+        await this.paintLetter();
+        try {
+          await call("SettingsUpdate", { ViewImagesWhitelist: this.prefs.whitelist, ViewImages: this.prefs.viewImages });
+          this.view.notice(`Bilder von ${sender} werden k\xFCnftig angezeigt.`);
+        } catch (error) {
+          this.view.notice(explain(error));
+        }
+        return;
+      }
+      case "links":
+        this.letter.links = !this.letter.links;
+        await this.paintLetter();
+        return;
+      case "mode":
+        this.letter.mode = this.letter.mode === "html" ? "plain" : "html";
+        await this.paintLetter();
+        return;
+      case "swap":
+        this.letter.swap = !this.letter.swap;
+        await this.paintLetter();
+        return;
+      case "receipt":
+      case "receipt-skip": {
+        if (!message) return;
+        this.receiptSkipped.add(`${message.folder}:${message.uid}`);
+        if (name === "receipt") {
+          try {
+            await call("SendReadReceiptMessage", {
+              messageFolder: message.folder,
+              messageUid: message.uid,
+              readReceipt: message.readReceipt,
+              subject: `Gelesen: ${message.subject}`,
+              plain: `Ihre Nachricht an ${this.email} wurde gelesen.`
+            });
+            message.flags.push("$mdnsent");
+            this.view.notice("Lesebest\xE4tigung gesendet.");
+          } catch (error) {
+            this.receiptSkipped.delete(`${message.folder}:${message.uid}`);
+            this.view.notice(explain(error));
+          }
+        }
+        await this.paintLetter();
+        return;
+      }
+      case "unsubscribe": {
+        if (!message) return;
+        const info = parseUnsubscribe(message.headers["list-unsubscribe"] || "", message.headers["list-unsubscribe-post"] || "");
+        if (!info) return;
+        if (info.mailto) {
+          const seed = parseMailto(info.mailto);
+          this.replyKind = "";
+          this.draftRef = null;
+          this.composeFiles = [];
+          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: "", subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
+          return;
+        }
+        const host = (() => {
+          try {
+            return new URL(info.http).host;
+          } catch {
+            return info.http;
+          }
+        })();
+        const ok = await this.view.confirm("Vom Verteiler abmelden?", `Die Abmeldeseite von ${host} \xF6ffnet sich in einem neuen Tab.`, "Seite \xF6ffnen", false);
+        if (ok) window.open(info.http, "_blank", "noopener,noreferrer");
+        return;
+      }
+      case "print":
+      case "window": {
+        const print = this.letterPrint();
+        if (!print) return;
+        if (!openLetterWindow(print, name === "print")) this.view.notice("Das Fenster wurde vom Browser blockiert.");
+        return;
+      }
+      case "source":
+        if (message) window.open(rawUrl("ViewAsPlain", this.messageKey(message)), "_blank", "noopener");
+        return;
+      case "eml":
+        if (message) {
+          const link = document.createElement("a");
+          link.href = rawUrl("Download", this.messageKey(message));
+          link.download = `${message.subject || "mail"}.eml`;
+          document.body.append(link);
+          link.click();
+          link.remove();
+        }
+        return;
+      case "edit-draft":
+      case "edit-new": {
+        if (!message) return;
+        this.replyKind = "";
+        this.composeFiles = [];
+        this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
+        this.view.openCompose({
+          title: name === "edit-draft" ? "Entwurf" : "Neue Nachricht",
+          to: message.to.map(address).join(", "),
+          cc: message.cc.map(address).join(", "),
+          subject: message.subject,
+          body: message.plain || plainFromHtml(message.html),
+          mode: "new"
+        });
+        void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+        return;
+      }
+      case "forward-att": {
+        const uids = this.targets();
+        const list = uids.map((uid) => message && message.uid === uid ? message : this.messages.find((item) => item.uid === uid)).filter(Boolean);
+        if (!list.length) return;
+        this.replyKind = "";
+        this.draftRef = null;
+        this.composeFiles = [];
+        const subject = list.length === 1 ? /^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}` : "Weitergeleitete Nachrichten";
+        this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
+        void this.attachFrom(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
+        return;
+      }
+      case "compose-drop": {
+        const index = Number(data.index || -1);
+        if (index >= 0) this.composeFiles.splice(index, 1);
+        this.view.setComposeFiles(this.composeFiles);
+        return;
+      }
+      case "preview": {
+        const file = message?.attachments[Number(data.index || -1)];
+        if (!file) return;
+        const kind = fileKind(file);
+        if (kind === "pdf") {
+          window.open(rawUrl("View", file.hash), "_blank", "noopener");
+          return;
+        }
+        this.view.preview(file.name, rawUrl(kind === "image" ? "View" : "ViewAsPlain", file.hash), kind === "image" ? "image" : "text");
+        return;
+      }
+      case "zip":
+      case "zip-mails": {
+        const hashes = name === "zip" ? message?.attachments.filter((file) => !file.inline).map((file) => file.hash) || [] : this.targets().map((uid) => this.messages.find((item) => item.uid === uid)).filter(Boolean).map((item) => this.messageKey(item));
+        if (!hashes.length) return;
+        try {
+          const result = await call("AttachmentsActions", {
+            target: "zip",
+            filename: name === "zip" ? message?.subject || "Anh\xE4nge" : "Mails",
+            hashes,
+            folder: this.folder
+          });
+          if (!result.fileHash) throw new ApiError(1, "ZIP konnte nicht erstellt werden.");
+          const link = document.createElement("a");
+          link.href = rawUrl("Download", result.fileHash);
+          link.download = `${result.fileHash}.zip`;
+          document.body.append(link);
+          link.click();
+          link.remove();
+        } catch (error) {
+          this.view.notice(explain(error));
+        }
+        return;
+      }
+      case "prev":
+      case "next": {
+        const order = this.visible().map((item) => item.uid);
+        const index = order.indexOf(this.selected);
+        const uid = order[index + (name === "next" ? 1 : -1)];
+        if (uid) await this.selectMessage(uid);
+        else if (name === "next" && this.hasMore) {
+          await this.loadList(true);
+          const more = this.visible().map((item) => item.uid)[index + 1];
+          if (more) await this.selectMessage(more);
+        }
+        return;
+      }
+      case "addr-write":
+        this.replyKind = "";
+        this.draftRef = null;
+        this.composeFiles = [];
+        this.view.openCompose({ title: "Neue Nachricht", to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
+        return;
+      case "addr-copy":
+        try {
+          await navigator.clipboard.writeText(data.email || "");
+          this.view.notice("Adresse kopiert.");
+        } catch {
+          this.view.notice(data.email || "");
+        }
+        return;
+      case "addr-search":
+        if (data.email) {
+          const input = document.querySelector("#search");
+          if (input) input.value = `from:${data.email}`;
+          await this.setSearch(`from:${data.email}`);
+        }
+        return;
+      case "accounts":
+        await this.loadAccounts();
+        return;
+      case "switch":
+        if (!data.email) return;
+        try {
+          await call("AccountSwitch", { Email: data.email });
+          await this.enter(await loadApp());
+        } catch (error) {
+          this.view.notice(explain(error));
+        }
+        return;
+      default:
+        return;
+    }
   }
   strip() {
     return {
@@ -2601,21 +4699,6 @@ ${body}`
     } catch (error) {
       turn.actions[index].state = explain(error);
       this.view.setChat(this.turns, "", this.contextLabel());
-    }
-  }
-  async markUnread() {
-    if (!this.selected) return;
-    const row2 = this.messages.find((message) => message.uid === this.selected);
-    if (!row2) return;
-    row2.flags = row2.flags.filter((flag) => flag.toLowerCase() !== "\\seen");
-    const folder = this.folders.find((item) => item.fullName === this.folder);
-    if (folder) folder.unread += 1;
-    this.paintFolders();
-    this.paintList();
-    try {
-      await call("MessageSetSeen", { folder: this.folder, uids: String(this.selected), setAction: 0 });
-    } catch (error) {
-      this.view.notice(explain(error));
     }
   }
 };

@@ -190,9 +190,102 @@ def theme_mails():
     print('Theme-Testmails eingespielt')
 
 
+def _png(width, height, rgb):
+    """Einfarbiges PNG fuer Inline- und Anhangsbilder."""
+    import struct
+    import zlib
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    raw = b''.join(b'\x00' + bytes(rgb) * width for _ in range(height))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
+PNG_RED = _png(64, 48, (250, 81, 17))
+
+FEATURE_HTML = '''<!doctype html><html><head><style>.box{padding:12px;border:1px solid #ccc}</style></head><body>
+<h2>Funktionstest: HTML mit externen Bildern</h2>
+<p>Externes Bild (muss blockiert sein): <img src="https://bilder.werkzeugshop.example/banner.png" width="300" height="80" alt="Banner"></p>
+<p>Inline-Bild per cid: <img src="cid:logo123@dev.example" width="32" height="32" alt="Logo"></p>
+<p>Tracking-Pixel (wird entfernt): <img src="https://tracker.example/track/open?id=42" width="1" height="1"></p>
+<p><a href="https://werkzeugshop.example/angebote?utm_source=mail&amp;utm_campaign=herbst&amp;id=7">Link mit Tracking-Parametern</a></p>
+<div class="box" style="background:url(https://bilder.werkzeugshop.example/hintergrund.jpg)">Box mit externem Hintergrund</div>
+<blockquote>Zitat Ebene 1<blockquote>Zitat Ebene 2</blockquote></blockquote>
+<script>alert("darf nie laufen")</script>
+</body></html>'''
+
+ICS = '''BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//dev.example//Test//DE
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:termin-1@dev.example
+DTSTART:20261112T090000Z
+DTEND:20261112T100000Z
+SUMMARY:Aufmaß Lindenstraße 12
+LOCATION:Lindenstraße 12\\, Musterstadt
+ORGANIZER;CN=Anna Müller:mailto:anna.mueller@kunde.example
+END:VEVENT
+END:VCALENDAR
+'''
+
+
+def feature_mails():
+    """Testmails fuer Phase 1: Bilder, Tracking, Anhaenge, Termin, Lesebestaetigung, Abmelden, Spam, Entwurf."""
+    m = EmailMessage(policy=SMTP)
+    m['From'] = 'Werkzeug-Shop <news@werkzeugshop.example>'
+    m['To'] = ME
+    m['Subject'] = 'Funktionstest: HTML, Bilder, Tracking, Abmelden'
+    m['Date'] = format_datetime(NOW - timedelta(minutes=10))
+    m['Message-ID'] = make_msgid(domain='dev.example')
+    m['List-Unsubscribe'] = '<mailto:abmelden@werkzeugshop.example?subject=abmelden>, <https://werkzeugshop.example/abmelden?u=42>'
+    m['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+    m['Disposition-Notification-To'] = 'news@werkzeugshop.example'
+    m.set_content('Textversion des Funktionstests.\n\n> Zitat\n>> doppelt\n\nLink: https://werkzeugshop.example/?utm_source=x', charset='utf-8')
+    m.add_alternative(FEATURE_HTML, subtype='html', charset='utf-8')
+    m.get_payload()[1].add_related(PNG_RED, maintype='image', subtype='png', cid='<logo123@dev.example>', filename='logo.png')
+    save('INBOX', m.as_bytes())
+
+    m = EmailMessage(policy=SMTP)
+    m['From'] = 'Anna Müller <anna.mueller@kunde.example>'
+    m['To'] = ME
+    m['Cc'] = 'Kollege <kollege@example.com>, buero@kunde.example'
+    m['Reply-To'] = 'Büro Müller <buero@kunde.example>'
+    m['Subject'] = 'Funktionstest: Anhänge und Termin'
+    m['Date'] = format_datetime(NOW - timedelta(minutes=20))
+    m['Message-ID'] = make_msgid(domain='dev.example')
+    m.set_content('Hallo,\n\nanbei Foto, Aufmaß und die Einladung zum Termin.\n\nGrüße\nAnna Müller', charset='utf-8')
+    m.add_attachment(PNG_RED, maintype='image', subtype='png', filename='Foto_Treppe.png')
+    m.add_attachment(b'%PDF-1.4\n% ausgedacht\n', maintype='application', subtype='pdf', filename='Aufmass.pdf')
+    m.add_attachment(ICS.encode(), maintype='text', subtype='calendar', filename='termin.ics')
+    save('INBOX', m.as_bytes())
+
+    m = EmailMessage(policy=SMTP)
+    m['From'] = 'Gewinnspiel <win@spam.example>'
+    m['To'] = ME
+    m['Subject'] = 'Funktionstest: Sie haben gewonnen'
+    m['Date'] = format_datetime(NOW - timedelta(minutes=30))
+    m['Message-ID'] = make_msgid(domain='dev.example')
+    m['X-Spam-Status'] = 'Yes, score=9.8 required=5.0'
+    m['X-Spam-Flag'] = 'YES'
+    m['X-Spam-Score'] = '9.8'
+    m.set_content('Klicken Sie hier. (Testmail, ausgedacht)', charset='utf-8')
+    save('INBOX', m.as_bytes())
+
+    save('Drafts', eml(f'Test Nutzer <{ME}>', 'anna.mueller@kunde.example', 'Funktionstest: Entwurf Angebot',
+        'Hallo Frau Müller,\n\nhier der Entwurf für das Angebot …', hours_ago=1))
+    dc('exec', '-T', 'mail', 'doveadm', 'flags', 'add', '-u', ME, '\\Draft', 'mailbox', 'Drafts', 'all', check=False)
+    dc('exec', '-T', 'mail', 'doveadm', 'flags', 'add', '-u', ME, 'Projekt-Linde', 'mailbox', 'INBOX', 'subject', 'Funktionstest: Anh', check=False)
+    dc('exec', '-T', 'mail', 'doveadm', 'flags', 'add', '-u', ME, '\\Flagged', 'mailbox', 'INBOX', 'subject', 'Funktionstest: Anh', check=False)
+    print('Funktionstest-Mails eingespielt')
+
+
 if __name__ == '__main__':
     if '--theme-mails' in sys.argv:
         theme_mails()
+        sys.exit()
+    if '--feature-mails' in sys.argv:
+        feature_mails()
         sys.exit()
     if '--mails' not in sys.argv:
         accounts()

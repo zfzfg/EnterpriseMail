@@ -1,6 +1,7 @@
 import type { AssistFlags } from "./assistant";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
+import { renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
 import { applyAppearance, type Appearance } from "./theme";
 
@@ -27,22 +28,23 @@ export interface MessageRow {
   answered?: boolean;
   forwarded?: boolean;
   attachment?: boolean;
+  checked?: boolean;
+  deleted?: boolean;
 }
 
-export interface AttachmentRow {
+export type { ReaderData } from "./reader";
+
+export interface PickerFolder {
+  fullName: string;
   name: string;
-  size: string;
-  href: string;
+  depth: number;
+  role: string;
 }
 
-export interface ReaderData {
-  subject: string;
-  from: string;
-  to: string;
-  when: string;
-  html: string | null;
-  plain: string | null;
-  attachments: AttachmentRow[];
+export interface AccountItem {
+  email: string;
+  unread: number;
+  current: boolean;
 }
 
 export interface StripState {
@@ -81,6 +83,13 @@ export interface ComposeSeed {
   subject: string;
   body: string;
   mode?: string;
+  files?: ComposeFile[];
+}
+
+export interface ComposeFile {
+  name: string;
+  size: string;
+  state?: "busy" | "error" | "";
 }
 
 export interface MailActions {
@@ -102,6 +111,8 @@ export interface MailActions {
   back(): void;
   assist?(name: string, data: Record<string, string | undefined>): void;
   settings?(name: string, data: Record<string, string>): void | Promise<void>;
+  /** Mail-Aktionen aus Phase 1 (Auswahl, Markieren, Verschieben, Briefmenü …). */
+  act(name: string, data: Record<string, string>): void;
 }
 
 const CATEGORY: Record<string, string> = {
@@ -152,8 +163,17 @@ export interface MailView {
   setFolders(rows: FolderRow[]): void;
   setList(rows: MessageRow[], empty: string, error: string, more: boolean, searching: boolean): void;
   setReader(data: ReaderData | null, loading: string, error: string): void;
+  setBulk(data: BulkData): void;
+  setChecks(visible: boolean): void;
+  setRefreshing(busy: boolean): void;
+  setAccounts(items: AccountItem[]): void;
+  pickFolder(title: string, folders: PickerFolder[], exclude: string): Promise<string | null>;
+  ask(title: string, label: string, value?: string): Promise<string | null>;
+  confirm(title: string, text: string, ok: string, danger?: boolean): Promise<boolean>;
+  preview(name: string, url: string, kind: "image" | "pdf" | "text"): void;
   openCompose(seed: ComposeSeed): void;
   closeCompose(): void;
+  setComposeFiles(files: ComposeFile[]): void;
   setSendState(busy: boolean, error: string): void;
   notice(text: string): void;
   confirmDelete(): Promise<boolean>;
@@ -230,6 +250,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
+              <div id="account-list"></div>
               <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
               <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
@@ -243,6 +264,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <div class="pane-head">
             <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
+            <span class="spacer"></span>
+            <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle auswählen" title="Alle auswählen (Strg+A)">${icon("select-all")}</button>
+            <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
@@ -262,12 +286,43 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <button type="button" class="text-btn bar-btn" data-action="back" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zurück"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc(t("GLOBAL.DELETE", "Löschen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc(t("GLOBAL.DELETE", "Löschen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="m-notspam" data-one="1" title="Kein Spam" hidden>${withIcon("not-spam", "Kein Spam")}</button>
+            <div class="bar-more">
+              <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
+              <div class="menu menu-right" id="more-menu" role="menu" hidden>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben …</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-spam" data-narrow="spam">${icon("spam")}<span>Spam</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-notspam" data-narrow="notspam">${icon("not-spam")}<span>Kein Spam</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>Entwurf bearbeiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>Als neu bearbeiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>Als Anhang weiterleiten</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>Kopieren nach …</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>Schlagwort hinzufügen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>Nur Text anzeigen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>Farben umkehren</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>Vom Verteiler abmelden</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>Drucken</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>In neuem Fenster</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>Vollbild</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>Quelltext anzeigen</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>Als .eml laden</span></button>
+                <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>Endgültig löschen</span></button>
+              </div>
+            </div>
+            <button type="button" class="icon-btn wide-only" data-action="m-prev" data-one="1" aria-label="Vorige Mail (K)" title="Vorige Mail (K)" hidden>${icon("chevron-up")}</button>
+            <button type="button" class="icon-btn wide-only" data-action="m-next" data-one="1" aria-label="Nächste Mail (J)" title="Nächste Mail (J)" hidden>${icon("chevron-down")}</button>
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
@@ -287,6 +342,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <label class="field"><span>${esc(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
               <label class="field"><span>${esc(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
               <label class="field"><span>${esc(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+              <ul class="compose-files" id="compose-files" aria-label="Anhänge" hidden></ul>
               <label class="field"><span>Text</span><textarea name="body"></textarea></label>
               <p class="error" id="send-error" hidden></p>
             </div>
@@ -329,8 +385,17 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <li><span>Öffnen</span><kbd>Enter</kbd></li>
               <li><span>Schreiben</span><kbd>C</kbd></li>
               <li><span>Antworten</span><kbd>R</kbd></li>
+              <li><span>Allen antworten</span><kbd>A</kbd></li>
+              <li><span>Weiterleiten</span><kbd>F</kbd></li>
               <li><span>Archivieren</span><kbd>E</kbd></li>
-              <li><span>Löschen</span><kbd>#</kbd></li>
+              <li><span>Markieren</span><kbd>I</kbd></li>
+              <li><span>Gelesen / ungelesen</span><kbd>U</kbd></li>
+              <li><span>Verschieben</span><kbd>M</kbd></li>
+              <li><span>Löschen</span><kbd>#</kbd> <kbd>Entf</kbd></li>
+              <li><span>Endgültig löschen</span><kbd>Umschalt</kbd> <kbd>Entf</kbd></li>
+              <li><span>Alle auswählen</span><kbd>Strg</kbd> <kbd>A</kbd></li>
+              <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
+              <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
               <li><span>Seitenleiste</span><kbd>\\</kbd></li>
               <li><span>Schließen</span><kbd>Esc</kbd></li>
               <li><span>Diese Liste</span><kbd>?</kbd></li>
@@ -340,12 +405,51 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <dialog id="confirm" aria-labelledby="confirm-title">
           <div class="dialog-body">
             <h2 id="confirm-title" class="title title-md">Wirklich löschen?</h2>
+            <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
               <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-              <button type="button" class="danger" value="ok">${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
+              <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
             </div>
           </div>
         </dialog>
+        <dialog id="picker" aria-labelledby="picker-title">
+          <form class="dialog-body" method="dialog" data-action="picker">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
+            </div>
+            <label class="sr" for="picker-q">Ordner suchen</label>
+            <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
+            <div class="picker-list" id="picker-list" role="listbox" aria-label="Ordner"></div>
+          </form>
+        </dialog>
+        <dialog id="prompt-dlg" aria-labelledby="prompt-title">
+          <form class="dialog-body" data-action="prompt-form">
+            <h2 id="prompt-title" class="title title-md"></h2>
+            <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
+            <div class="dialog-actions">
+              <button type="button" class="text-btn" data-action="close-dialog">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="submit" class="ink-btn">${withIcon("check", "Übernehmen")}</button>
+            </div>
+          </form>
+        </dialog>
+        <dialog id="lightbox" class="dialog-wide lightbox" aria-labelledby="lightbox-title">
+          <div class="dialog-body">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="lightbox-title" class="title title-md"></h2>
+              <span class="spacer"></span>
+              <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab öffnen" title="In neuem Tab öffnen">${icon("external")}</a>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
+            </div>
+            <div class="lightbox-body" id="lightbox-body"></div>
+          </div>
+        </dialog>
+        <ul class="menu addr-menu" id="addr-menu" role="menu" hidden>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
+        </ul>
       </div>`;
     const next = root.querySelector(".shell") as HTMLElement | null;
     if (!next) return;
@@ -368,16 +472,79 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     back.hidden = wide() || name !== "reader";
   }
 
+  let expanded = false;
+  let keyHandler: ((event: KeyboardEvent) => void) | null = null;
+  let lastReader: ReaderData | null = null;
+
+  /** Knöpfe der Brief-Leiste je nach Brief und Ordner zeigen. */
+  function paintBar(data: ReaderData | null): void {
+    lastReader = data;
+    if (!shell) return;
+    const show = (name: string, on: boolean) => {
+      shell?.querySelectorAll<HTMLElement>(`.reader-bar > [data-action='${name}'], .reader-bar > .bar-more > [data-action='${name}']`).forEach((button) => { button.hidden = !on; });
+    };
+    const one = Boolean(data);
+    ["reply", "reply-all", "forward", "delete", "m-flag", "m-move", "m-more", "m-prev", "m-next", "unread"].forEach((name) => show(name, one));
+    show("archive", one && Boolean(data?.place.archive));
+    show("m-spam", one && Boolean(data?.place.spam) && !data?.place.inSpam);
+    show("m-notspam", one && Boolean(data?.place.inSpam));
+    if (!data) return;
+    const flag = shell.querySelector(".reader-bar > [data-action='m-flag']") as HTMLElement | null;
+    if (flag) {
+      flag.setAttribute("aria-pressed", data.flagged ? "true" : "false");
+      flag.innerHTML = withIcon(data.flagged ? "flag-filled" : "flag", data.flagged ? "Markiert" : "Markieren");
+    }
+    const unread = shell.querySelector(".reader-bar > [data-action='unread']") as HTMLElement | null;
+    if (unread) {
+      unread.innerHTML = withIcon(data.seen ? "mark-unread" : "mark-read", data.seen ? "Ungelesen" : "Gelesen");
+      unread.title = data.seen ? "Als ungelesen markieren (U)" : "Als gelesen markieren (U)";
+    }
+    const del = shell.querySelector(".reader-bar > [data-action='delete']") as HTMLElement | null;
+    if (del) del.title = data.place.inTrash ? "Endgültig löschen" : t("GLOBAL.DELETE", "Löschen");
+    const menuShow = (name: string, on: boolean) => {
+      const item = shell?.querySelector(`#more-menu [data-action='${name}']`) as HTMLElement | null;
+      if (item) item.hidden = !on;
+    };
+    menuShow("m-edit-draft", data.place.inDrafts);
+    shell.querySelectorAll<HTMLElement>("#more-menu [data-narrow='spam']").forEach((item) => { item.hidden = !(data.place.spam && !data.place.inSpam); });
+    shell.querySelectorAll<HTMLElement>("#more-menu [data-narrow='notspam']").forEach((item) => { item.hidden = !data.place.inSpam; });
+    menuShow("m-unsubscribe", data.unsubscribe);
+    menuShow("m-mode", data.canToggleMode);
+    menuShow("m-delete-forever", !data.place.inTrash);
+    const mode = shell.querySelector("#more-menu [data-action='m-mode']") as HTMLElement | null;
+    if (mode) mode.innerHTML = `${icon("source")}<span>${data.mode === "html" ? "Nur Text anzeigen" : "HTML anzeigen"}</span>`;
+    const swap = shell.querySelector("#more-menu [data-action='m-swap']") as HTMLElement | null;
+    if (swap) swap.innerHTML = `${icon("eye")}<span>${data.swap ? "Originalfarben" : "Farben umkehren"}</span>`;
+  }
+
   function setSidebar(open: boolean): void {
     if (shell) shell.dataset.sidebar = open ? "open" : "closed";
   }
 
   function closeMenu(): void {
-    const menu = shell?.querySelector("#account-menu") as HTMLElement | undefined;
-    const button = shell?.querySelector("[data-action='account']") as HTMLButtonElement | undefined;
-    if (!menu || !button) return;
-    menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
+    shell?.querySelectorAll<HTMLElement>("#account-menu, #more-menu, #addr-menu").forEach((menu) => { menu.hidden = true; });
+    shell?.querySelectorAll<HTMLElement>("[data-action='account'], [data-action='m-more']").forEach((button) => {
+      button.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function anyMenuOpen(): boolean {
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden])"));
+  }
+
+  let addrTarget: { email: string; name: string } = { email: "", name: "" };
+
+  function openAddrMenu(target: HTMLElement): void {
+    const menu = shell?.querySelector("#addr-menu") as HTMLElement | null;
+    if (!menu || !shell) return;
+    closeMenu();
+    addrTarget = { email: target.dataset.email || "", name: target.dataset.name || "" };
+    const box = shell.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(rect.left - box.left, box.width - 240))}px`;
+    menu.style.top = `${rect.bottom - box.top + 4}px`;
+    menu.hidden = false;
+    (menu.querySelector("button") as HTMLButtonElement | null)?.focus({ preventScroll: true });
   }
 
   function openLayer(layer: HTMLElement, from: HTMLElement | null): void {
@@ -396,6 +563,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     opener = null;
   }
 
+  function toggleFullscreen(force?: boolean): void {
+    if (!shell) return;
+    const on = force ?? shell.dataset.full !== "true";
+    shell.dataset.full = on ? "true" : "false";
+    const button = shell.querySelector("[data-action='m-fullscreen']") as HTMLElement | null;
+    if (button) button.innerHTML = `${icon(on ? "fullscreen-exit" : "fullscreen")}<span>${on ? "Vollbild beenden" : "Vollbild"}</span>`;
+    if (on && !wide()) pane("reader");
+  }
+
   function wireShell(): void {
     if (!shell) return;
     const menu = shell.querySelector("#account-menu") as HTMLElement;
@@ -412,14 +588,21 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
     shell.addEventListener("click", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action], [data-folder], [data-uid]");
-      if (!menu.hidden && !target?.closest(".account")) closeMenu();
+      if (anyMenuOpen() && !target?.closest(".account, .bar-more, #addr-menu")) closeMenu();
       if (!target) return;
       const action = target.dataset.action;
+      if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
       if (target.dataset.folder) {
         actions.selectFolder(target.dataset.folder);
         if (!wide()) pane("list");
         if (!docked()) setSidebar(false);
       } else if (target.dataset.uid) {
+        const mouse = event as MouseEvent;
+        if (mouse.shiftKey || mouse.ctrlKey || mouse.metaKey) {
+          event.preventDefault();
+          actions.act("select", { uid: target.dataset.uid, mode: mouse.shiftKey ? "range" : "toggle" });
+          return;
+        }
         actions.selectMessage(Number(target.dataset.uid));
         if (!wide()) pane("reader");
       } else if (action === "toggle-sidebar") {
@@ -428,8 +611,43 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       } else if (action === "close-sidebar") setSidebar(false);
       else if (action === "account") {
         const open = menu.hidden;
+        closeMenu();
         menu.hidden = !open;
         accountBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) actions.act("accounts", {});
+      } else if (action === "m-more") {
+        const more = shell?.querySelector("#more-menu") as HTMLElement;
+        const open = more.hidden;
+        closeMenu();
+        more.hidden = !open;
+        target.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) (more.querySelector(".menu-item:not([hidden])") as HTMLElement | null)?.focus({ preventScroll: true });
+      } else if (action === "m-address") {
+        openAddrMenu(target);
+      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search") {
+        closeMenu();
+        actions.act(action.slice(2), addrTarget);
+      } else if (action === "m-check") {
+        event.stopPropagation();
+        const mouse = event as MouseEvent;
+        actions.act("select", { uid: target.dataset.ref || "", mode: mouse.shiftKey ? "range" : "toggle" });
+      } else if (action === "m-details") {
+        expanded = !expanded;
+        const body = shell?.querySelector("#reader-body") as HTMLElement | null;
+        if (body && lastReader) {
+          const top = body.scrollTop;
+          renderReader(body, lastReader, expanded);
+          body.scrollTop = top;
+          (body.querySelector("[data-action='m-details']") as HTMLElement | null)?.focus({ preventScroll: true });
+        }
+      } else if (action === "m-fullscreen") {
+        closeMenu();
+        toggleFullscreen();
+      } else if (action?.startsWith("m-")) {
+        if (target.closest(".menu")) closeMenu();
+        const data: Record<string, string> = {};
+        Object.entries(target.dataset).forEach(([key, value]) => { if (value != null) data[key] = value; });
+        actions.act(action.slice(2), data);
       } else if (action === "settings") {
         closeMenu();
         section = "look";
@@ -461,6 +679,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           if (action === "settings-delete") {
             const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
             if (!dialog) return;
+            (dialog.querySelector("#confirm-title") as HTMLElement).textContent = "Wirklich löschen?";
+            (dialog.querySelector("#confirm-text") as HTMLElement).hidden = true;
+            const ok_ = dialog.querySelector("#confirm-ok") as HTMLElement;
+            ok_.className = "danger";
+            ok_.innerHTML = withIcon("delete", t("GLOBAL.DELETE", "Löschen"));
+            dialog.returnValue = "";
             dialog.showModal();
             const ok = await new Promise<boolean>((resolve) => {
               dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
@@ -549,13 +773,17 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
     });
 
-    shell.addEventListener("keydown", (event) => {
-      const typing = event.target instanceof HTMLInputElement
+    if (keyHandler) document.removeEventListener("keydown", keyHandler);
+    keyHandler = (event: KeyboardEvent) => {
+      if (!shell?.isConnected) return;
+      const typing = (event.target instanceof HTMLInputElement && !["checkbox", "radio", "button"].includes(event.target.type))
         || event.target instanceof HTMLTextAreaElement
+        || event.target instanceof HTMLSelectElement
         || (event.target instanceof HTMLElement && event.target.isContentEditable);
       if (event.key === "Escape") {
         if (shell?.querySelector("dialog[open]")) return;
-        if (!menu.hidden) { closeMenu(); return; }
+        if (anyMenuOpen()) { closeMenu(); return; }
+        if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
         if (!composer.hidden) {
           closeLayer(composer);
           if (!wide()) pane("list");
@@ -565,7 +793,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
         return;
       }
-      if (typing) return;
+      if (typing || shell.querySelector("dialog[open]")) return;
       const focusedControl = event.target instanceof HTMLButtonElement
         && !event.target.dataset.uid
         && !event.target.dataset.folder;
@@ -582,14 +810,61 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         event.preventDefault();
         if (!wide()) pane("reader");
         openLayer(shell.querySelector(".sheet") as HTMLElement, null);
-      } else if (key === "c") actions.compose();
-      else if (key === "r") actions.reply(false);
+      } else if (key === "a" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        actions.act("select-all", {});
+      } else if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      } else if (key === "r" && event.shiftKey) actions.act("refresh", {});
+      else if (event.key === "Delete" && event.shiftKey) actions.act("delete-forever", {});
+      else if (event.key === "Delete" || event.key === "#") actions.askDelete();
+      else if (event.key === "*") actions.act("select-all", {});
+      else if (key === "c") { event.preventDefault(); actions.compose(); }
+      else if (key === "r") { event.preventDefault(); actions.reply(false); }
+      else if (key === "a") { event.preventDefault(); actions.reply(true); }
+      else if (key === "f") { event.preventDefault(); actions.forward(); }
       else if (key === "e") actions.archive();
-      else if (event.key === "#") actions.askDelete();
+      else if (key === "i") actions.act("flag", {});
+      else if (key === "u") actions.unread();
+      else if (key === "m") { event.preventDefault(); actions.act("move", {}); }
       else if (key === "j" || key === "k" || event.key === "Enter") {
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
       }
+    };
+    document.addEventListener("keydown", keyHandler);
+
+    // Ziehen und Ablegen: Zeilen auf Ordner. Mit Strg/Alt wird kopiert. Tastaturweg bleibt „Verschieben“ (M).
+    shell.addEventListener("dragstart", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-uid]");
+      if (!row || !event.dataTransfer) return;
+      event.dataTransfer.setData("application/x-sm-uid", row.dataset.uid || "");
+      event.dataTransfer.effectAllowed = "copyMove";
+      shell?.classList.add("dragging");
+    });
+    shell.addEventListener("dragend", () => {
+      shell?.classList.remove("dragging");
+      shell?.querySelectorAll(".folder.drop").forEach((node) => node.classList.remove("drop"));
+    });
+    shell.addEventListener("dragover", (event) => {
+      const folder = (event.target as HTMLElement).closest<HTMLElement>(".folder[data-folder]");
+      if (!folder || !event.dataTransfer?.types.includes("application/x-sm-uid")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = event.ctrlKey || event.altKey ? "copy" : "move";
+      shell?.querySelectorAll(".folder.drop").forEach((node) => { if (node !== folder) node.classList.remove("drop"); });
+      folder.classList.add("drop");
+    });
+    shell.addEventListener("dragleave", (event) => {
+      const folder = (event.target as HTMLElement).closest<HTMLElement>(".folder[data-folder]");
+      if (folder && !folder.contains(event.relatedTarget as Node | null)) folder.classList.remove("drop");
+    });
+    shell.addEventListener("drop", (event) => {
+      const folder = (event.target as HTMLElement).closest<HTMLElement>(".folder[data-folder]");
+      const uid = event.dataTransfer?.getData("application/x-sm-uid");
+      if (!folder || !uid) return;
+      event.preventDefault();
+      folder.classList.remove("drop");
+      actions.act("drop", { uid, folder: folder.dataset.folder || "", copy: event.ctrlKey || event.altKey ? "1" : "" });
     });
 
     separator.addEventListener("pointerdown", (event) => {
@@ -684,7 +959,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       ask.className = "text-btn";
       ask.dataset.action = "open-sheet";
       ask.innerHTML = withIcon("assist", t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
-      ask.classList.add("bar-btn");
+      ask.classList.add("bar-btn", "primary");
       ask.title = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
       shell.querySelector(".reader-bar")?.append(ask);
       const sheet = document.createElement("aside");
@@ -803,13 +1078,20 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const moreBtn = shell?.querySelector("[data-action='more']") as HTMLButtonElement | null;
       const clearBtn = shell?.querySelector("[data-action='clear-search']") as HTMLButtonElement | null;
       if (box) {
-        box.innerHTML = rows.map((row) => `
-          <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" aria-current="${row.current ? "true" : "false"}">
-            <span class="who">${esc(row.who)}</span>
-            <span class="when">${rowMarks(row)}${esc(row.when)}</span>
-            <span class="subj">${esc(row.subject || "(ohne Betreff)")}${categoryMark(row.category)}</span>
-            <span class="peek">${esc(row.preview)}</span>
-          </button>`).join("");
+        box.innerHTML = rows.map((row) => {
+          const subject = row.subject || "(ohne Betreff)";
+          return `
+          <div class="msg-row${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="Auswählen: ${esc(subject)}">
+            <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" draggable="true" aria-current="${row.current ? "true" : "false"}">
+              <span class="who">${esc(row.who)}</span>
+              <span class="when">${rowMarks({ ...row, flagged: false })}${esc(row.when)}</span>
+              <span class="subj">${esc(subject)}${categoryMark(row.category)}</span>
+              <span class="peek">${esc(row.preview)}</span>
+            </button>
+            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? "Markierung entfernen" : "Markieren"}: ${esc(subject)}" title="${row.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+          </div>`;
+        }).join("");
       }
       if (emptyEl) {
         emptyEl.hidden = !empty;
@@ -823,71 +1105,153 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (clearBtn) clearBtn.hidden = !searching;
     },
     setReader(data, loading, error) {
-      const body = shell?.querySelector("#reader-body");
-      const buttons = ["reply", "reply-all", "forward", "archive", "unread", "delete"];
-      buttons.forEach((name) => {
-        const button = shell?.querySelector(`[data-action='${name}']`) as HTMLButtonElement | null;
-        if (button) button.hidden = !data;
-      });
+      const body = shell?.querySelector("#reader-body") as HTMLElement | null;
+      paintBar(data);
       if (!body) return;
       body.replaceChildren();
-      if (loading) {
+      const say = (className: string, text: string) => {
         const p = document.createElement("p");
-        p.className = "quiet";
-        p.textContent = loading;
+        p.className = className;
+        p.textContent = text;
         body.append(p);
-        return;
+      };
+      if (loading) return say("quiet", loading);
+      if (error) return say("error", error);
+      if (!data) return say("empty", "Wählen Sie eine Mail.");
+      renderReader(body, data, expanded);
+      body.scrollTop = 0;
+    },
+    setBulk(data) {
+      const body = shell?.querySelector("#reader-body") as HTMLElement | null;
+      paintBar(null);
+      if (body) renderBulk(body, data);
+      if (!wide()) pane("reader");
+    },
+    setChecks(visible) {
+      shell?.classList.toggle("with-checks", visible);
+    },
+    setRefreshing(busy) {
+      const button = shell?.querySelector("[data-action='m-refresh']") as HTMLButtonElement | null;
+      if (!button) return;
+      button.disabled = busy;
+      button.innerHTML = icon(busy ? "loading" : "refresh");
+    },
+    setAccounts(items) {
+      const box = shell?.querySelector("#account-list") as HTMLElement | null;
+      if (!box) return;
+      const others = items.filter((item) => !item.current);
+      box.innerHTML = others.length
+        ? `<p class="menu-label mono">Konten</p>` + others.map((item) =>
+          `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc(item.email)}">${icon("user")}<span class="grow">${esc(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
+        ).join("") + `<hr class="menu-sep">`
+        : "";
+    },
+    pickFolder(title, folders, exclude) {
+      const dialog = shell?.querySelector("#picker") as HTMLDialogElement | null;
+      if (!dialog) return Promise.resolve(null);
+      const list = dialog.querySelector("#picker-list") as HTMLElement;
+      const query = dialog.querySelector("#picker-q") as HTMLInputElement;
+      (dialog.querySelector("#picker-title") as HTMLElement).textContent = title;
+      const paint = () => {
+        const q = query.value.trim().toLowerCase();
+        const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
+        list.innerHTML = rows.map((folder) =>
+          `<button type="button" class="folder" role="option" data-pick="${esc(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc(q ? folder.fullName : folder.name)}</span></button>`
+        ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
+      };
+      query.value = "";
+      paint();
+      dialog.returnValue = "";
+      dialog.showModal();
+      query.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onInput = () => paint();
+        const onClick = (event: Event) => {
+          const button = (event.target as HTMLElement).closest<HTMLElement>("[data-pick]");
+          if (button) dialog.close(button.dataset.pick || "");
+        };
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === "Enter" && event.target === query) {
+            event.preventDefault();
+            const first = list.querySelector<HTMLElement>("[data-pick]");
+            if (first) dialog.close(first.dataset.pick || "");
+          }
+          if (event.key === "ArrowDown" && event.target === query) {
+            event.preventDefault();
+            list.querySelector<HTMLElement>("[data-pick]")?.focus();
+          }
+        };
+        query.addEventListener("input", onInput);
+        list.addEventListener("click", onClick);
+        dialog.addEventListener("keydown", onKey);
+        dialog.addEventListener("close", () => {
+          query.removeEventListener("input", onInput);
+          list.removeEventListener("click", onClick);
+          dialog.removeEventListener("keydown", onKey);
+          resolve(dialog.returnValue || null);
+        }, { once: true });
+      });
+    },
+    ask(title, label, value = "") {
+      const dialog = shell?.querySelector("#prompt-dlg") as HTMLDialogElement | null;
+      if (!dialog) return Promise.resolve(null);
+      const input = dialog.querySelector("#prompt-input") as HTMLInputElement;
+      const form = dialog.querySelector("form") as HTMLFormElement;
+      (dialog.querySelector("#prompt-title") as HTMLElement).textContent = title;
+      (dialog.querySelector("#prompt-label") as HTMLElement).textContent = label;
+      input.value = value;
+      dialog.returnValue = "";
+      dialog.showModal();
+      input.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onSubmit = (event: Event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dialog.close("ok");
+        };
+        form.addEventListener("submit", onSubmit);
+        dialog.addEventListener("close", () => {
+          form.removeEventListener("submit", onSubmit);
+          resolve(dialog.returnValue === "ok" ? input.value.trim() : null);
+        }, { once: true });
+      });
+    },
+    confirm(title, text, ok, danger = true) {
+      const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
+      if (!dialog) return Promise.resolve(false);
+      (dialog.querySelector("#confirm-title") as HTMLElement).textContent = title;
+      const p = dialog.querySelector("#confirm-text") as HTMLElement;
+      p.hidden = !text;
+      p.textContent = text;
+      const button = dialog.querySelector("#confirm-ok") as HTMLButtonElement;
+      button.className = danger ? "danger" : "ink-btn";
+      button.innerHTML = withIcon(danger ? "delete" : "check", ok);
+      dialog.returnValue = "";
+      dialog.showModal();
+      return new Promise((resolve) => {
+        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+      });
+    },
+    preview(name, url, kind) {
+      const dialog = shell?.querySelector("#lightbox") as HTMLDialogElement | null;
+      if (!dialog) return;
+      (dialog.querySelector("#lightbox-title") as HTMLElement).textContent = name;
+      (dialog.querySelector("#lightbox-open") as HTMLAnchorElement).href = url;
+      const box = dialog.querySelector("#lightbox-body") as HTMLElement;
+      box.replaceChildren();
+      if (kind === "image") {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = name;
+        box.append(img);
+      } else {
+        const frame = document.createElement("iframe");
+        frame.src = url;
+        frame.title = name;
+        if (kind === "text") frame.setAttribute("sandbox", "");
+        box.append(frame);
       }
-      if (error) {
-        const p = document.createElement("p");
-        p.className = "error";
-        p.textContent = error;
-        body.append(p);
-        return;
-      }
-      if (!data) {
-        const p = document.createElement("p");
-        p.className = "empty";
-        p.textContent = "Wählen Sie eine Mail.";
-        body.append(p);
-        return;
-      }
-      const head = document.createElement("header");
-      head.className = "letter-head";
-      const title = document.createElement("h2");
-      title.className = "title title-md";
-      title.textContent = data.subject || "(ohne Betreff)";
-      const meta = document.createElement("p");
-      meta.className = "quiet";
-      meta.textContent = `${data.from} · ${data.when}`;
-      const to = document.createElement("p");
-      to.className = "quiet";
-      to.textContent = data.to ? `An ${data.to}` : "";
-      head.append(title, meta, to);
-      body.append(head);
-      if (data.attachments.length) {
-        const list = document.createElement("ul");
-        list.className = "files";
-        data.attachments.forEach((file) => {
-          const item = document.createElement("li");
-          const link = document.createElement("a");
-          link.href = file.href;
-          link.textContent = file.size ? `${file.name} (${file.size})` : file.name;
-          item.append(link);
-          list.append(item);
-        });
-        body.append(list);
-      }
-      const frame = document.createElement("iframe");
-      frame.className = "letter";
-      frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
-      frame.referrerPolicy = "no-referrer";
-      frame.title = "Brief";
-      const scheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-      frame.srcdoc = data.html
-        ? (/<html[\s>]/i.test(data.html) ? data.html : `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${data.html}</body></html>`)
-        : `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"><style>body{margin:0;background:Canvas;color:CanvasText;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 sans-serif}</style>${esc(data.plain || "")}`;
-      body.append(frame);
+      dialog.showModal();
     },
     openCompose(seed) {
       if (!shell) return;
@@ -898,6 +1262,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       (form.elements.namedItem("cc") as HTMLInputElement).value = seed.cc;
       (form.elements.namedItem("subject") as HTMLInputElement).value = seed.subject;
       (form.elements.namedItem("body") as HTMLTextAreaElement).value = seed.body;
+      this.setComposeFiles(seed.files || []);
       shell.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
         button.setAttribute("aria-pressed", button.dataset.mode === (seed.mode || "new") ? "true" : "false");
       });
@@ -909,6 +1274,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     closeCompose() {
       const composer = shell?.querySelector(".composer") as HTMLElement | null;
       if (composer && !composer.hidden) closeLayer(composer);
+    },
+    setComposeFiles(files) {
+      const box = shell?.querySelector("#compose-files") as HTMLElement | null;
+      if (!box) return;
+      box.hidden = !files.length;
+      box.innerHTML = files.map((file, index) =>
+        `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc(file.name)}">${esc(file.name)}</span><span class="quiet">${esc(file.state === "error" ? "Fehler" : file.size)}</span><button type="button" class="icon-btn" data-action="m-compose-drop" data-index="${index}" aria-label="${esc(file.name)} entfernen" title="Entfernen">${icon("close")}</button></li>`
+      ).join("");
     },
     setSendState(busy, error) {
       const button = shell?.querySelector(".composer-form button[type='submit']") as HTMLButtonElement | null;
@@ -927,12 +1300,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (slot) slot.textContent = text;
     },
     confirmDelete() {
-      const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
-      if (!dialog) return Promise.resolve(false);
-      dialog.showModal();
-      return new Promise((resolve) => {
-        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
-      });
+      return this.confirm("Wirklich löschen?", "", t("GLOBAL.DELETE", "Löschen"));
     },
     confirmConsent(text) {
       const dialog = shell?.querySelector("#consent") as HTMLDialogElement | null;

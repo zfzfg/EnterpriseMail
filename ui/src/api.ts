@@ -147,18 +147,74 @@ export async function streamEvents(
   }
 }
 
-export function downloadUrl(file: {
+/** Base64url eines JSON-Objekts, wie SnappyMail es für Raw-Schlüssel erwartet. */
+export function b64Json(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export type RawType = "Download" | "View" | "ViewAsPlain" | "ViewThumbnail";
+
+export function rawUrl(type: RawType, hash: string): string {
+  return `${root()}?/Raw/&q[]=/0/${type}/&q[]=/${hash}`;
+}
+
+export interface FileKey {
   folder: string;
   uid: number;
   mimeIndex: string;
   mimeType: string;
   fileName: string;
   accountHash: string;
-}): string {
-  const json = JSON.stringify(file);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  const hash = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `${root()}?/Raw/&q[]=/0/Download/&q[]=/${hash}`;
+}
+
+export function fileHash(file: FileKey): string {
+  return b64Json(file);
+}
+
+export function downloadUrl(file: FileKey): string {
+  return rawUrl("Download", fileHash(file));
+}
+
+/** Schlüssel der ganzen Mail (für Quelltext, .eml, Weiterleiten als Anhang). */
+export function messageHash(folder: string, uid: number, subject: string, hash: string, accountHash: string): string {
+  return b64Json({
+    folder,
+    uid,
+    mimeType: "message/rfc822",
+    fileName: `${(subject || "message").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80)}-${hash}.eml`,
+    accountHash
+  });
+}
+
+/** Externe Adresse über den Bild-Proxy des Servers. */
+export function proxyUrl(url: string): string {
+  const encoded = btoa(url.replace(/ /g, "%20")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${root()}?/ProxyExternal/${encoded}`;
+}
+
+/** Lädt eine Adresse dieser Seite und gibt sie als data:-URL zurück (für den sandboxed Brief). */
+export async function fetchDataUrl(url: string, limit = 8 * 1024 * 1024): Promise<string> {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+  const blob = await response.blob();
+  if (blob.size > limit) throw new ApiError(1, "Datei zu groß.");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new ApiError(1, "Datei nicht lesbar."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function fetchText(url: string): Promise<string> {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+  return response.text();
+}
+
+export function appRoot(): string {
+  return root();
 }

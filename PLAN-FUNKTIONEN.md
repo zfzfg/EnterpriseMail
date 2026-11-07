@@ -78,7 +78,7 @@ Damit nichts doppelt gebaut wird:
 > - Eingebaut: Reader-Leiste (Symbol + Text ab 1280 px, darunter nur Symbol, Text bleibt als zugänglicher Name, Klasse `bar-btn`), Ordner-Rollen in der Seitenleiste, Merker in der Liste (Anhang, beantwortet, weitergeleitet, markiert; `MessageRow` hat dafür neue Felder), Konto-Menü, Tab-Leiste, Senden-Knopf (mit `loading` beim Senden), Einstellungsnavigation und -knöpfe, Bestätigungsdialog, Assistenten-Knöpfe, Admin-Knöpfe.
 > - CSS in `shell.css`: `.icon` (20 px), `.icon-lg` (40 px), `.btn-label`, `.bar-btn`, `.marks`, Ladeanimation mit `prefers-reduced-motion`.
 > - Geprüft: `tsc`, Build, Token-Prüfung (0 Fehler), Browser-Fotos in 1400 px hell/dunkel, 1000 px, 375 px und im Einstellungsdialog; kein sichtbarer Knopf ohne zugänglichen Namen. **Ungetestet:** die Listen-Merker, weil die Testmails keine Flags und Anhänge haben.
-> - Beobachtet, nicht Teil von Phase 0: Wechselt das Farbschema, während ein HTML-Brief offen ist, bleibt der iframe im alten Schema (im hellen Modus schwarzer Brief). Gehört zu Phase 1, 3.8.
+> - Beobachtet, nicht Teil von Phase 0: Wechselt das Farbschema, während ein HTML-Brief offen ist, bleibt der iframe im alten Schema (im hellen Modus schwarzer Brief). In Phase 1 behoben.
 
 Alle folgenden Phasen brauchen Symbole. Deshalb zuerst ein vollständiger Satz.
 
@@ -126,7 +126,24 @@ Eine einheitliche Pixel-Sprache im Stil von `mistral-design` (`references/pixel-
 
 ---
 
-## 3. Phase 1: Liste und Brief vervollständigen
+## 3. Phase 1: Liste und Brief vervollständigen – ERLEDIGT
+
+> **Status: abgeschlossen am 2026-11-07.** Alle Punkte 3.1 bis 3.11 sind umgesetzt. Neue Module: `ui/src/clean.ts` (HTML-Säuberung aus `dev/Common/Html.js` übertragen, Tracking-Filter, externe Bilder nur nach Freigabe), `ui/src/letter.ts` (srcdoc mit CSP, Druck-/Fensteransicht, ICS-Auswertung, List-Unsubscribe), `ui/src/reader.ts` (Briefkopf, Hinweisleisten, Anhänge, Sammelansicht). `api.ts` hat `rawUrl`, `fileHash`, `messageHash`, `proxyUrl`, `fetchDataUrl`. Die Aktionen laufen über `MailActions.act(name, data)` in `mail.ts`.
+>
+> Wichtige Entscheidungen und Korrekturen:
+> - **Löschen verschiebt jetzt in den Papierkorb.** Vorher rief die neue Oberfläche `MessageDelete` direkt auf und löschte endgültig. Endgültig nur im Papierkorb, ohne Papierkorb oder über „Endgültig löschen“ (Umschalt+Entf), jeweils mit Bestätigung.
+> - **Absender wurden in der Liste als „(unbekannt)“ gezeigt**, weil `from` vom Server ein Array ist. Behoben.
+> - Der Brief bleibt im iframe ohne `allow-same-origin`. Inline-Bilder (`cid:`) und über den Server-Proxy geladene externe Bilder werden deshalb im Hauptfenster geholt und als `data:`-URL eingesetzt. Ohne Proxy (`proxyExternalImages` aus) erlaubt die CSP nach Freigabe `https:`/`http:`.
+> - HTML-Mails stehen auf hellem Papier (wie vom Absender gestaltet), Text-Mails folgen dem Erscheinungsbild. „Farben umkehren“ im Menü. Der Farbschema-Fehler aus Phase 0 ist behoben (Brief wird bei `sm-appearance` neu gebaut).
+> - System-Ordner: Kontoeinstellung, sonst Server-Rolle, sonst üblicher Name (z. B. `Archive` ohne Rolle).
+> - Aus Phase 2 vorgezogen: Weiterleiten übernimmt die Original-Anhänge, „Als Anhang weiterleiten“, „Als neu bearbeiten“ und „Entwurf bearbeiten“ (der Entwurf wird nach dem Senden über `messageFolder`/`messageUid` entfernt). Der Editor zeigt dafür eine Anhangsliste (`setComposeFiles`). Eigene Dateien hochladen bleibt Phase 2.
+> - Tastenkürzel hängen jetzt am Dokument, nicht an der Hülle; vorher gingen sie verloren, sobald die Liste neu gezeichnet wurde. Neu: A, F, I, U, M, Entf, Umschalt+Entf, Strg+A, `*`, Umschalt+R.
+> - Schmale Brief-Spalte (unter 560 px, Container-Query): seltene Aktionen wandern ins Menü „Weitere“. Text an Knöpfen nur bei den Hauptaktionen und ab 1000 px Spaltenbreite.
+> - Testdaten: `python seed.py --feature-mails` in `plugins/ai-copilot/dev` legt HTML-Mail mit externen Bildern, cid-Bild, Tracking, Lesebestätigung, List-Unsubscribe, Anhänge mit ICS, Spam-Mail und Entwurf an.
+>
+> Im Browser geprüft (Docker-Vorschau, headless Chrome, hell/dunkel, 375/900/1000/1400 px): externe Bilder blockiert, Freigabe, „Immer für diesen Absender“ (speichert `ViewImagesWhitelist` und `ViewImages=match`), Tracking-Leiste, Nur-Text-Umschaltung, Details im Kopf, Adressmenü mit Suche, Schlagwort hinzufügen/entfernen, Lesebestätigung senden, Abmelden per mailto, Anhangsliste mit Vorschaubild, Lightbox, ZIP, Termin-Karte, Spam-Hinweis, Mehrfachauswahl (Kästchen, Strg/Umschalt-Klick, Strg+A), Sammelansicht, Markieren in Zeile und per I, Verschieben-Dialog mit Suche, Ziehen auf Ordner, Löschen in den Papierkorb, endgültig mit Bestätigung, Spam/Kein Spam, Archivieren, Vor/Zurück, verzögertes Gelesen (5 s), Aktualisieren mit neuer Mail, Quelltext-URL, Weiterleiten mit Anhängen und Senden, Entwurf öffnen, Vollbild mit Esc.
+>
+> **Ungetestet:** Desktop-Benachrichtigung und Ton (headless ohne Erlaubnis und Lautsprecher; Erlaubnis wird erst in Phase 4 angefragt), Druckfenster und „In neuem Fenster“ (headless blockiert Pop-ups ohne echten Klick), externe Bilder über den Proxy mit echtem Internet (die Vorschau hat keins, es erscheint „nicht erreichbar“), Wiederherstellen von `\Deleted` (nur sichtbar, wenn `HideDeleted` aus ist; der Schalter kommt in Phase 4), Ungelesen-Zahlen weiterer Konten (in der Vorschau ist kein zweites Konto verknüpft), One-Click-Abmeldung per POST (bewusst nicht gebaut, es öffnet sich die Abmeldeseite nach Bestätigung).
 
 ### 3.1 Mehrfachauswahl und Sammelaktionen
 Alt: `dev/View/User/MailBox/MessageList.js`, `Views/User/MailMessageList.html`.
@@ -414,8 +431,8 @@ Vorgehen:
 
 | Phase | Inhalt | Priorität |
 |---|---|---|
-| 0 | Symbolsystem | Muss zuerst |
-| 1 | Liste und Brief (3.1–3.11) | Hoch. 3.8 (externe Bilder) zuerst, da Datenschutz |
+| 0 | Symbolsystem | Erledigt |
+| 1 | Liste und Brief (3.1–3.11) | Erledigt |
 | 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Hoch |
 | 3 | Ordner, Suche, Sortierung, Threads | Hoch |
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Mittel bis hoch |

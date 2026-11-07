@@ -221,6 +221,7 @@ function applyAppearance(mode) {
   root3.dataset.appearance = mode;
   root3.classList.toggle("dark", dark);
   root3.style.colorScheme = dark ? "dark" : "light";
+  window.dispatchEvent(new CustomEvent("sm-appearance", { detail: { dark } }));
   try {
     localStorage.setItem(KEY, mode);
   } catch {
