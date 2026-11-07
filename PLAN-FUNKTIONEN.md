@@ -1,6 +1,6 @@
 # Plan: Alte Funktionen in die neue Oberfläche holen
 
-Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–3 erledigt, siehe Abschnitte 4a und 5; Phase 4 siehe Abschnitt 6).
+Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–5 erledigt, siehe Abschnitte 4a, 5, 6 und 7).
 Bezugspunkt: Seit `90127a2d6` (Neue Mail-Hülle) läuft die Oberfläche als eigener TypeScript-Client unter `ui/`. Das alte Knockout-Frontend wurde in `388c3815d` entfernt. Den letzten vollständigen Stand des alten Frontends enthält **`387e27b19`**.
 
 Dieser Plan ist für eine KI geschrieben, die ihn umsetzt. Arbeite die Phasen der Reihe nach ab. Jede Phase endet mit einem Commit und einer Prüfung im Browser.
@@ -364,7 +364,13 @@ Alt: `git show 653859c9c:plugins/ai-copilot/templates/AiCopilotSettingsTab.html`
 
 ---
 
-## 7. Phase 5: Kontakte
+## 7. Phase 5: Kontakte – ERLEDIGT
+
+> **Status: abgeschlossen am 2026-11-07.** Das Adressbuch ist eine eigene Ansicht (`ui/src/contacts.ts`, jCard in `ui/src/jcard.ts`): Eintrag unter den Ordnern und im Konto-Menü, Liste links, Karte rechts, mobil eine Spalte. Mehrere E-Mails, Telefon, URL, Adresse, Spitzname, Notiz, Organisation, Geburtstag und Krypto-Vorgaben kommen über „Hinzufügen“. Mehrfachauswahl, Löschen über `#confirm`, Mail an die Auswahl, Import und Export. Die Einstellungen zeigen nur noch CardDAV, und nur wenn die AppData `ContactsSync` enthalten.
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`, Token-Prüfung Schicht `app` ohne Fehler. In der Docker-Vorschau (Headless Chrome, `test@example.com`) angelegt, mit Telefon und Signaturvorgabe gespeichert, gesucht, importiert (eine vCard), als Mail geöffnet und nach Bestätigung gelöscht. Hell, Dunkel, 375 px, 800 px und 1280 px. Die Seitenleiste bleibt neben dem Buch, die Trefferflächen sind 28 px bzw. 44 px.
+>
+> Die Vorschau hatte `contacts.enable = Off`. Für die Prüfung steht es im Container auf `On` (`application.ini`, nicht im Git). **Nicht geprüft:** Blättern (zu wenige Kontakte), schreibgeschützte Karten, der Dialog bei ungespeicherten Änderungen, CardDAV. `allow_sync` ist aus, deshalb fehlt `ContactsSync` und die Sync-Oberfläche bleibt zu.
 
 Alt: `dev/View/Popup/Contacts.js`, `Views/User/PopupsContacts.html`, `dev/Model/Contact.js`, `dev/DAV/*`, `Settings/User/Contacts.js`.
 Neues Modul `ui/src/contacts.ts`. Kontakte bekommen eine eigene Ansicht (Eintrag in der Seitenleiste unter den Ordnern und im Konto-Menü), statt nur im Einstellungsdialog. Zwei Spalten: Liste links, Karte rechts. Mobil wie das Postfach.
@@ -472,7 +478,7 @@ Vorgehen:
 | 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Erledigt |
 | 3 | Ordner, Suche, Sortierung, Threads | Erledigt |
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Erledigt |
-| 5 | Kontakte | Mittel |
+| 5 | Kontakte | Erledigt |
 | 6 | Sieve-Formular, Abwesenheitsnotiz | Mittel (Abwesenheit hoch) |
 | 7 | Verschlüsselung | Niedrig bis mittel |
 | 8 | Admin | Mittel |

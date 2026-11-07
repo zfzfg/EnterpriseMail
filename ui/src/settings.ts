@@ -3,6 +3,8 @@ import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { readAppearance, type Appearance } from "./theme";
 
+export { writeProp } from "./jcard";
+
 export interface Caps {
   accounts: boolean;
   identities: boolean;
@@ -45,14 +47,6 @@ export interface IdentityRow {
   smimeCertificateChain: string;
 }
 
-export interface ContactRow {
-  id: string;
-  name: string;
-  email: string;
-  readOnly: boolean;
-  jCard: unknown;
-}
-
 export interface ScriptRow {
   name: string;
   active: boolean;
@@ -77,9 +71,6 @@ export interface SettingsSnapshot {
   currentEmail: string;
   accounts: AccountRow[];
   identities: IdentityRow[];
-  contacts: ContactRow[] | null;
-  contactCount: number;
-  contactSearch: string;
   scripts: ScriptRow[] | null;
   keys: KeyRow[];
   certs: CertRow[];
@@ -117,32 +108,6 @@ function values(value: unknown): unknown[] {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function propText(card: unknown, names: string[]): string {
-  if (!Array.isArray(card) || !Array.isArray(card[1])) return "";
-  const wanted = new Set(names);
-  for (const row of card[1] as unknown[]) {
-    if (!Array.isArray(row) || !wanted.has(String(row[0]).toLowerCase())) continue;
-    const value = row[3];
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) {
-      return value.map((part) => (typeof part === "string" ? part : "")).filter(Boolean).join(" ");
-    }
-  }
-  return "";
-}
-
-export function writeProp(card: unknown, name: string, value: string): unknown[] {
-  const rows = Array.isArray(card) && card[0] === "vcard" && Array.isArray(card[1])
-    ? (card[1] as unknown[][]).map((row) => (Array.isArray(row) ? row.slice() : row))
-    : [["version", {}, "text", "4.0"]];
-  const index = rows.findIndex((row) => Array.isArray(row) && String(row[0]).toLowerCase() === name);
-  const next = [name, {}, "text", value];
-  if (index >= 0) rows[index] = next;
-  else rows.push(next);
-  const extra = Array.isArray(card) && Array.isArray(card[2]) ? [card[2]] : [];
-  return ["vcard", rows, ...extra];
 }
 
 function identityOf(item: Record<string, unknown>): IdentityRow {
@@ -183,7 +148,7 @@ async function tryCall<T>(action: string, params: Record<string, unknown> = {}):
   }
 }
 
-export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: string, contactSearch = "", app: Record<string, unknown> = {}): Promise<SettingsSnapshot> {
+export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: string, app: Record<string, unknown> = {}): Promise<SettingsSnapshot> {
   const main = mainEmail || currentEmail;
   const plugins = (app.Plugins || {}) as Record<string, unknown>;
   const snap: SettingsSnapshot = {
@@ -192,9 +157,6 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
     currentEmail,
     accounts: [{ email: main, name: "", current: currentEmail === main, main: true, unread: null }],
     identities: [],
-    contacts: caps.contacts ? [] : null,
-    contactCount: 0,
-    contactSearch,
     scripts: caps.sieve ? [] : null,
     keys: [],
     certs: [],
@@ -218,24 +180,6 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
     snap.identities = values(desk.value.Identities).map((item) => identityOf(item as Record<string, unknown>));
     const named = snap.identities.find((item) => item.email === main && item.name);
     if (named) snap.accounts[0].name = named.name;
-  }
-
-  if (caps.contacts) {
-    const book = await tryCall<{ Count?: number; List?: unknown[] }>("Contacts", { Search: contactSearch, Offset: 0, Limit: 50 });
-    if (book.error) snap.notes.contacts = book.error;
-    else if (book.value) {
-      snap.contactCount = Number(book.value.Count || 0);
-      snap.contacts = values(book.value.List).map((item) => {
-        const row = item as { id?: unknown; readOnly?: boolean; jCard?: unknown };
-        return {
-          id: text(row.id),
-          name: propText(row.jCard, ["fn", "n"]),
-          email: propText(row.jCard, ["email"]),
-          readOnly: Boolean(row.readOnly),
-          jCard: row.jCard
-        };
-      });
-    }
   }
 
   if (caps.sieve) {
@@ -305,7 +249,7 @@ async function pluginSafe(): Promise<{ settings: Record<string, unknown> | null;
   }
 }
 
-export async function applyDesk(name: string, data: Record<string, string>, snap: SettingsSnapshot): Promise<"reload" | "session"> {
+export async function applyDesk(name: string, data: Record<string, string>, snap: SettingsSnapshot): Promise<"reload" | "session" | "keep"> {
   if (name === "save-account") {
     if (!data.email?.trim() || !data.password) throw new ApiError(0, "Adresse und Passwort eintragen.");
     await call("AccountSetup", { email: data.email.trim(), password: data.password, name: data.name || "", new: 1 });
@@ -399,19 +343,21 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     await call("IdentityDelete", { idToDelete: data.id });
     return "reload";
   }
-  if (name === "save-contact") {
-    const nameText = (data.name || "").trim();
-    const email = (data.email || "").trim();
-    if (!nameText && !email) throw new ApiError(0, "Name oder E-Mail eintragen.");
-    const existing = snap.contacts?.find((item) => item.id === data.id);
-    let card = writeProp(existing?.jCard, "fn", nameText || email);
-    card = writeProp(card, "email", email);
-    await call("ContactSave", { uid: data.id || "", jCard: card });
-    return "reload";
-  }
-  if (name === "delete-contact") {
-    await call("ContactsDelete", { uids: data.id });
-    return "reload";
+  if (name === "save-sync") {
+    await call("SaveContactsSyncData", {
+      Mode: Number(data.Mode || 0),
+      Url: data.Url || "",
+      User: data.User || "",
+      Password: data.Password || ""
+    });
+    const previous = snap.app.ContactsSync;
+    const sync = previous && typeof previous === "object" ? { ...(previous as Record<string, unknown>) } : {};
+    sync.Mode = Number(data.Mode || 0);
+    sync.Url = data.Url || "";
+    sync.User = data.User || "";
+    sync.Password = data.Password ? "********" : "";
+    snap.app.ContactsSync = sync;
+    return "keep";
   }
   if (name === "save-script") {
     if (!data.name?.trim()) throw new ApiError(0, "Name eintragen.");
@@ -789,30 +735,29 @@ export function renderDesk(section: string, snap: SettingsSnapshot | null, edit:
   }
 
   if (section === "contacts") {
-    if (!snap.contacts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verfügbar."));
-    const rows = snap.contacts.map((item) => row(
-      item.name || item.email || item.id,
-      item.name ? item.email : "",
-      item.readOnly ? "" : [
-        button("settings-edit", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "contact", id: item.id }),
-        button("settings-delete", t("GLOBAL.DELETE", "Löschen"), { kind: "contact", id: item.id }, true)
-      ].join("")
-    )).join("");
-    const search = form("search-contacts", field(t("GLOBAL.SEARCH", "Suchen"), "search", snap.contactSearch, "search"), t("GLOBAL.SEARCH", "Suchen"), false);
-    const adding = edit?.kind === "contact";
-    const current = edit?.kind === "contact" && !edit.fresh
-      ? snap.contacts.find((item) => item.id === edit.id)
-      : null;
-    const editor = adding ? form("save-contact", `
-      <input type="hidden" name="id" value="${esc(current?.id || "")}">
-      ${field(t("CONTACTS.DISPLAY_NAME", "Anzeigename"), "name", current?.name || "")}
-      ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", current?.email || "", "email", "autocomplete=\"email\"")}
-    `, t("GLOBAL.SAVE", "Speichern"), true) : "";
-    const more = snap.contactCount > snap.contacts.length
-      ? note(`${snap.contacts.length} / ${snap.contactCount}`)
-      : "";
-    const add = adding ? "" : button("settings-edit", t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzufügen"), { kind: "contact", fresh: "1" });
-    return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</p>${note(snap.notes.contacts, true)}${search}<ul class="set-list">${rows}</ul>${rows ? "" : note(snap.contactSearch ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte"))}${more}${add}${editor}`;
+    const sync = snap.app.ContactsSync;
+    if (!sync || typeof sync !== "object") return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verfügbar."));
+    const row = sync as { Mode?: unknown; Url?: unknown; User?: unknown; Password?: unknown };
+    const mode = String(row.Mode ?? 0);
+    const options = [
+      ["0", t("GLOBAL.NO", "Nein")],
+      ["1", t("GLOBAL.YES", "Ja")],
+      ["2", t("SETTINGS_CONTACTS.SYNC_READ", "Nur lesend")]
+    ].map(([id, label]) => `<option value="${id}"${id === mode ? " selected" : ""}>${esc(label)}</option>`).join("");
+    const password = String(row.Password || "");
+    return `${error}<p class="mono">${esc(t("SETTINGS_CONTACTS.LEGEND_CONTACTS_SYNC", "Remote-Synchronisierung (CardDAV)"))}</p>${note(snap.notes.contacts, true)}
+      <form class="fields" data-action="settings-form" data-kind="save-sync">
+        <label class="field"><span>${esc(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_ENABLE", "Remote-Synchronisierung aktivieren"))}</span><select name="Mode">${options}</select></label>
+        ${field(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_AB_URL", "Adressbuch-URL"), "Url", String(row.Url || ""), "url", "autocomplete=\"off\" inputmode=\"url\"")}
+        ${field(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_USER", "Benutzer"), "User", String(row.User || ""), "text", "autocomplete=\"username\"")}
+        ${field(t("GLOBAL.PASSWORD", "Passwort"), "Password", password, "password", "autocomplete=\"new-password\"")}
+        ${password === "********" ? `<p class="quiet">${esc(t("SETTINGS_CONTACTS.PASSWORD_KEEP", "Acht Sterne stehen für das gespeicherte Passwort."))}</p>` : ""}
+      </form>
+      <div class="dialog-actions">
+        <button type="button" class="text-btn" data-action="test-sync">${icon("check")}<span class="btn-label">${esc(t("GLOBAL.TEST", "Testen"))}</span></button>
+        <button type="button" class="text-btn" data-action="sync-now"${mode === "0" ? " hidden" : ""}>${icon("refresh")}<span class="btn-label">${esc(t("CONTACTS.SYNC_NOW", "Jetzt synchronisieren"))}</span></button>
+      </div>
+      <p class="quiet">${esc(t("SETTINGS_CONTACTS.SYNC_HINT", "Änderungen werden beim Verlassen des Feldes gespeichert. Das Adressbuch selbst liegt in der Seitenleiste."))}</p>`;
   }
 
   if (section === "filters") {

@@ -3,6 +3,7 @@ import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferenc
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
+import { mountBook, type Book } from "./contacts";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
 import { renderFolderDesk, renderFolderMenu, renderQuota, renderSidebarRows, type FolderAction, type FolderDesk, type SidebarData } from "./folders";
 import { readSearchForm, renderSearchForm, serializeSearch, type QuickFlag, type SearchCriteria } from "./search";
@@ -221,6 +222,8 @@ export interface MailView {
   showTranslation(search: string, explanation: string): void;
   showSettings(snap: SettingsSnapshot): void;
   settingsNotice(text: string): void;
+  setBook(allowed: boolean, sync: boolean, mode: number): void;
+  reloadBook(): Promise<void>;
 }
 
 export function createView(root: HTMLElement, actions: MailActions): MailView {
@@ -230,6 +233,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   let edit: DeskEdit | null = null;
   let snap: SettingsSnapshot | null = null;
   let composer: Composer | null = null;
+  let book: Book | null = null;
   let composePrefs: ComposePreferences = {
     editor: "Plain", markdown: false, spellcheck: false, autosave: true, draftsFolder: "", sentFolder: "",
     replySameFolder: false, attachmentLimit: 0, readReceipt: false, dsn: false, requireTLS: false, pgpSign: false, pgpEncrypt: false
@@ -238,6 +242,53 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
+
+  function chooseDialog(title: string, text: string, ok: string, alt = "", danger = true): Promise<"ok" | "alt" | "cancel"> {
+    const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
+    if (!dialog) return Promise.resolve("cancel");
+    (dialog.querySelector("#confirm-title") as HTMLElement).textContent = title;
+    const body = dialog.querySelector("#confirm-text") as HTMLElement;
+    body.hidden = !text;
+    body.textContent = text;
+    const accept = dialog.querySelector("#confirm-ok") as HTMLButtonElement;
+    accept.className = danger ? "danger" : "ink-btn";
+    accept.innerHTML = withIcon(danger ? "delete" : "check", ok);
+    const other = dialog.querySelector("#confirm-alt") as HTMLButtonElement;
+    other.hidden = !alt;
+    other.textContent = alt;
+    dialog.returnValue = "";
+    dialog.showModal();
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => {
+        const value = dialog.returnValue;
+        resolve(value === "ok" || value === "alt" ? value : "cancel");
+      }, { once: true });
+    });
+  }
+
+  async function closeBook(): Promise<boolean> {
+    if (shell?.dataset.surface !== "contacts") return true;
+    if (book && !(await book.confirmLeave())) return false;
+    if (!shell) return true;
+    shell.dataset.surface = "mail";
+    const node = shell.querySelector<HTMLElement>("#book");
+    if (node) node.hidden = true;
+    shell.querySelectorAll("[data-action='open-book']").forEach((button) => button.setAttribute("aria-pressed", "false"));
+    return true;
+  }
+
+  async function openBook(): Promise<void> {
+    if (!shell) return;
+    if (shell.dataset.full === "true") toggleFullscreen(false);
+    if (!docked()) setSidebar(false);
+    shell.dataset.surface = "contacts";
+    const node = shell.querySelector<HTMLElement>("#book");
+    if (node) node.hidden = false;
+    shell.querySelectorAll("[data-action='open-book']").forEach((button) => button.setAttribute("aria-pressed", "true"));
+    if (!wide()) pane("list");
+    await book?.open();
+    shell.querySelector<HTMLElement>("#book-q")?.focus({ preventScroll: true });
+  }
 
   const showLogin: MailView["showLogin"] = (title, options) => {
     document.title = title;
@@ -289,13 +340,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
   const showMail: MailView["showMail"] = (email, folderName, assist) => {
     root.innerHTML = `
-      <div class="shell" data-pane="list" data-layout="1" data-sidebar="${docked() ? "open" : "closed"}">
+      <div class="shell" data-pane="list" data-layout="1" data-surface="mail" data-sidebar="${docked() ? "open" : "closed"}">
         <button type="button" class="scrim" data-action="close-sidebar" aria-label="Ordner schließen"></button>
         <aside class="sidebar" aria-label="Ordner">
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
               <div id="account-list"></div>
+              <button type="button" class="menu-item" role="menuitem" data-action="open-book" data-book-entry hidden>${icon("contacts")}<span>${esc(t("GLOBAL.CONTACTS", "Kontakte"))}</span></button>
               <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
               <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
@@ -306,6 +358,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <input class="search" id="folder-q" type="search" placeholder="${esc(t("FOLDERS_UI.FILTER", "Ordner suchen"))}" autocomplete="off">
           </div>
           <div id="folder-tree" class="folder-tree"></div>
+          <button type="button" class="folder book-entry" data-action="open-book" data-book-entry hidden aria-pressed="false">${icon("contacts")}<span class="folder-name">${esc(t("GLOBAL.CONTACTS", "Kontakte"))}</span></button>
           <div class="sidebar-foot">
             <button type="button" class="text-btn" data-action="f-create" hidden>${withIcon("folder-plus", t("SETTINGS_FOLDERS.BUTTON_CREATE", "Ordner anlegen"))}</button>
             <div id="quota" class="quota"></div>
@@ -395,6 +448,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <p class="empty" id="reader-empty">Wählen Sie eine Mail.</p>
           </div>
         </section>
+        <section class="book" id="book" hidden aria-label="${esc(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
         <div id="compose-host"></div>
         <nav class="tabbar" aria-label="Navigation">
           <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
@@ -472,6 +526,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
               <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" value="alt" id="confirm-alt" hidden></button>
               <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
             </div>
           </div>
@@ -561,6 +616,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       notice: (text) => { const slot = shell?.querySelector("#notice"); if (slot) slot.textContent = text; }
     });
     composer.configure(composePrefs, composeIdentities);
+    book = mountBook(next.querySelector("#book") as HTMLElement, {
+      confirm: (title, text, ok, danger = true) => chooseDialog(title, text, ok, "", danger).then((value) => value === "ok"),
+      choose: (title, text, ok, alt) => chooseDialog(title, text, ok, alt, false),
+      compose: (to) => actions.act("compose-to", { to }),
+      pane: (name) => pane(name),
+      wide
+    });
     (next.querySelector("#folder-title") as HTMLElement).textContent = folderName;
     (next.querySelector("#reader-place") as HTMLElement).textContent = folderName;
     const search = next.querySelector("#search") as HTMLInputElement;
@@ -745,14 +807,21 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
     shell.addEventListener("click", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action], [data-folder], [data-uid]");
+      if (!target?.closest("#book-menu, #book-add, [data-op='more'], [data-op='add-menu']")) {
+        shell?.querySelectorAll<HTMLElement>("#book-menu, #book-add").forEach((menu) => { menu.hidden = true; });
+        shell?.querySelectorAll<HTMLElement>("[data-op='more'], [data-op='add-menu']").forEach((button) => button.setAttribute("aria-expanded", "false"));
+      }
       if (anyMenuOpen() && !target?.closest(".account, .bar-more, #addr-menu")) closeMenu();
       if (!target) return;
       const action = target.dataset.action;
       if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
       if (target.dataset.folder && !action) {
-        actions.selectFolder(target.dataset.folder);
-        if (!wide()) pane("list");
-        if (!docked()) setSidebar(false);
+        void (async () => {
+          if (!(await closeBook())) return;
+          actions.selectFolder(target.dataset.folder || "");
+          if (!wide()) pane("list");
+          if (!docked()) setSidebar(false);
+        })();
       } else if (target.dataset.uid) {
         const mouse = event as MouseEvent;
         if (mouse.shiftKey || mouse.ctrlKey || mouse.metaKey) {
@@ -915,6 +984,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             const ok_ = dialog.querySelector("#confirm-ok") as HTMLElement;
             ok_.className = "danger";
             ok_.innerHTML = withIcon("delete", t("GLOBAL.DELETE", "Löschen"));
+            (dialog.querySelector("#confirm-alt") as HTMLElement).hidden = true;
             dialog.returnValue = "";
             dialog.showModal();
             const ok = await new Promise<boolean>((resolve) => {
@@ -936,7 +1006,23 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (action === "pane-folders") pane("folders");
       else if (action === "pane-search") {
         pane("list");
-        (shell?.querySelector("#search") as HTMLInputElement).focus();
+        const field = shell?.dataset.surface === "contacts" ? "#book-q" : "#search";
+        shell?.querySelector<HTMLElement>(field)?.focus({ preventScroll: true });
+      } else if (action === "test-sync" || action === "sync-now") {
+        const form = shell?.querySelector<HTMLFormElement>("form[data-kind='save-sync']");
+        if (!form) return;
+        const data: Record<string, string> = {};
+        new FormData(form).forEach((value, key) => { data[key] = String(value); });
+        void actions.settings?.(action, data);
+      } else if (action === "open-book") {
+        closeMenu();
+        void openBook();
+      } else if (action === "close-book") {
+        void closeBook();
+      } else if (action === "book") {
+        const data: Record<string, string> = {};
+        Object.entries(target.dataset).forEach(([key, value]) => { if (value != null) data[key] = value; });
+        void book?.onAction(data.op || "", target, event);
       } else if (action === "compose") actions.compose();
       else if (action === "reply") actions.reply(false);
       else if (action === "reply-all") actions.reply(true);
@@ -979,6 +1065,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         return;
       }
       if (form.dataset.action === "folder-dlg-form") return;
+      if (form.dataset.action === "book-search") {
+        event.preventDefault();
+        return;
+      }
       if (form.dataset.action === "search") {
         event.preventDefault();
         actions.search((form.querySelector("#search") as HTMLInputElement).value.trim());
@@ -1053,6 +1143,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
     shell.addEventListener("change", (event) => {
       const input = event.target as HTMLInputElement;
+      const syncForm = input.closest<HTMLFormElement>("form[data-kind='save-sync']");
+      if (syncForm) {
+        const data: Record<string, string> = {};
+        new FormData(syncForm).forEach((value, key) => { data[key] = String(value); });
+        void actions.settings?.("save-sync", data);
+        return;
+      }
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
       const pref = input.dataset.pref || (event.target as HTMLSelectElement).dataset?.pref;
       if (!pref) return;
@@ -1117,12 +1214,29 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         }
         if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
         if (!docked() && shell?.dataset.sidebar === "open") { setSidebar(false); return; }
+        const bookMenu = shell.querySelector<HTMLElement>("#book-menu:not([hidden]), #book-add:not([hidden])");
+        if (bookMenu) {
+          bookMenu.hidden = true;
+          const opener = shell.querySelector<HTMLElement>(bookMenu.id === "book-add" ? "[data-op='add-menu']" : "[data-op='more']");
+          opener?.setAttribute("aria-expanded", "false");
+          opener?.focus({ preventScroll: true });
+          return;
+        }
+        if (shell.dataset.surface === "contacts") {
+          if (!wide() && shell.dataset.pane === "reader") { pane("list"); return; }
+          void closeBook();
+          return;
+        }
         if (!typing && listMode.threadOpen) actions.act("thread-back", {});
         return;
       }
       if (typing || shell.querySelector("dialog[open]")) return;
       const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid;
       if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
+      if (shell.dataset.surface === "contacts" && event.key !== "\\" && event.key !== "?") {
+        book?.onKey(event);
+        return;
+      }
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
         event.preventDefault();
@@ -1379,7 +1493,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     shell?.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((button) => {
       const id = button.dataset.section || "";
       button.setAttribute("aria-pressed", id === section ? "true" : "false");
-      if (id === "contacts") button.hidden = !snap?.caps.contacts;
+      if (id === "contacts") button.hidden = !snap?.app.ContactsSync;
       if (id === "filters") button.hidden = !snap?.caps.sieve;
       if (id === "assistant") button.hidden = !((snap?.app.Plugins || {}) as Record<string, unknown>)["ai-copilot"];
     });
@@ -1675,20 +1789,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       });
     },
     confirm(title, text, ok, danger = true) {
-      const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
-      if (!dialog) return Promise.resolve(false);
-      (dialog.querySelector("#confirm-title") as HTMLElement).textContent = title;
-      const p = dialog.querySelector("#confirm-text") as HTMLElement;
-      p.hidden = !text;
-      p.textContent = text;
-      const button = dialog.querySelector("#confirm-ok") as HTMLButtonElement;
-      button.className = danger ? "danger" : "ink-btn";
-      button.innerHTML = withIcon(danger ? "delete" : "check", ok);
-      dialog.returnValue = "";
-      dialog.showModal();
-      return new Promise((resolve) => {
-        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
-      });
+      return chooseDialog(title, text, ok, "", danger).then((value) => value === "ok");
+    },
+    setBook(allowed, sync, mode) {
+      shell?.querySelectorAll<HTMLElement>("[data-book-entry]").forEach((button) => { button.hidden = !allowed; });
+      book?.setSync(sync, mode);
+      if (!allowed) void closeBook();
+    },
+    reloadBook() {
+      return book?.reload() || Promise.resolve();
     },
     preview(name, url, kind) {
       const dialog = shell?.querySelector("#lightbox") as HTMLDialogElement | null;

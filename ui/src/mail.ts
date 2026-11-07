@@ -1,6 +1,6 @@
 import { readAssist, type AssistFlags } from "./assistant";
 import {
-  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, watchSession
+  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, syncContacts, watchSession
 } from "./api";
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
@@ -11,6 +11,7 @@ import {
   buildTree, displayName, flattenTree, folderPath, parseAcl, parseFolders, renderAcl, KOLAB_KEYS,
   type FolderAction, type FolderDesk, type FolderInfo, type FolderModel
 } from "./folders";
+import { t } from "./i18n";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
   createView, type ChatTurn, type ComposeSeed, type ListMode, type MailView, type MessageRow,
@@ -242,7 +243,6 @@ class Session {
   private mainEmail = "";
   private caps: Caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
   private desk: SettingsSnapshot | null = null;
-  private contactSearch = "";
   private prefs: Prefs = {
     viewImages: "ask", whitelist: "", proxy: false, removeColors: false, allowStyles: false, minFontSize: 5,
     maxBlockquotes: 0, collapseBlockquotes: true, viewHtml: true, hideDeleted: true, showNext: false, readAuto: true,
@@ -467,6 +467,8 @@ class Session {
     const cycle = String(data.hourCycle || "");
     hourCycle = cycle === "h12" || cycle === "h23" ? cycle : undefined;
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    const sync = data.ContactsSync;
+    this.view.setBook(this.caps.contacts, Boolean(sync && typeof sync === "object"), Number((sync as { Mode?: unknown } | null)?.Mode || 0));
     this.view.setLayout(Number(data.Layout ?? 1));
     this.view.setChecks(this.prefs.useChecks);
     this.armLogout();
@@ -489,11 +491,30 @@ class Session {
       return;
     }
     try {
-      if (name === "open") this.contactSearch = "";
-      if (name === "search-contacts") this.contactSearch = data.search || "";
-      if (name === "open" || name === "search-contacts") {
-        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
+      if (name === "open") {
+        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
         this.view.showSettings(this.desk);
+        return;
+      }
+      if (name === "test-sync") {
+        await call("TestContactsSyncData", { Mode: Number(data.Mode || 0), Url: data.Url || "", User: data.User || "", Password: data.Password || "" });
+        this.view.settingsNotice(t("CONTACTS.TEST_OK", "Die Verbindung steht."));
+        return;
+      }
+      if (name === "sync-now") {
+        if (this.desk) {
+          await applyDesk("save-sync", data, this.desk);
+          this.view.showSettings(this.desk);
+        }
+        if (Number(data.Mode || 0) === 0) {
+          this.view.settingsNotice("Die Synchronisierung ist aus.");
+          this.view.setBook(this.caps.contacts, true, 0);
+          return;
+        }
+        await syncContacts();
+        this.view.setBook(this.caps.contacts, true, Number(data.Mode || 0));
+        this.view.settingsNotice(t("CONTACTS.SYNC_OK", "Synchronisiert."));
+        await this.view.reloadBook();
         return;
       }
       if (name === "pref") {
@@ -513,7 +534,14 @@ class Session {
         await this.enter(await loadApp());
         return;
       }
-      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
+      if (next === "keep") {
+        this.view.showSettings(this.desk);
+        this.view.settingsSaved();
+        const sync = this.desk.app.ContactsSync as { Mode?: unknown } | null;
+        if (sync && typeof sync === "object") this.view.setBook(this.caps.contacts, true, Number(sync.Mode || 0));
+        return;
+      }
+      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
       this.view.showSettings(this.desk);
     } catch (error) {
       this.view.settingsNotice(explain(error));
@@ -2118,10 +2146,16 @@ class Session {
             card = writeProp(card, "email", data.email);
             await call("ContactSave", { uid: "", jCard: card });
             this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugefügt.`);
+            await this.view.reloadBook();
           } catch (error) {
             this.view.notice(explain(error));
           }
         }
+        return;
+      case "compose-to":
+        this.replyKind = "";
+        this.draftRef = null;
+        this.view.openCompose({ title: "Neue Nachricht", to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
         return;
       case "accounts":
         await this.loadAccounts();

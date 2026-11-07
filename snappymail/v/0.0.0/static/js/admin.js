@@ -27,6 +27,7 @@ function explain(error) {
     204: "Verschieben ist fehlgeschlagen.",
     302: "Senden ist fehlgeschlagen.",
     303: "Empf\xE4nger pr\xFCfen.",
+    140: "Die Kontakte konnten nicht synchronisiert werden.",
     901: "Der Mailserver hat die Anfrage abgelehnt."
   };
   const text = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";

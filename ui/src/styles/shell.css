@@ -1097,3 +1097,218 @@ a.icon-btn { color: inherit; text-decoration: none; }
 }
 .frow:has(.folder[aria-current="page"]) { background: var(--sidebar-accent); color: var(--sidebar-accent-foreground); }
 .frow .folder[aria-current="page"] { background: transparent; }
+
+/* ---------- Phase 5: Adressbuch ---------- */
+.folder[hidden], .menu-item[hidden] { display: none; }
+a.menu-item { color: inherit; text-decoration: none; }
+
+.book { display: none; min-width: 0; min-height: 0; overflow: hidden; background: var(--background); color: var(--foreground); }
+.shell[data-surface="contacts"] .book:not([hidden]) {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: minmax(18rem, min(40rem, var(--list-w))) minmax(0, 1fr);
+}
+.shell[data-surface="contacts"] .list-pane,
+.shell[data-surface="contacts"] .reader,
+.shell[data-surface="contacts"] .splitter { display: none; }
+
+.book-entry[aria-pressed="true"] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-weight: 500;
+}
+.book-entry[aria-pressed="true"] .icon { color: inherit; }
+
+.book-list, .book-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.book-card { border-left: 1px solid var(--border); }
+.book-list .pane-head { gap: 2px; }
+.book-list .pane-head .icon-btn,
+.book-list .pane-head .bar-more,
+.book-card-head .icon-btn,
+.book-card-head .ink-btn { flex: 0 0 auto; }
+.book-list .pane-head .title,
+.book-card-head .title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book .pane-body { padding: 0; }
+.book .pane-body > .quiet { margin: 0; padding: 16px; }
+.book .error { padding: 8px 12px 0; overflow-wrap: anywhere; }
+.book .error[hidden], .book-pager[hidden], #book-file[hidden] { display: none; }
+
+.book-rows { display: flex; flex-direction: column; }
+.book-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+}
+.book-row[aria-current="true"] { background: var(--accent); color: var(--accent-foreground); }
+.book-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: var(--hit);
+  min-height: var(--hit);
+  margin: 0;
+  cursor: pointer;
+}
+.book-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--foreground);
+}
+.book-open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  min-height: var(--row);
+  padding: 6px 12px 6px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.book-open strong, .book-open span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-open .quiet { font-size: 12px; }
+
+.book-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--hit);
+  padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+.book-pager .quiet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#book-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.book-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.book-card-head .quiet { margin: 0; white-space: nowrap; }
+.book-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.book-tabs [role="tab"] {
+  flex: 0 0 auto;
+  min-height: var(--hit);
+  margin-bottom: -1px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-quiet);
+  font: inherit;
+  cursor: pointer;
+}
+.book-tabs [role="tab"][aria-selected="true"] {
+  border-bottom-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 500;
+}
+.book-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.book-panels .field { margin: 0 0 10px; }
+.book-panels textarea { min-height: 4.5rem; }
+.book-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.book-line input, .book-line textarea { flex: 1 1 auto; min-width: 0; }
+.book-group {
+  margin: 16px 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.book-group .book-line,
+.book-group .field { margin-bottom: 8px; }
+.book-group .check { align-items: flex-start; }
+.book-add { flex: 0 0 auto; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); }
+.book-add .menu {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 14rem;
+  max-width: min(20rem, calc(100vw - 24px));
+}
+.book .menu-item { white-space: normal; }
+
+@media (hover: hover) {
+  .book .icon-btn:hover,
+  .book .text-btn:hover,
+  .book .menu-item:hover,
+  .book-open:hover,
+  .book-tabs [role="tab"]:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+  .book-row[aria-current="true"] .book-open:hover { background: transparent; }
+  .book-tabs [role="tab"][aria-selected="true"]:hover {
+    background: transparent;
+    color: var(--foreground);
+  }
+  .book .ink-btn:hover { background: color-mix(in srgb, var(--foreground) 88%, transparent); color: var(--background); }
+}
+
+@media (min-width: 1280px) {
+  .shell[data-sidebar="open"][data-surface="contacts"] .book:not([hidden]) { grid-column: 2 / -1; }
+}
+
+@media (max-width: 799px) {
+  .shell[data-surface="contacts"] .book:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+  .shell[data-surface="contacts"][data-pane="list"] .book-card,
+  .shell[data-surface="contacts"][data-pane="reader"] .book-list,
+  .shell[data-surface="contacts"][data-pane="folders"] .book,
+  .shell[data-surface="contacts"][data-pane="compose"] .book { display: none; }
+}

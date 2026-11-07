@@ -56,6 +56,7 @@ export function explain(error: unknown): string {
     204: "Verschieben ist fehlgeschlagen.",
     302: "Senden ist fehlgeschlagen.",
     303: "Empfänger prüfen.",
+    140: "Die Kontakte konnten nicht synchronisiert werden.",
     901: "Der Mailserver hat die Anfrage abgelehnt."
   };
   const text = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
@@ -157,6 +158,64 @@ export function upload(file: File, onProgress: (percent: number) => void): Uploa
     request.send(body);
   });
   return { promise, abort: () => request.abort() };
+}
+
+function readEnvelope(text: string): Envelope {
+  const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const last = lines[lines.length - 1] || "";
+  try {
+    return JSON.parse(last) as Envelope;
+  } catch {
+    throw new ApiError(1, "Der Server hat keine lesbare Antwort geschickt.");
+  }
+}
+
+function takeToken(data: Envelope): void {
+  if (data.System?.token) token = data.System.token;
+  const result = data.Result as { System?: { token?: string } } | null;
+  if (result && typeof result === "object" && result.System?.token) token = result.System.token;
+}
+
+/** Import von vCard oder CSV über ServiceUploadContacts. Liefert die Zahl neuer Kontakte. */
+export async function uploadContacts(file: File): Promise<number> {
+  const body = new FormData();
+  body.append("uploader", file, file.name);
+  const response = await fetch(`${root()}?/UploadContacts/&q[]=/0/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "X-SM-Token": token },
+    body
+  });
+  const data = readEnvelope(await response.text());
+  takeToken(data);
+  if (!response.ok || data.Result === false || data.Result == null) {
+    throw new ApiError(data.code || 999, data.message || "Der Import ist fehlgeschlagen.", data.messageAdditional || "");
+  }
+  return Number(data.Result) || 0;
+}
+
+/** CardDAV-Abgleich. Der Server schreibt zuerst eine Zeile, dann die JSON-Antwort. */
+export async function syncContacts(): Promise<void> {
+  const response = await fetch(`${root()}?/Json/&q[]=/0/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-SM-Token": token
+    },
+    body: JSON.stringify({ Action: "ContactsSync" })
+  });
+  const data = readEnvelope(await response.text());
+  takeToken(data);
+  if (!response.ok || data.Result === false || data.Result == null) {
+    throw new ApiError(data.code || 140, data.message || "", data.messageAdditional || "");
+  }
+}
+
+/** Raw-Pfad ohne Schlüssel, zum Beispiel ContactsVcf und ContactsCsv. */
+export function rawPath(action: string): string {
+  return `${root()}?/Raw/&q[]=/0/${encodeURIComponent(action)}/`;
 }
 
 export async function plugin<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {

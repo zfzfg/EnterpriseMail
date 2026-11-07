@@ -77,6 +77,7 @@ function explain(error) {
     204: "Verschieben ist fehlgeschlagen.",
     302: "Senden ist fehlgeschlagen.",
     303: "Empf\xE4nger pr\xFCfen.",
+    140: "Die Kontakte konnten nicht synchronisiert werden.",
     901: "Der Mailserver hat die Anfrage abgelehnt."
   };
   const text2 = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
@@ -151,6 +152,56 @@ function upload(file, onProgress) {
     request.send(body);
   });
   return { promise, abort: () => request.abort() };
+}
+function readEnvelope(text2) {
+  const lines = text2.split(/\n/).map((line2) => line2.trim()).filter(Boolean);
+  const last = lines[lines.length - 1] || "";
+  try {
+    return JSON.parse(last);
+  } catch {
+    throw new ApiError(1, "Der Server hat keine lesbare Antwort geschickt.");
+  }
+}
+function takeToken(data) {
+  if (data.System?.token) token = data.System.token;
+  const result = data.Result;
+  if (result && typeof result === "object" && result.System?.token) token = result.System.token;
+}
+async function uploadContacts(file) {
+  const body = new FormData();
+  body.append("uploader", file, file.name);
+  const response = await fetch(`${root()}?/UploadContacts/&q[]=/0/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "X-SM-Token": token },
+    body
+  });
+  const data = readEnvelope(await response.text());
+  takeToken(data);
+  if (!response.ok || data.Result === false || data.Result == null) {
+    throw new ApiError(data.code || 999, data.message || "Der Import ist fehlgeschlagen.", data.messageAdditional || "");
+  }
+  return Number(data.Result) || 0;
+}
+async function syncContacts() {
+  const response = await fetch(`${root()}?/Json/&q[]=/0/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-SM-Token": token
+    },
+    body: JSON.stringify({ Action: "ContactsSync" })
+  });
+  const data = readEnvelope(await response.text());
+  takeToken(data);
+  if (!response.ok || data.Result === false || data.Result == null) {
+    throw new ApiError(data.code || 140, data.message || "", data.messageAdditional || "");
+  }
+}
+function rawPath(action) {
+  return `${root()}?/Raw/&q[]=/0/${encodeURIComponent(action)}/`;
 }
 async function plugin(action, params = {}) {
   const result = await call("Plugin" + action, params);
@@ -687,8 +738,8 @@ function externalUrls(html) {
   return [...urls];
 }
 function plainToHtml(text2, collapse) {
-  const esc8 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
-  const linkify = (value) => esc8(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
+  const esc9 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+  const linkify = (value) => esc9(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
     const clean = stripTracking(url.replace(/&amp;/g, "&")).replace(/&/g, "&amp;");
     return `<a href="${clean}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
@@ -992,6 +1043,198 @@ function watchSystemTheme(onChange) {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onChange);
 }
 
+// src/jcard.ts
+var PREFS = /* @__PURE__ */ new Set(["Ask", "Never", "Always", "IfPossible"]);
+var MANAGED = /* @__PURE__ */ new Set(["n", "fn", "nickname", "note", "bday", "title", "org", "email", "tel", "url", "adr", "categories", "x-crypto"]);
+function propName(row2) {
+  const raw = String(row2[0] || "").toLowerCase();
+  const dot = raw.lastIndexOf(".");
+  return dot >= 0 ? raw.slice(dot + 1) : raw;
+}
+function paramsOf(row2) {
+  const value = row2?.[1];
+  return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+}
+function flat(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map((part) => typeof part === "string" ? part : "").filter(Boolean).join(" ");
+  return "";
+}
+function parts(value, count) {
+  const list = Array.isArray(value) ? value : [];
+  return Array.from({ length: count }, (_, index) => typeof list[index] === "string" ? list[index] : "");
+}
+function pref(value) {
+  const text2 = String(value || "");
+  return PREFS.has(text2) ? text2 : "Ask";
+}
+function asCard(card) {
+  if (Array.isArray(card) && String(card[0]).toLowerCase() === "vcard" && Array.isArray(card[1])) {
+    const rows = card[1].filter(Array.isArray).map((row2) => {
+      const item = row2;
+      return [String(item[0] || ""), paramsOf(item), String(item[2] || "text"), item[3]];
+    });
+    const groups = Array.isArray(card[2]) ? [card[2]] : [];
+    return groups.length ? ["vcard", rows, ...groups] : ["vcard", rows];
+  }
+  return ["vcard", [["version", {}, "text", "4.0"]]];
+}
+function writeProp(card, name, value) {
+  const next = asCard(card);
+  const rows = next[1];
+  const index = rows.findIndex((row2) => propName(row2) === name.toLowerCase());
+  const line2 = [name, {}, "text", value];
+  if (index >= 0) rows[index] = line2;
+  else rows.push(line2);
+  return next;
+}
+function rowsNamed(card, name) {
+  return card[1].filter((row2) => propName(row2) === name);
+}
+function dateValue(value) {
+  const text2 = flat(value).trim();
+  const compact = text2.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  return text2;
+}
+function blankCard() {
+  return {
+    id: "",
+    readOnly: false,
+    prefix: "",
+    given: "",
+    middle: "",
+    surname: "",
+    suffix: "",
+    nickname: null,
+    note: null,
+    birthday: null,
+    org: "",
+    department: "",
+    title: "",
+    emails: [""],
+    phones: null,
+    urls: null,
+    addresses: null,
+    tags: null,
+    sign: "Ask",
+    encrypt: "Ask",
+    sendAll: true,
+    source: ["vcard", [["version", {}, "text", "4.0"]]]
+  };
+}
+function parseCard(raw) {
+  const source = asCard(raw.jCard);
+  const name = parts(rowsNamed(source, "n")[0]?.[3], 5);
+  const org = parts(rowsNamed(source, "org")[0]?.[3], 2);
+  const crypto = paramsOf(rowsNamed(source, "x-crypto")[0]);
+  const emails = rowsNamed(source, "email").map((row2) => flat(row2[3])).filter(Boolean);
+  const phones = rowsNamed(source, "tel").map((row2) => flat(row2[3]));
+  const urls = rowsNamed(source, "url").map((row2) => flat(row2[3]));
+  const addresses2 = rowsNamed(source, "adr").map((row2) => {
+    const value = parts(row2[3], 7);
+    return { pobox: value[0], ext: value[1], street: value[2], locality: value[3], region: value[4], code: value[5], country: value[6] };
+  });
+  const tags = rowsNamed(source, "categories")[0];
+  const tagText = Array.isArray(tags?.[3]) ? tags[3].map((part) => flat(part)).filter(Boolean).join(", ") : flat(tags?.[3]);
+  const one = (field2) => {
+    const row2 = rowsNamed(source, field2)[0];
+    return row2 ? flat(row2[3]) : null;
+  };
+  return {
+    id: raw.id == null ? "" : String(raw.id),
+    readOnly: Boolean(raw.readOnly),
+    surname: name[0],
+    given: name[1],
+    middle: name[2],
+    prefix: name[3],
+    suffix: name[4],
+    nickname: one("nickname"),
+    note: one("note"),
+    birthday: rowsNamed(source, "bday")[0] ? dateValue(rowsNamed(source, "bday")[0][3]) : null,
+    org: org[0],
+    department: org[1],
+    title: one("title") || "",
+    emails: emails.length ? emails : [""],
+    phones: phones.length ? phones : null,
+    urls: urls.length ? urls : null,
+    addresses: addresses2.length ? addresses2 : null,
+    tags: tags ? tagText : null,
+    sign: pref(crypto.signpref),
+    encrypt: pref(crypto.encryptpref),
+    sendAll: true,
+    source
+  };
+}
+function displayName(card) {
+  const name = [card.prefix, card.given, card.middle, card.surname, card.suffix].map((part) => part.trim()).filter(Boolean).join(" ");
+  return name || card.emails.find((item) => item.trim()) || card.nickname || "";
+}
+function reuseText(existing, name, values2, type = "text") {
+  const pool = existing.filter((row2) => propName(row2) === name);
+  const used = /* @__PURE__ */ new Set();
+  return values2.map((value) => value.trim()).filter(Boolean).map((value) => {
+    const match = pool.findIndex((row2, index) => !used.has(index) && flat(row2[3]) === value);
+    if (match >= 0) {
+      used.add(match);
+      return [name, paramsOf(pool[match]), String(pool[match][2] || type), value];
+    }
+    return [name, {}, type, value];
+  });
+}
+function single(existing, name, value, type = "text") {
+  const text2 = value.trim();
+  if (!text2) return null;
+  const prev = existing.find((row2) => propName(row2) === name);
+  return [name, paramsOf(prev), String(prev?.[2] || type), text2];
+}
+function toJCard(card) {
+  const kept = card.source[1].filter((row2) => !MANAGED.has(propName(row2))).map((row2) => [row2[0], paramsOf(row2), row2[2], row2[3]]);
+  if (!kept.some((row2) => propName(row2) === "version")) kept.unshift(["version", {}, "text", "4.0"]);
+  const name = [card.surname, card.given, card.middle, card.prefix, card.suffix];
+  kept.push(["n", {}, "text", name]);
+  const fn = displayName(card);
+  if (fn) kept.push(["fn", {}, "text", fn]);
+  const nickname = card.nickname == null ? null : single(card.source[1], "nickname", card.nickname);
+  const note2 = card.note == null ? null : single(card.source[1], "note", card.note);
+  const title = single(card.source[1], "title", card.title);
+  const birthday = card.birthday == null ? null : single(card.source[1], "bday", card.birthday, "date");
+  [nickname, note2, title, birthday].forEach((row2) => {
+    if (row2) kept.push(row2);
+  });
+  if (card.org.trim() || card.department.trim()) {
+    const prev = card.source[1].find((row2) => propName(row2) === "org");
+    const value = card.department.trim() ? [card.org.trim(), card.department.trim()] : [card.org.trim()];
+    kept.push(["org", paramsOf(prev), "text", value]);
+  }
+  reuseText(card.source[1], "email", card.emails).forEach((row2) => kept.push(row2));
+  if (card.phones) reuseText(card.source[1], "tel", card.phones).forEach((row2) => kept.push(row2));
+  if (card.urls) reuseText(card.source[1], "url", card.urls, "uri").forEach((row2) => kept.push(row2));
+  (card.addresses || []).forEach((item, index) => {
+    const filled = [item.pobox, item.ext, item.street, item.locality, item.region, item.code, item.country].some((part) => part.trim());
+    if (!filled) return;
+    const prev = rowsNamed(card.source, "adr")[index];
+    kept.push(["adr", paramsOf(prev), String(prev?.[2] || "text"), [item.pobox, item.ext, item.street, item.locality, item.region, item.code, item.country]]);
+  });
+  if (card.tags != null && card.tags.trim()) {
+    const prev = card.source[1].find((row2) => propName(row2) === "categories");
+    kept.push(["categories", paramsOf(prev), "text", card.tags.trim()]);
+  }
+  const prevCrypto = card.source[1].find((row2) => propName(row2) === "x-crypto");
+  const crypto = paramsOf(prevCrypto);
+  crypto.allowed = crypto.allowed || "PGP/INLINE,PGP/MIME,S/MIME,S/MIMEOpaque";
+  crypto.signpref = card.sign;
+  crypto.encryptpref = card.encrypt;
+  kept.push(["x-crypto", crypto, "x-crypto", ""]);
+  return card.source[2] ? ["vcard", kept, card.source[2]] : ["vcard", kept];
+}
+function formatAddress(name, email) {
+  const clean = name.replace(/"/g, "").trim();
+  if (!clean || clean.toLowerCase() === email.toLowerCase()) return email;
+  return /[",<>]/.test(clean) ? `"${clean}" <${email}>` : `${clean} <${email}>`;
+}
+
 // src/settings.ts
 function readCaps(data) {
   const capa = data.Capa && typeof data.Capa === "object" ? data.Capa : {};
@@ -1011,28 +1254,6 @@ function values(value) {
 }
 function text(value) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-function propText(card, names) {
-  if (!Array.isArray(card) || !Array.isArray(card[1])) return "";
-  const wanted = new Set(names);
-  for (const row2 of card[1]) {
-    if (!Array.isArray(row2) || !wanted.has(String(row2[0]).toLowerCase())) continue;
-    const value = row2[3];
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) {
-      return value.map((part) => typeof part === "string" ? part : "").filter(Boolean).join(" ");
-    }
-  }
-  return "";
-}
-function writeProp(card, name, value) {
-  const rows = Array.isArray(card) && card[0] === "vcard" && Array.isArray(card[1]) ? card[1].map((row2) => Array.isArray(row2) ? row2.slice() : row2) : [["version", {}, "text", "4.0"]];
-  const index = rows.findIndex((row2) => Array.isArray(row2) && String(row2[0]).toLowerCase() === name);
-  const next = [name, {}, "text", value];
-  if (index >= 0) rows[index] = next;
-  else rows.push(next);
-  const extra = Array.isArray(card) && Array.isArray(card[2]) ? [card[2]] : [];
-  return ["vcard", rows, ...extra];
 }
 function identityOf(item) {
   return {
@@ -1065,7 +1286,7 @@ async function tryCall(action, params = {}) {
     return { value: null, error: explain(error) };
   }
 }
-async function loadDesk(caps, currentEmail, mainEmail, contactSearch = "", app = {}) {
+async function loadDesk(caps, currentEmail, mainEmail, app = {}) {
   const main = mainEmail || currentEmail;
   const plugins = app.Plugins || {};
   const snap = {
@@ -1074,9 +1295,6 @@ async function loadDesk(caps, currentEmail, mainEmail, contactSearch = "", app =
     currentEmail,
     accounts: [{ email: main, name: "", current: currentEmail === main, main: true, unread: null }],
     identities: [],
-    contacts: caps.contacts ? [] : null,
-    contactCount: 0,
-    contactSearch,
     scripts: caps.sieve ? [] : null,
     keys: [],
     certs: [],
@@ -1099,23 +1317,6 @@ async function loadDesk(caps, currentEmail, mainEmail, contactSearch = "", app =
     snap.identities = values(desk.value.Identities).map((item) => identityOf(item));
     const named = snap.identities.find((item) => item.email === main && item.name);
     if (named) snap.accounts[0].name = named.name;
-  }
-  if (caps.contacts) {
-    const book = await tryCall("Contacts", { Search: contactSearch, Offset: 0, Limit: 50 });
-    if (book.error) snap.notes.contacts = book.error;
-    else if (book.value) {
-      snap.contactCount = Number(book.value.Count || 0);
-      snap.contacts = values(book.value.List).map((item) => {
-        const row2 = item;
-        return {
-          id: text(row2.id),
-          name: propText(row2.jCard, ["fn", "n"]),
-          email: propText(row2.jCard, ["email"]),
-          readOnly: Boolean(row2.readOnly),
-          jCard: row2.jCard
-        };
-      });
-    }
   }
   if (caps.sieve) {
     const filters = await tryCall("Filters");
@@ -1270,19 +1471,21 @@ async function applyDesk(name, data, snap) {
     await call("IdentityDelete", { idToDelete: data.id });
     return "reload";
   }
-  if (name === "save-contact") {
-    const nameText = (data.name || "").trim();
-    const email = (data.email || "").trim();
-    if (!nameText && !email) throw new ApiError(0, "Name oder E-Mail eintragen.");
-    const existing = snap.contacts?.find((item) => item.id === data.id);
-    let card = writeProp(existing?.jCard, "fn", nameText || email);
-    card = writeProp(card, "email", email);
-    await call("ContactSave", { uid: data.id || "", jCard: card });
-    return "reload";
-  }
-  if (name === "delete-contact") {
-    await call("ContactsDelete", { uids: data.id });
-    return "reload";
+  if (name === "save-sync") {
+    await call("SaveContactsSyncData", {
+      Mode: Number(data.Mode || 0),
+      Url: data.Url || "",
+      User: data.User || "",
+      Password: data.Password || ""
+    });
+    const previous = snap.app.ContactsSync;
+    const sync = previous && typeof previous === "object" ? { ...previous } : {};
+    sync.Mode = Number(data.Mode || 0);
+    sync.Url = data.Url || "";
+    sync.User = data.User || "";
+    sync.Password = data.Password ? "********" : "";
+    snap.app.ContactsSync = sync;
+    return "keep";
   }
   if (name === "save-script") {
     if (!data.name?.trim()) throw new ApiError(0, "Name eintragen.");
@@ -1636,26 +1839,29 @@ function renderDesk(section, snap, edit) {
     return `${error}<p class="mono">${esc2(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows || ""}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
   if (section === "contacts") {
-    if (!snap.contacts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
-    const rows = snap.contacts.map((item) => row(
-      item.name || item.email || item.id,
-      item.name ? item.email : "",
-      item.readOnly ? "" : [
-        button("settings-edit", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "contact", id: item.id }),
-        button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "contact", id: item.id }, true)
-      ].join("")
-    )).join("");
-    const search = form("search-contacts", field(t("GLOBAL.SEARCH", "Suchen"), "search", snap.contactSearch, "search"), t("GLOBAL.SEARCH", "Suchen"), false);
-    const adding = edit?.kind === "contact";
-    const current = edit?.kind === "contact" && !edit.fresh ? snap.contacts.find((item) => item.id === edit.id) : null;
-    const editor = adding ? form("save-contact", `
-      <input type="hidden" name="id" value="${esc2(current?.id || "")}">
-      ${field(t("CONTACTS.DISPLAY_NAME", "Anzeigename"), "name", current?.name || "")}
-      ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", current?.email || "", "email", 'autocomplete="email"')}
-    `, t("GLOBAL.SAVE", "Speichern"), true) : "";
-    const more = snap.contactCount > snap.contacts.length ? note(`${snap.contacts.length} / ${snap.contactCount}`) : "";
-    const add = adding ? "" : button("settings-edit", t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"), { kind: "contact", fresh: "1" });
-    return `${error}<p class="mono">${esc2(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</p>${note(snap.notes.contacts, true)}${search}<ul class="set-list">${rows}</ul>${rows ? "" : note(snap.contactSearch ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte"))}${more}${add}${editor}`;
+    const sync = snap.app.ContactsSync;
+    if (!sync || typeof sync !== "object") return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
+    const row2 = sync;
+    const mode = String(row2.Mode ?? 0);
+    const options = [
+      ["0", t("GLOBAL.NO", "Nein")],
+      ["1", t("GLOBAL.YES", "Ja")],
+      ["2", t("SETTINGS_CONTACTS.SYNC_READ", "Nur lesend")]
+    ].map(([id, label2]) => `<option value="${id}"${id === mode ? " selected" : ""}>${esc2(label2)}</option>`).join("");
+    const password = String(row2.Password || "");
+    return `${error}<p class="mono">${esc2(t("SETTINGS_CONTACTS.LEGEND_CONTACTS_SYNC", "Remote-Synchronisierung (CardDAV)"))}</p>${note(snap.notes.contacts, true)}
+      <form class="fields" data-action="settings-form" data-kind="save-sync">
+        <label class="field"><span>${esc2(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_ENABLE", "Remote-Synchronisierung aktivieren"))}</span><select name="Mode">${options}</select></label>
+        ${field(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_AB_URL", "Adressbuch-URL"), "Url", String(row2.Url || ""), "url", 'autocomplete="off" inputmode="url"')}
+        ${field(t("SETTINGS_CONTACTS.LABEL_CONTACTS_SYNC_USER", "Benutzer"), "User", String(row2.User || ""), "text", 'autocomplete="username"')}
+        ${field(t("GLOBAL.PASSWORD", "Passwort"), "Password", password, "password", 'autocomplete="new-password"')}
+        ${password === "********" ? `<p class="quiet">${esc2(t("SETTINGS_CONTACTS.PASSWORD_KEEP", "Acht Sterne stehen f\xFCr das gespeicherte Passwort."))}</p>` : ""}
+      </form>
+      <div class="dialog-actions">
+        <button type="button" class="text-btn" data-action="test-sync">${icon("check")}<span class="btn-label">${esc2(t("GLOBAL.TEST", "Testen"))}</span></button>
+        <button type="button" class="text-btn" data-action="sync-now"${mode === "0" ? " hidden" : ""}>${icon("refresh")}<span class="btn-label">${esc2(t("CONTACTS.SYNC_NOW", "Jetzt synchronisieren"))}</span></button>
+      </div>
+      <p class="quiet">${esc2(t("SETTINGS_CONTACTS.SYNC_HINT", "\xC4nderungen werden beim Verlassen des Feldes gespeichert. Das Adressbuch selbst liegt in der Seitenleiste."))}</p>`;
   }
   if (section === "filters") {
     if (!snap.scripts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
@@ -1884,7 +2090,7 @@ var SYSTEM_NAME = {
   trash: ["FOLDER_LIST.TRASH_NAME", "Papierkorb"],
   archive: ["FOLDER_LIST.ARCHIVE_NAME", "Archiv"]
 };
-function displayName(folder, role) {
+function displayName2(folder, role) {
   const system = SYSTEM_NAME[role];
   return system && folder.depth === 0 ? t(system[0], system[1]) : folder.name;
 }
@@ -1919,7 +2125,7 @@ function flattenTree(roots, options) {
 function renderSidebarRows(rows, filtering) {
   if (!rows.length) return `<p class="quiet folder-empty">${esc3(filtering ? t("FOLDERS_UI.NO_MATCH", "Kein Ordner gefunden.") : t("FOLDERS_UI.EMPTY", "Keine Ordner."))}</p>`;
   return rows.map((row2) => {
-    const name = displayName(row2.info, row2.role);
+    const name = displayName2(row2.info, row2.role);
     const target = esc3(row2.info.fullName);
     const toggle = row2.hasChildren ? `<button type="button" class="icon-btn ftoggle" data-action="f-toggle" data-target="${target}" tabindex="-1" aria-expanded="${row2.collapsed ? "false" : "true"}" aria-label="${esc3(`${t("FOLDERS_UI.SUBFOLDERS_OF", "Unterordner von")} ${name}`)}" title="${esc3(row2.collapsed ? t("FOLDERS_UI.EXPAND", "Aufklappen") : t("FOLDERS_UI.COLLAPSE", "Zuklappen"))}">${icon(row2.collapsed ? "chevron-right" : "chevron-down")}</button>` : `<span class="ftoggle" aria-hidden="true"></span>`;
     const count = row2.info.unread > 0 ? `<span class="count" aria-label="${row2.info.unread} ${esc3(t("FOLDERS_UI.UNREAD", "ungelesen"))}">${row2.info.unread}</span>` : "";
@@ -1972,7 +2178,7 @@ function deskButton(action, iconName, label2, attrs, danger = false, pressed, co
   return `<button type="button" class="${danger ? "danger" : "text-btn"}${compact ? " icon-only" : ""}" data-action="${action}"${extra}${press}${tip}>${icon(iconName)}${text2}</button>`;
 }
 function indentLabel(row2) {
-  return `${"\xA0\xA0".repeat(row2.depth)}${displayName(row2.info, row2.role)}`;
+  return `${"\xA0\xA0".repeat(row2.depth)}${displayName2(row2.info, row2.role)}`;
 }
 function parentOptions(rows, selected, exclude = "") {
   const top = option("", t("FOLDERS_UI.TOP_LEVEL", "Oberste Ebene"), !selected);
@@ -1989,7 +2195,7 @@ function renderFolderDesk(desk, edit) {
   const editing = edit?.kind === "folder" && !edit.fresh ? desk.rows.find((row2) => row2.info.fullName === edit.id) : void 0;
   const creating = edit?.kind === "folder" && edit.fresh;
   const rows = desk.rows.map((row2) => {
-    const name = displayName(row2.info, row2.role);
+    const name = displayName2(row2.info, row2.role);
     const meta = [
       row2.info.selectable ? `${row2.info.total} ${row2.info.total === 1 ? t("FOLDERS_UI.MAIL", "Mail") : t("FOLDERS_UI.MAILS", "Mails")}${row2.info.unread ? `, ${row2.info.unread} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar"),
       row2.role && row2.role !== "inbox" ? t(`FOLDERS_UI.ROLE_${row2.role.toUpperCase()}`, { sent: "Gesendet", drafts: "Entw\xFCrfe", junk: "Spam", spam: "Spam", trash: "Papierkorb", archive: "Archiv" }[row2.role] || row2.role) : "",
@@ -2063,8 +2269,8 @@ function parseAcl(result) {
   }));
 }
 function explainRights(rights) {
-  const parts = ACL_RIGHTS.filter(([letter]) => rights.includes(letter)).map(([letter, fallback]) => t(`IMAP.ACL_${letter.toUpperCase()}`, fallback));
-  return parts.join(", ") || t("FOLDERS_UI.NO_RIGHTS", "keine Rechte");
+  const parts2 = ACL_RIGHTS.filter(([letter]) => rights.includes(letter)).map(([letter, fallback]) => t(`IMAP.ACL_${letter.toUpperCase()}`, fallback));
+  return parts2.join(", ") || t("FOLDERS_UI.NO_RIGHTS", "keine Rechte");
 }
 function renderAcl(folder, entries, error) {
   const mine = entries.find((entry) => entry.mine);
@@ -2144,8 +2350,8 @@ function shiftDay(iso, days) {
   return isoDate(date);
 }
 function isStructured(query) {
-  const parts = query.split("&").map((part) => part.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every((part) => {
+  const parts2 = query.split("&").map((part) => part.trim()).filter(Boolean);
+  return parts2.length > 0 && parts2.every((part) => {
     const name = part.split("=")[0].toLowerCase();
     return part.includes("=") ? VALUE_KEYS.includes(name) || /^[a-z_[\]]+$/.test(name) : FLAG_KEYS.has(name);
   });
@@ -2204,16 +2410,16 @@ function parseSearch(query) {
   return result;
 }
 function serializeSearch(c, multisearch) {
-  const parts = [];
+  const parts2 = [];
   const add = (name, value) => {
-    if (value.trim()) parts.push(`${name}=${encodeValue(value.trim())}`);
+    if (value.trim()) parts2.push(`${name}=${encodeValue(value.trim())}`);
   };
   add("from", c.from);
   add("to", c.to);
   add("subject", c.subject);
   add("text", c.text);
   add("keyword", c.keyword);
-  if (multisearch && c.subtree) parts.push(`in=${c.subtree}`);
+  if (multisearch && c.subtree) parts2.push(`in=${c.subtree}`);
   const days = Number(c.period || 0);
   if (days > 0) {
     add("since", shiftDay(isoDate(/* @__PURE__ */ new Date()), -days));
@@ -2225,12 +2431,12 @@ function serializeSearch(c, multisearch) {
   }
   add("larger", c.larger.replace(/\s+/g, "").toUpperCase());
   add("smaller", c.smaller.replace(/\s+/g, "").toUpperCase());
-  if (c.attachment) parts.push("attachment");
-  if (c.unseen) parts.push("unseen");
-  if (c.flagged) parts.push("flagged");
-  if (c.replied === "yes") parts.push("answered");
-  if (c.replied === "no") parts.push("unanswered");
-  return parts.join("&");
+  if (c.attachment) parts2.push("attachment");
+  if (c.unseen) parts2.push("unseen");
+  if (c.flagged) parts2.push("flagged");
+  if (c.replied === "yes") parts2.push("answered");
+  if (c.replied === "no") parts2.push("unanswered");
+  return parts2.join("&");
 }
 function activeQuick(query) {
   const c = parseSearch(query);
@@ -3238,6 +3444,731 @@ function renderBulk(body, data) {
     </div>`;
 }
 
+// src/contacts.ts
+var PAGE = 50;
+var Book = class {
+  constructor(host, hooks) {
+    this.host = host;
+    this.hooks = hooks;
+    this.host.innerHTML = this.shell();
+    matchMedia("(min-width: 800px)").addEventListener("change", () => {
+      if (this.host.isConnected) this.renderCard();
+    });
+    this.host.addEventListener("input", (event) => this.onInput(event));
+    this.host.addEventListener("change", (event) => this.onChange(event));
+    this.host.querySelector("#book-file")?.addEventListener("change", (event) => {
+      const input2 = event.target;
+      const file = input2.files?.[0];
+      input2.value = "";
+      if (file) void this.importFile(file);
+    });
+    this.renderRows();
+    this.renderCard();
+  }
+  search = "";
+  page = 1;
+  count = 0;
+  rows = [];
+  draft = null;
+  saved = "";
+  checked = /* @__PURE__ */ new Set();
+  anchor = -1;
+  tab = "person";
+  busy = false;
+  request = 0;
+  syncAllowed = false;
+  syncMode = 0;
+  timer = 0;
+  setSync(allowed, mode) {
+    this.syncAllowed = allowed;
+    this.syncMode = mode;
+    const button3 = this.host.querySelector("[data-op='sync']");
+    if (button3) button3.hidden = !allowed;
+  }
+  async open() {
+    await this.load();
+    this.host.querySelector("#book-q")?.focus({ preventScroll: true });
+  }
+  reload() {
+    return this.load();
+  }
+  async confirmLeave() {
+    if (!this.dirty()) return true;
+    const choice3 = await this.hooks.choose(
+      t("GLOBAL.SAVE_CHANGES", "\xC4nderungen speichern?"),
+      t("CONTACTS.UNSAVED", "Die \xC4nderungen an diesem Kontakt sind nicht gespeichert."),
+      t("GLOBAL.SAVE", "Speichern"),
+      t("COMPOSE.DISCARD", "Verwerfen")
+    );
+    if (choice3 === "cancel") return false;
+    if (choice3 === "ok") return this.save();
+    this.revert();
+    return true;
+  }
+  onKey(event) {
+    const key = event.key.toLowerCase();
+    if (key === "a" && (event.ctrlKey || event.metaKey) || event.key === "*") {
+      event.preventDefault();
+      this.rows.forEach((row2) => {
+        if (row2.id) this.checked.add(row2.id);
+      });
+      this.renderRows();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (key === "c" || key === "w") {
+      event.preventDefault();
+      this.write(false);
+      return;
+    }
+    if (event.key === "Delete" || event.key === "#") {
+      event.preventDefault();
+      void this.remove();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const target = event.target;
+      if (target.getAttribute("role") === "tab" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        event.preventDefault();
+        const order = ["person", "work", "crypto"];
+        const index = Math.max(0, order.indexOf(this.tab));
+        const next = order[(index + (event.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
+        this.tab = next;
+        this.renderCard();
+        this.host.querySelector(`[data-tab='${next}']`)?.focus({ preventScroll: true });
+        return;
+      }
+      if (target.closest(".book-card")) return;
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      this.move(event.key === "ArrowDown" ? 1 : -1);
+    }
+  }
+  async onAction(op, target, event) {
+    if (op === "more" || op === "add-menu") {
+      this.toggleMenu(op === "more" ? "#book-menu" : "#book-add", target);
+      return;
+    }
+    this.closeMenus();
+    if (op === "check") {
+      const mouse = event;
+      this.toggleCheck(target.dataset.id || "", mouse.shiftKey);
+      return;
+    }
+    if (op === "open") {
+      await this.select(target.dataset.id || "");
+      return;
+    }
+    if (op === "new") {
+      await this.create();
+      return;
+    }
+    if (op === "save") {
+      await this.save();
+      return;
+    }
+    if (op === "delete") {
+      await this.remove();
+      return;
+    }
+    if (op === "write") {
+      this.write(false);
+      return;
+    }
+    if (op === "write-all") {
+      this.write(true);
+      return;
+    }
+    if (op === "import") {
+      this.host.querySelector("#book-file")?.click();
+      return;
+    }
+    if (op === "sync") {
+      await this.sync();
+      return;
+    }
+    if (op === "clear-search") {
+      this.setSearch("");
+      return;
+    }
+    if (op === "page") {
+      await this.turn(target.dataset.dir === "next" ? 1 : -1);
+      return;
+    }
+    if (op === "back-list") {
+      this.hooks.pane("list");
+      return;
+    }
+    if (op === "tab") {
+      this.tab = target.dataset.tab || "person";
+      this.renderCard();
+      this.host.querySelector(`[data-tab='${this.tab}']`)?.focus({ preventScroll: true });
+      return;
+    }
+    if (op === "add") {
+      this.addField(target.dataset.field || "");
+      return;
+    }
+    if (op === "drop") {
+      this.dropField(target.dataset.field || "", Number(target.dataset.index || 0));
+      return;
+    }
+  }
+  shell() {
+    const vcf = rawPath("ContactsVcf");
+    const csv = rawPath("ContactsCsv");
+    return `
+      <div class="book-list">
+        <div class="pane-head">
+          <button type="button" class="icon-btn" data-action="close-book" aria-label="${esc7(t("CONTACTS.BACK_TO_MAIL", "Zum Postfach"))}" title="${esc7(t("CONTACTS.BACK_TO_MAIL", "Zum Postfach"))}">${icon("back")}</button>
+          <h1 class="title title-md">${esc7(t("GLOBAL.CONTACTS", "Kontakte"))}</h1>
+          <span class="spacer"></span>
+          <button type="button" class="icon-btn" data-action="book" data-op="new" aria-label="${esc7(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}" title="${esc7(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}">${icon("plus")}</button>
+          <button type="button" class="icon-btn" data-action="book" data-op="write" aria-label="${esc7(t("CONTACTS.MAIL_SELECTION", "Mail an Auswahl"))}" title="${esc7(t("CONTACTS.MAIL_SELECTION", "Mail an Auswahl"))}">${icon("compose")}</button>
+          <button type="button" class="icon-btn" data-action="book" data-op="delete" aria-label="${esc7(t("GLOBAL.DELETE", "L\xF6schen"))}" title="${esc7(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
+          <div class="bar-more">
+            <button type="button" class="icon-btn" data-action="book" data-op="more" aria-haspopup="menu" aria-expanded="false" aria-controls="book-menu" aria-label="${esc7(t("GLOBAL.MORE", "Mehr"))}" title="${esc7(t("GLOBAL.MORE", "Mehr"))}">${icon("more")}</button>
+            <div class="menu menu-right" id="book-menu" role="menu" hidden>
+              <button type="button" class="menu-item" role="menuitem" data-action="book" data-op="import">${icon("upload")}<span>${esc7(t("CONTACTS.BUTTON_IMPORT", "Import (csv, vcf, vCard)"))}</span></button>
+              <a class="menu-item" role="menuitem" href="${esc7(vcf)}" download="contacts.vcf">${icon("download")}<span>${esc7(t("CONTACTS.BUTTON_EXPORT_VCARD", "Export (vcf, vCard)"))}</span></a>
+              <a class="menu-item" role="menuitem" href="${esc7(csv)}" download="contacts.csv">${icon("download")}<span>${esc7(t("CONTACTS.BUTTON_EXPORT_CSV", "Export (csv)"))}</span></a>
+              <button type="button" class="menu-item" role="menuitem" data-action="book" data-op="write-all">${icon("compose")}<span>${esc7(t("CONTACTS.SEND_TO_ALL_CONTACT_EMAILS", "An alle E-Mail-Adressen schreiben"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="book" data-op="sync" hidden>${icon("refresh")}<span>${esc7(t("CONTACTS.SYNC_NOW", "Jetzt synchronisieren"))}</span></button>
+            </div>
+          </div>
+        </div>
+        <form class="search-wrap" data-action="book-search">
+          <label class="sr" for="book-q">${esc7(t("GLOBAL.SEARCH", "Suchen"))}</label>
+          <input class="search" id="book-q" type="search" placeholder="${esc7(t("GLOBAL.SEARCH", "Suchen"))}" autocomplete="off">
+          <button type="button" class="icon-btn" data-action="book" data-op="clear-search" hidden aria-label="${esc7(t("CONTACTS.CLEAR_SEARCH", "Suche leeren"))}">${icon("close")}</button>
+        </form>
+        <p class="error" id="book-error" hidden></p>
+        <div class="pane-body" id="book-rows"></div>
+        <div class="book-pager" id="book-pager"></div>
+      </div>
+      <div class="book-card">
+        <div id="book-card"></div>
+      </div>
+      <p class="sr" id="book-live" aria-live="polite"></p>
+      <input id="book-file" type="file" accept=".csv,.vcf,.vcard,text/csv,text/vcard,text/x-vcard" hidden>`;
+  }
+  async load() {
+    const ticket = ++this.request;
+    this.busy = true;
+    this.note("");
+    try {
+      const result = await call("Contacts", {
+        Search: this.search,
+        Offset: (this.page - 1) * PAGE,
+        Limit: PAGE
+      });
+      if (ticket !== this.request) return;
+      const list = Array.isArray(result.List) ? result.List : result.List ? Object.values(result.List) : [];
+      this.rows = list.map((item) => parseCard(item));
+      this.count = Number(result.Count || 0);
+      const pages = Math.max(1, Math.ceil(this.count / PAGE));
+      if (this.page > pages) {
+        this.page = pages;
+        await this.load();
+        return;
+      }
+      if (this.draft?.id && !this.rows.some((row2) => row2.id === this.draft?.id) && !this.dirty()) this.draft = null;
+      this.checked.forEach((id) => {
+        if (!this.rows.some((row2) => row2.id === id)) this.checked.delete(id);
+      });
+    } catch (error) {
+      if (ticket !== this.request) return;
+      this.rows = [];
+      this.count = 0;
+      this.fail(error);
+    } finally {
+      if (ticket === this.request) {
+        this.busy = false;
+        this.renderRows();
+        this.renderPager();
+        if (!this.draft) this.renderCard();
+      }
+    }
+  }
+  async select(id) {
+    if (this.draft?.id === id && id) {
+      if (!this.hooks.wide()) this.hooks.pane("reader");
+      return;
+    }
+    if (!await this.confirmLeave()) return;
+    const row2 = this.rows.find((item) => item.id === id);
+    this.draft = row2 ? clone(row2) : null;
+    this.tab = "person";
+    this.remember();
+    this.renderRows();
+    this.renderCard();
+    if (!this.hooks.wide()) this.hooks.pane("reader");
+    this.host.querySelector(".book-card input, .book-card button")?.focus({ preventScroll: true });
+  }
+  async create() {
+    if (!await this.confirmLeave()) return;
+    this.draft = blankCard();
+    this.tab = "person";
+    this.remember();
+    this.renderRows();
+    this.renderCard();
+    if (!this.hooks.wide()) this.hooks.pane("reader");
+    this.host.querySelector("[data-field='given']")?.focus({ preventScroll: true });
+  }
+  dirty() {
+    return Boolean(this.draft) && JSON.stringify(toJCard(this.draft)) !== this.saved;
+  }
+  remember() {
+    this.saved = this.draft ? JSON.stringify(toJCard(this.draft)) : "";
+  }
+  /** Verwirft ungespeicherte Eingaben und stellt den zuletzt geladenen Kontakt her. */
+  revert() {
+    if (!this.draft?.id) {
+      this.draft = null;
+      this.saved = "";
+      this.renderCard();
+      return;
+    }
+    const row2 = this.rows.find((item) => item.id === this.draft?.id);
+    this.draft = row2 ? clone(row2) : null;
+    this.remember();
+    this.renderCard();
+  }
+  async save() {
+    const card = this.draft;
+    if (!card || card.readOnly) return false;
+    if (!displayName(card)) {
+      this.fail(new ApiError(0, t("CONTACTS.NEED_NAME", "Name oder E-Mail eintragen.")));
+      return false;
+    }
+    this.busy = true;
+    try {
+      const result = await call("ContactSave", {
+        uid: card.id,
+        jCard: toJCard(card)
+      });
+      if (result.Result === false) throw new ApiError(1, t("CONTACTS.ERROR_SAVE", "Der Kontakt konnte nicht gespeichert werden."));
+      card.id = String(result.ResultID || card.id);
+      card.source = toJCard(card);
+      this.remember();
+      this.live(t("CONTACTS.SAVED", "Gespeichert"));
+      await this.load();
+      const fresh = this.rows.find((row2) => row2.id === card.id);
+      if (fresh) this.draft = clone(fresh);
+      this.remember();
+      this.renderCard();
+      return true;
+    } catch (error) {
+      this.fail(error);
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+  targets() {
+    const picked = this.rows.filter((row2) => row2.id && this.checked.has(row2.id));
+    if (picked.length) return picked;
+    return this.draft ? [this.draft] : [];
+  }
+  async remove() {
+    const rows = this.targets().filter((row2) => row2.id && !row2.readOnly);
+    if (!rows.length || this.busy) return;
+    const what = rows.length === 1 ? t("CONTACTS.DELETE_ONE", "%NAME% wird aus dem Adressbuch entfernt.").replace("%NAME%", displayName(rows[0]) || t("CONTACTS.THIS_CONTACT", "Dieser Kontakt")) : t("CONTACTS.DELETE_MANY", "%N% Kontakte werden aus dem Adressbuch entfernt.").replace("%N%", String(rows.length));
+    const ok = await this.hooks.confirm(t("CONTACTS.DELETE_TITLE", "Kontakte l\xF6schen?"), what, t("GLOBAL.DELETE", "L\xF6schen"));
+    if (!ok) return;
+    this.busy = true;
+    try {
+      await call("ContactsDelete", { uids: rows.map((row2) => row2.id).join(",") });
+      rows.forEach((row2) => this.checked.delete(row2.id));
+      if (this.draft && rows.some((row2) => row2.id === this.draft?.id)) this.draft = null;
+      this.live(rows.length === 1 ? t("CONTACTS.DELETED_ONE", "Kontakt gel\xF6scht.") : t("CONTACTS.DELETED_MANY", "%N% Kontakte gel\xF6scht.").replace("%N%", String(rows.length)));
+      await this.load();
+      this.renderCard();
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+  write(all) {
+    const lines = [];
+    this.targets().forEach((card) => {
+      const emails = card.emails.map((item) => item.trim()).filter(Boolean);
+      const use = all || card.sendAll ? emails : emails.slice(0, 1);
+      const name = displayName(card);
+      use.forEach((email) => lines.push(formatAddress(name, email)));
+    });
+    if (!lines.length) {
+      this.live(t("CONTACTS.NO_EMAIL", "Keine E-Mail-Adresse in der Auswahl."));
+      return;
+    }
+    this.hooks.compose(lines.join(", "));
+  }
+  async importFile(file) {
+    this.busy = true;
+    this.note("");
+    try {
+      const count = await uploadContacts(file);
+      this.live(t("CONTACTS.IMPORT_OK", "%N% Kontakte \xFCbernommen.").replace("%N%", String(count)));
+      this.page = 1;
+      await this.load();
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+  async sync() {
+    if (!this.syncAllowed) return;
+    if (!this.syncMode) {
+      this.live(t("CONTACTS.SYNC_OFF", "Die Synchronisierung ist in den Einstellungen aus."));
+      return;
+    }
+    this.busy = true;
+    this.note("");
+    try {
+      await syncContacts();
+      this.live(t("CONTACTS.SYNC_OK", "Synchronisiert."));
+      await this.load();
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+  setSearch(value) {
+    this.search = value;
+    const input2 = this.host.querySelector("#book-q");
+    if (input2 && input2.value !== value) input2.value = value;
+    const clear = this.host.querySelector("[data-op='clear-search']");
+    if (clear) clear.hidden = !value;
+    window.clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => {
+      this.page = 1;
+      void this.load();
+    }, 250);
+  }
+  async turn(dir) {
+    const pages = Math.max(1, Math.ceil(this.count / PAGE));
+    const next = Math.min(pages, Math.max(1, this.page + dir));
+    if (next === this.page) return;
+    if (!await this.confirmLeave()) return;
+    this.page = next;
+    this.draft = null;
+    await this.load();
+    this.renderCard();
+    this.host.querySelector("[data-op='open']")?.focus({ preventScroll: true });
+  }
+  move(dir) {
+    if (!this.rows.length) return;
+    const index = this.rows.findIndex((row2) => row2.id === this.draft?.id);
+    const next = this.rows[Math.min(this.rows.length - 1, Math.max(0, index + dir))];
+    if (next) void this.select(next.id);
+  }
+  toggleCheck(id, range) {
+    if (!id) return;
+    const ids = this.rows.map((row2) => row2.id);
+    const index = ids.indexOf(id);
+    if (range && this.anchor >= 0 && index >= 0) {
+      const [from, to] = [this.anchor, index].sort((a, b) => a - b);
+      for (let cursor = from; cursor <= to; cursor += 1) if (ids[cursor]) this.checked.add(ids[cursor]);
+    } else if (this.checked.has(id)) this.checked.delete(id);
+    else this.checked.add(id);
+    this.anchor = index;
+    this.renderRows();
+  }
+  addField(field2) {
+    const card = this.draft;
+    if (!card || card.readOnly) return;
+    if (field2 === "email") card.emails.push("");
+    else if (field2 === "phone") card.phones = (card.phones || []).concat("");
+    else if (field2 === "url") card.urls = (card.urls || []).concat("");
+    else if (field2 === "address") card.addresses = (card.addresses || []).concat(emptyAddress());
+    else if (field2 === "nickname") card.nickname = card.nickname ?? "";
+    else if (field2 === "note") card.note = card.note ?? "";
+    else if (field2 === "birthday") card.birthday = card.birthday ?? "";
+    else if (field2 === "tags") card.tags = card.tags ?? "";
+    this.tab = field2 === "tags" ? "person" : this.tab;
+    this.renderCard();
+    const selector = field2 === "address" ? "[data-field='street']" : `[data-field='${field2 === "phone" ? "phone" : field2 === "email" ? "email" : field2}']`;
+    const nodes = this.host.querySelectorAll(selector);
+    nodes[nodes.length - 1]?.focus({ preventScroll: true });
+  }
+  dropField(field2, index) {
+    const card = this.draft;
+    if (!card || card.readOnly) return;
+    if (field2 === "email") {
+      card.emails.splice(index, 1);
+      if (!card.emails.length) card.emails = [""];
+    } else if (field2 === "phone" && card.phones) {
+      card.phones.splice(index, 1);
+      if (!card.phones.length) card.phones = null;
+    } else if (field2 === "url" && card.urls) {
+      card.urls.splice(index, 1);
+      if (!card.urls.length) card.urls = null;
+    } else if (field2 === "address" && card.addresses) {
+      card.addresses.splice(index, 1);
+      if (!card.addresses.length) card.addresses = null;
+    } else if (field2 === "nickname") card.nickname = null;
+    else if (field2 === "note") card.note = null;
+    else if (field2 === "birthday") card.birthday = null;
+    else if (field2 === "tags") card.tags = null;
+    this.renderCard();
+  }
+  onInput(event) {
+    const input2 = event.target;
+    if (input2.id === "book-q") {
+      this.setSearch(input2.value);
+      return;
+    }
+    this.patch(input2);
+  }
+  onChange(event) {
+    const input2 = event.target;
+    if (input2.dataset.field) this.patch(input2);
+  }
+  patch(input2) {
+    const card = this.draft;
+    const field2 = input2.dataset.field || "";
+    if (!card || !field2) return;
+    const index = Number(input2.dataset.index || 0);
+    const value = input2.value;
+    if (field2 === "given") card.given = value;
+    else if (field2 === "middle") card.middle = value;
+    else if (field2 === "surname") card.surname = value;
+    else if (field2 === "prefix") card.prefix = value;
+    else if (field2 === "suffix") card.suffix = value;
+    else if (field2 === "nickname") card.nickname = value;
+    else if (field2 === "note") card.note = value;
+    else if (field2 === "birthday") card.birthday = value;
+    else if (field2 === "org") card.org = value;
+    else if (field2 === "department") card.department = value;
+    else if (field2 === "title") card.title = value;
+    else if (field2 === "tags") card.tags = value;
+    else if (field2 === "email") card.emails[index] = value;
+    else if (field2 === "phone" && card.phones) card.phones[index] = value;
+    else if (field2 === "url" && card.urls) card.urls[index] = value;
+    else if (field2 === "sign" || field2 === "encrypt") card[field2] = value;
+    else if (card.addresses && ["pobox", "ext", "street", "locality", "region", "code", "country"].includes(field2)) {
+      card.addresses[index][field2] = value;
+    } else if (field2 === "send-all") card.sendAll = input2.checked;
+    if (["given", "middle", "surname", "prefix", "suffix", "nickname", "email"].includes(field2)) this.renderRows();
+  }
+  renderRows() {
+    const box = this.host.querySelector("#book-rows");
+    const clear = this.host.querySelector("[data-op='clear-search']");
+    if (clear) clear.hidden = !this.search;
+    if (!box) return;
+    if (!this.rows.length && !this.busy) {
+      const empty = this.search ? t("CONTACTS.EMPTY_SEARCH", "Keine Kontakte gefunden") : t("CONTACTS.EMPTY_LIST", "Keine Kontakte");
+      box.innerHTML = `<div class="empty"><span class="icon icon-lg">${icon("contacts")}</span><p>${esc7(empty)}</p>${this.search ? "" : `<button type="button" class="ink-btn" data-action="book" data-op="new">${icon("plus")}<span class="btn-label">${esc7(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button>`}</div>`;
+      return;
+    }
+    if (!this.rows.length) {
+      box.innerHTML = `<p class="quiet">${esc7(t("GLOBAL.LOADING", "Wird geladen"))} \u2026</p>`;
+      return;
+    }
+    box.innerHTML = `<div class="book-rows" role="list">${this.rows.map((row2) => {
+      const shown = this.draft?.id === row2.id ? this.draft : row2;
+      const name = displayName(shown) || t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt");
+      const mail = shown.emails.find((item) => item.trim()) || "";
+      const current = this.draft?.id === row2.id;
+      const on2 = this.checked.has(row2.id);
+      return `<div class="book-row" role="listitem"${current ? ` aria-current="true"` : ""}>
+        <label class="book-check"><input type="checkbox" data-action="book" data-op="check" data-id="${esc7(row2.id)}"${on2 ? " checked" : ""} aria-label="${esc7(t("CONTACTS.SELECT", "Ausw\xE4hlen: %NAME%").replace("%NAME%", name))}"></label>
+        <button type="button" class="book-open" data-action="book" data-op="open" data-id="${esc7(row2.id)}">
+          <strong>${esc7(name)}</strong>
+          ${mail ? `<span class="quiet">${esc7(mail)}</span>` : ""}
+        </button>
+      </div>`;
+    }).join("")}</div>`;
+  }
+  renderPager() {
+    const box = this.host.querySelector("#book-pager");
+    if (!box) return;
+    const pages = Math.max(1, Math.ceil(this.count / PAGE));
+    if (pages < 2) {
+      box.innerHTML = "";
+      box.setAttribute("hidden", "");
+      return;
+    }
+    box.removeAttribute("hidden");
+    const label2 = t("CONTACTS.PAGE_STATUS", "Seite %P% von %N%").replace("%P%", String(this.page)).replace("%N%", String(pages));
+    box.innerHTML = `
+      <button type="button" class="text-btn" data-action="book" data-op="page" data-dir="prev"${this.page <= 1 ? " disabled" : ""}>${icon("chevron-left")}<span class="btn-label">${esc7(t("GLOBAL.BACK", "Zur\xFCck"))}</span></button>
+      <span class="quiet">${esc7(label2)}</span>
+      <button type="button" class="text-btn" data-action="book" data-op="page" data-dir="next"${this.page >= pages ? " disabled" : ""}><span class="btn-label">${esc7(t("CONTACTS.NEXT_PAGE", "Weiter"))}</span>${icon("chevron-right")}</button>`;
+  }
+  renderCard() {
+    const box = this.host.querySelector("#book-card");
+    if (!box) return;
+    const card = this.draft;
+    if (!card) {
+      box.innerHTML = `<div class="empty"><span class="icon icon-lg">${icon("contacts")}</span><p>${esc7(t("CONTACTS.CONTACT_VIEW_DESC", "Kontakt aus der Liste w\xE4hlen, um ihn anzuzeigen."))}</p></div>`;
+      return;
+    }
+    const lock = card.readOnly;
+    const dis = lock ? " disabled" : "";
+    const canEdit = !lock;
+    const back = this.hooks.wide() ? "" : `<button type="button" class="icon-btn" data-action="book" data-op="back-list" aria-label="${esc7(t("GLOBAL.BACK", "Zur\xFCck"))}">${icon("back")}</button>`;
+    const heading = displayName(card) || t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen");
+    box.innerHTML = `
+      <div class="book-card-head">
+        ${back}
+        <h2 class="title title-md">${esc7(heading)}</h2>
+        ${lock ? `<p class="quiet">${esc7(t("CONTACTS.LABEL_READ_ONLY", "Schreibgesch\xFCtzt"))}</p>` : `<button type="button" class="ink-btn" data-action="book" data-op="save">${icon("save")}<span class="btn-label">${esc7(card.id ? t("GLOBAL.SAVE", "Speichern") : t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen"))}</span></button>`}
+      </div>
+      <div class="book-tabs" role="tablist" aria-label="${esc7(t("GLOBAL.CONTACTS", "Kontakte"))}">
+        ${this.tabButton("person", t("CONTACTS.TAB_CONTACT", "Kontakt"))}
+        ${this.tabButton("work", t("CONTACTS.TAB_BUSINESS", "Unternehmen"))}
+        ${this.tabButton("crypto", t("CONTACTS.TAB_CRYPTO", "Verschl\xFCsselung"))}
+      </div>
+      <div class="book-panels">
+        <div role="tabpanel" id="book-panel-person" ${this.tab === "person" ? "" : "hidden"}>
+          ${this.text("prefix", t("CONTACTS.NAME_PREFIX", "Vorsatz"), card.prefix, "honorific-prefix", dis)}
+          ${this.text("given", t("CONTACTS.FIRST_NAME", "Vorname"), card.given, "given-name", dis)}
+          ${this.text("middle", t("CONTACTS.MIDDLE_NAME", "Weiterer Vorname"), card.middle, "additional-name", dis)}
+          ${this.text("surname", t("CONTACTS.LAST_NAME", "Nachname"), card.surname, "family-name", dis)}
+          ${this.text("suffix", t("CONTACTS.NAME_SUFFIX", "Nachsatz"), card.suffix, "honorific-suffix", dis)}
+          ${card.nickname == null ? "" : this.text("nickname", t("CONTACTS.NICK_NAME", "Spitzname"), card.nickname, "nickname", dis, canEdit)}
+          <fieldset class="book-group">
+            <legend class="mono">${esc7(t("GLOBAL.EMAIL", "E-Mail"))}</legend>
+            <label class="check"><input type="checkbox" data-field="send-all"${card.sendAll ? " checked" : ""}${dis}> ${esc7(t("CONTACTS.SEND_TO_ALL_CONTACT_EMAILS", "An alle E-Mail-Adressen schreiben"))}</label>
+            ${card.emails.map((value, index) => this.row("email", value, index, "email", dis, canEdit && card.emails.length > 1)).join("")}
+          </fieldset>
+          ${card.phones ? this.group(t("CONTACTS.ADD_MENU_PHONE", "Telefon"), card.phones.map((value, index) => this.row("phone", value, index, "tel", dis, canEdit)).join("")) : ""}
+          ${card.urls ? this.group(t("CONTACTS.ADD_MENU_URL", "URL"), card.urls.map((value, index) => this.row("url", value, index, "url", dis, canEdit)).join("")) : ""}
+          ${card.addresses ? card.addresses.map((item, index) => this.address(item, index, dis, canEdit)).join("") : ""}
+          ${card.birthday == null ? "" : this.text("birthday", t("CONTACTS.LABEL_BIRTHDAY", "Geburtstag"), card.birthday, "bday", dis, canEdit, "date")}
+          ${card.note == null ? "" : this.area("note", t("CONTACTS.ADD_MENU_NOTE", "Anmerkung"), card.note, dis, canEdit)}
+          ${card.tags == null ? "" : this.text("tags", t("CONTACTS.ADD_MENU_TAGS", "Schlagw\xF6rter"), card.tags, "off", dis, canEdit)}
+        </div>
+        <div role="tabpanel" id="book-panel-work" ${this.tab === "work" ? "" : "hidden"}>
+          ${this.text("org", t("CONTACTS.LABEL_ORGANIZATION", "Organisation"), card.org, "organization", dis)}
+          ${this.text("department", t("CONTACTS.LABEL_DEPARTMENT", "Abteilung"), card.department, "organization", dis)}
+          ${this.text("title", t("CONTACTS.LABEL_TITLE", "Titel"), card.title, "organization-title", dis)}
+        </div>
+        <div role="tabpanel" id="book-panel-crypto" ${this.tab === "crypto" ? "" : "hidden"}>
+          ${this.crypto("sign", t("CRYPTO.SIGN", "Unterschreiben"), card.sign, dis)}
+          ${this.crypto("encrypt", t("CRYPTO.ENCRYPT", "Verschl\xFCsseln"), card.encrypt, dis)}
+        </div>
+      </div>
+      ${lock ? "" : `<div class="book-add bar-more">
+        <button type="button" class="text-btn" data-action="book" data-op="add-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="book-add">${icon("plus")}<span class="btn-label">${esc7(t("CONTACTS.ADD_MENU_LABEL", "Hinzuf\xFCgen"))}</span></button>
+        <div class="menu" id="book-add" role="menu" hidden>
+          ${card.nickname == null ? this.addItem("nickname", t("CONTACTS.ADD_MENU_NICKNAME", "Spitzname")) : ""}
+          ${this.addItem("email", t("GLOBAL.EMAIL", "E-Mail"))}
+          ${this.addItem("phone", t("CONTACTS.ADD_MENU_PHONE", "Telefon"))}
+          ${this.addItem("url", t("CONTACTS.ADD_MENU_URL", "URL"))}
+          ${this.addItem("address", t("CONTACTS.ADD_MENU_ADDRESS", "Adresse"))}
+          ${card.birthday == null ? this.addItem("birthday", t("CONTACTS.ADD_MENU_BIRTHDAY", "Geburtstag")) : ""}
+          ${card.note == null ? this.addItem("note", t("CONTACTS.ADD_MENU_NOTE", "Anmerkung")) : ""}
+          ${card.tags == null ? this.addItem("tags", t("CONTACTS.ADD_MENU_TAGS", "Schlagw\xF6rter")) : ""}
+        </div>
+      </div>`}`;
+  }
+  tabButton(id, label2) {
+    const on2 = this.tab === id;
+    return `<button type="button" role="tab" id="book-tab-${id}" aria-controls="book-panel-${id}" aria-selected="${on2 ? "true" : "false"}" tabindex="${on2 ? "0" : "-1"}" data-action="book" data-op="tab" data-tab="${id}">${esc7(label2)}</button>`;
+  }
+  text(field2, label2, value, auto, dis, drop = false, type = "text") {
+    return `<label class="field"><span>${esc7(label2)}</span><span class="book-line"><input data-field="${field2}" type="${type}" value="${esc7(value)}" autocomplete="${esc7(auto)}"${dis}>${drop ? this.drop(field2, 0, label2) : ""}</span></label>`;
+  }
+  area(field2, label2, value, dis, drop) {
+    return `<label class="field"><span>${esc7(label2)}</span><span class="book-line"><textarea data-field="${field2}"${dis}>${esc7(value)}</textarea>${drop ? this.drop(field2, 0, label2) : ""}</span></label>`;
+  }
+  row(field2, value, index, auto, dis, drop) {
+    const type = field2 === "email" ? "email" : field2 === "phone" ? "tel" : field2 === "url" ? "url" : "text";
+    return `<span class="book-line"><input data-field="${field2}" data-index="${index}" type="${type}" value="${esc7(value)}" autocomplete="${auto}"${field2 === "url" ? ` placeholder="https://"` : ""}${dis}>${drop ? this.drop(field2, index, field2) : ""}</span>`;
+  }
+  address(item, index, dis, drop) {
+    const line2 = (field2, label2, auto) => `<label class="field"><span>${esc7(label2)}</span><input data-field="${field2}" data-index="${index}" type="text" value="${esc7(item[field2])}" autocomplete="${auto}"${dis}></label>`;
+    return `<fieldset class="book-group"><legend class="mono">${esc7(t("CONTACTS.ADD_MENU_ADDRESS", "Adresse"))}</legend>
+      ${line2("street", t("CONTACTS.STREET", "Stra\xDFe"), "street-address")}
+      ${line2("ext", t("CONTACTS.EXT", "Adresszusatz"), "off")}
+      ${line2("code", t("CONTACTS.POSTCODE", "Postleitzahl"), "postal-code")}
+      ${line2("locality", t("CONTACTS.LOCALITY", "Ort"), "address-level2")}
+      ${line2("region", t("CONTACTS.REGION", "Region"), "address-level1")}
+      ${line2("country", t("CONTACTS.COUNTRY", "Land"), "country-name")}
+      ${line2("pobox", t("CONTACTS.POBOX", "Postfach"), "off")}
+      ${drop ? this.drop("address", index, t("CONTACTS.ADD_MENU_ADDRESS", "Adresse")) : ""}
+    </fieldset>`;
+  }
+  crypto(field2, label2, value, dis) {
+    const options = [
+      ["Ask", t("CONTACTS.ASK", "Fragen")],
+      ["IfPossible", t("CONTACTS.ALWAYS_IF_POSSIBLE", "Wenn m\xF6glich")],
+      ["Always", t("CONTACTS.ALWAYS", "Immer")],
+      ["Never", t("CONTACTS.NEVER", "Niemals")]
+    ];
+    return `<label class="field"><span>${esc7(label2)}</span><select data-field="${field2}"${dis}>${options.map(([id, text2]) => `<option value="${id}"${id === value ? " selected" : ""}>${esc7(text2)}</option>`).join("")}</select></label>`;
+  }
+  group(legend, inner) {
+    return `<fieldset class="book-group"><legend class="mono">${esc7(legend)}</legend>${inner}</fieldset>`;
+  }
+  addItem(field2, label2) {
+    return `<button type="button" class="menu-item" role="menuitem" data-action="book" data-op="add" data-field="${field2}">${icon("plus")}<span>${esc7(label2)}</span></button>`;
+  }
+  drop(field2, index, label2) {
+    return `<button type="button" class="icon-btn" data-action="book" data-op="drop" data-field="${field2}" data-index="${index}" aria-label="${esc7(t("CONTACTS.REMOVE_FIELD", "Feld entfernen") + ": " + label2)}">${icon("minus")}</button>`;
+  }
+  toggleMenu(selector, source) {
+    const menu = this.host.querySelector(selector);
+    if (!menu) return;
+    const open = menu.hidden;
+    this.closeMenus();
+    menu.hidden = !open;
+    source.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) menu.querySelector("[role='menuitem']")?.focus({ preventScroll: true });
+  }
+  closeMenus() {
+    this.host.querySelectorAll("#book-menu, #book-add").forEach((menu) => {
+      menu.hidden = true;
+    });
+    this.host.querySelectorAll("[data-op='more'], [data-op='add-menu']").forEach((button3) => button3.setAttribute("aria-expanded", "false"));
+  }
+  note(text2) {
+    const slot = this.host.querySelector("#book-error");
+    if (!slot) return;
+    slot.hidden = !text2;
+    slot.textContent = text2;
+  }
+  fail(error) {
+    const text2 = error instanceof ApiError && error.code === 0 ? error.message : explain(error);
+    this.note(text2);
+  }
+  live(text2) {
+    this.note("");
+    const slot = this.host.querySelector("#book-live");
+    if (slot) slot.textContent = text2;
+  }
+};
+function emptyAddress() {
+  return { pobox: "", ext: "", street: "", locality: "", region: "", code: "", country: "" };
+}
+function clone(card) {
+  return {
+    ...card,
+    emails: card.emails.slice(),
+    phones: card.phones ? card.phones.slice() : null,
+    urls: card.urls ? card.urls.slice() : null,
+    addresses: card.addresses ? card.addresses.map((item) => ({ ...item })) : null,
+    source: card.source
+  };
+}
+function esc7(value) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char] ?? char);
+}
+function mountBook(host, hooks) {
+  return new Book(host, hooks);
+}
+
 // src/view.ts
 var SORTS = [
   ["", "MESSAGE_LIST.SORT_DATE_DESC", "Datum absteigend"],
@@ -3261,7 +4192,7 @@ var CATEGORY = {
 function categoryMark(category) {
   if (!category || !CATEGORY[category]) return "";
   const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
-  return `<span class="cat">${mark}${esc7(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
+  return `<span class="cat">${mark}${esc8(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 function rowMarks(row2) {
   const marks = [
@@ -3273,7 +4204,7 @@ function rowMarks(row2) {
   const html = marks.filter(([on2]) => on2).map(([, name, label2]) => icon(name, label2)).join("");
   return html ? `<span class="marks">${html}</span>` : "";
 }
-function esc7(value) {
+function esc8(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -3283,7 +4214,7 @@ function esc7(value) {
   })[char] ?? char);
 }
 function withIcon(name, label2) {
-  return `${icon(name)}<span class="btn-label">${esc7(label2)}</span>`;
+  return `${icon(name)}<span class="btn-label">${esc8(label2)}</span>`;
 }
 var ROLE_ICON2 = {
   inbox: "inbox",
@@ -3301,6 +4232,7 @@ function createView(root3, actions) {
   let edit = null;
   let snap = null;
   let composer = null;
+  let book = null;
   let composePrefs = {
     editor: "Plain",
     markdown: false,
@@ -3319,29 +4251,73 @@ function createView(root3, actions) {
   let composeIdentities = [];
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
+  function chooseDialog(title, text2, ok, alt = "", danger = true) {
+    const dialog = shell?.querySelector("#confirm");
+    if (!dialog) return Promise.resolve("cancel");
+    dialog.querySelector("#confirm-title").textContent = title;
+    const body = dialog.querySelector("#confirm-text");
+    body.hidden = !text2;
+    body.textContent = text2;
+    const accept = dialog.querySelector("#confirm-ok");
+    accept.className = danger ? "danger" : "ink-btn";
+    accept.innerHTML = withIcon(danger ? "delete" : "check", ok);
+    const other = dialog.querySelector("#confirm-alt");
+    other.hidden = !alt;
+    other.textContent = alt;
+    dialog.returnValue = "";
+    dialog.showModal();
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => {
+        const value = dialog.returnValue;
+        resolve(value === "ok" || value === "alt" ? value : "cancel");
+      }, { once: true });
+    });
+  }
+  async function closeBook() {
+    if (shell?.dataset.surface !== "contacts") return true;
+    if (book && !await book.confirmLeave()) return false;
+    if (!shell) return true;
+    shell.dataset.surface = "mail";
+    const node = shell.querySelector("#book");
+    if (node) node.hidden = true;
+    shell.querySelectorAll("[data-action='open-book']").forEach((button3) => button3.setAttribute("aria-pressed", "false"));
+    return true;
+  }
+  async function openBook() {
+    if (!shell) return;
+    if (shell.dataset.full === "true") toggleFullscreen(false);
+    if (!docked()) setSidebar(false);
+    shell.dataset.surface = "contacts";
+    const node = shell.querySelector("#book");
+    if (node) node.hidden = false;
+    shell.querySelectorAll("[data-action='open-book']").forEach((button3) => button3.setAttribute("aria-pressed", "true"));
+    if (!wide()) pane("list");
+    await book?.open();
+    shell.querySelector("#book-q")?.focus({ preventScroll: true });
+  }
   const showLogin = (title, options) => {
     document.title = title;
     const languages = options?.languages || {};
     const codes = Object.keys(languages);
-    const langField = options && codes.length ? `<label class="field"><span>${esc7(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc7(code)}"${code === options.language ? " selected" : ""}>${esc7(languages[code] || code)}</option>`).join("")}</select></label>` : "";
-    const codeField = options?.twoFactor ? `<label class="field"><span>${esc7(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>` : "";
+    const langField = options && codes.length ? `<label class="field"><span>${esc8(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc8(code)}"${code === options.language ? " selected" : ""}>${esc8(languages[code] || code)}</option>`).join("")}</select></label>` : "";
+    const codeField = options?.twoFactor ? `<label class="field"><span>${esc8(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>` : "";
     root3.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
-          <h1 class="title">${esc7(title)}</h1>
+          <h1 class="title">${esc8(title)}</h1>
           ${langField}
-          <label class="field"><span>${esc7(t("GLOBAL.EMAIL", "E-Mail"))}</span>
+          <label class="field"><span>${esc8(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
           <p class="error" data-for="email" hidden></p>
-          <label class="field"><span>${esc7(t("GLOBAL.PASSWORD", "Passwort"))}</span>
+          <label class="field"><span>${esc8(t("GLOBAL.PASSWORD", "Passwort"))}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
           ${codeField}
-          <label class="stay"><input name="stay" type="checkbox"> ${esc7(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
+          <label class="stay"><input name="stay" type="checkbox"> ${esc8(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
-          <button type="submit" class="ink-btn">${esc7(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
+          <button type="submit" class="ink-btn">${esc8(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
         </form>
       </main>`;
     const form2 = root3.querySelector("form");
@@ -3366,28 +4342,30 @@ function createView(root3, actions) {
   };
   const showMail = (email, folderName, assist) => {
     root3.innerHTML = `
-      <div class="shell" data-pane="list" data-layout="1" data-sidebar="${docked() ? "open" : "closed"}">
+      <div class="shell" data-pane="list" data-layout="1" data-surface="mail" data-sidebar="${docked() ? "open" : "closed"}">
         <button type="button" class="scrim" data-action="close-sidebar" aria-label="Ordner schlie\xDFen"></button>
         <aside class="sidebar" aria-label="Ordner">
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
               <div id="account-list"></div>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc7(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="open-book" data-book-entry hidden>${icon("contacts")}<span>${esc8(t("GLOBAL.CONTACTS", "Kontakte"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc8(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc8(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
-          <p class="group-label mono">${esc7(t("FOLDERS_UI.FOLDERS", "Ordner"))}</p>
+          <p class="group-label mono">${esc8(t("FOLDERS_UI.FOLDERS", "Ordner"))}</p>
           <div class="folder-filter" hidden>
-            <label class="sr" for="folder-q">${esc7(t("FOLDERS_UI.FILTER", "Ordner suchen"))}</label>
-            <input class="search" id="folder-q" type="search" placeholder="${esc7(t("FOLDERS_UI.FILTER", "Ordner suchen"))}" autocomplete="off">
+            <label class="sr" for="folder-q">${esc8(t("FOLDERS_UI.FILTER", "Ordner suchen"))}</label>
+            <input class="search" id="folder-q" type="search" placeholder="${esc8(t("FOLDERS_UI.FILTER", "Ordner suchen"))}" autocomplete="off">
           </div>
           <div id="folder-tree" class="folder-tree"></div>
+          <button type="button" class="folder book-entry" data-action="open-book" data-book-entry hidden aria-pressed="false">${icon("contacts")}<span class="folder-name">${esc8(t("GLOBAL.CONTACTS", "Kontakte"))}</span></button>
           <div class="sidebar-foot">
             <button type="button" class="text-btn" data-action="f-create" hidden>${withIcon("folder-plus", t("SETTINGS_FOLDERS.BUTTON_CREATE", "Ordner anlegen"))}</button>
             <div id="quota" class="quota"></div>
           </div>
-          <ul class="menu folder-menu" id="folder-menu" role="menu" aria-label="${esc7(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}" hidden></ul>
+          <ul class="menu folder-menu" id="folder-menu" role="menu" aria-label="${esc8(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}" hidden></ul>
         </aside>
         <section class="list-pane" aria-label="Mails">
           <div class="pane-head">
@@ -3395,7 +4373,7 @@ function createView(root3, actions) {
             <h1 class="title title-md" id="folder-title"></h1>
             <span class="spacer"></span>
             <div class="bar-more view-more">
-              <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc7(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc7(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
+              <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc8(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc8(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
               <div class="menu menu-right" id="view-menu" role="menu" hidden></div>
             </div>
             <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle ausw\xE4hlen" title="Alle ausw\xE4hlen (Strg+A)">${icon("select-all")}</button>
@@ -3404,12 +4382,12 @@ function createView(root3, actions) {
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
             <input class="search" id="search" type="search" placeholder="" autocomplete="off">
-            <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
+            <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc8(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc8(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
-          <div class="quick" role="group" aria-label="${esc7(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
-            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc7(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc7(t("SEARCH.FLAGGED", "Markiert"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc7(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
+          <div class="quick" role="group" aria-label="${esc8(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
+            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc8(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc8(t("SEARCH.FLAGGED", "Markiert"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc8(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
           </div>
           <div class="thread-bar" id="thread-bar" hidden>
             <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zur\xFCck zur Liste"))}</button>
@@ -3426,15 +4404,15 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc7(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc8(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc7(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc7(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc7(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc7(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc8(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc8(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc8(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc8(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc7(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc8(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
@@ -3442,7 +4420,7 @@ function createView(root3, actions) {
             <div class="bar-more">
               <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
               <div class="menu menu-right" id="more-menu" role="menu" hidden>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc7(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc8(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben \u2026</span></button>
@@ -3472,6 +4450,7 @@ function createView(root3, actions) {
             <p class="empty" id="reader-empty">W\xE4hlen Sie eine Mail.</p>
           </div>
         </section>
+        <section class="book" id="book" hidden aria-label="${esc8(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
         <div id="compose-host"></div>
         <nav class="tabbar" aria-label="Navigation">
           <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
@@ -3482,11 +4461,11 @@ function createView(root3, actions) {
           <div class="dialog-body">
             <div class="settings-sticky">
               <div class="sheet-head" style="padding:0;border:0;min-height:0">
-                <h2 id="settings-title" class="title title-md">${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <h2 id="settings-title" class="title title-md">${esc8(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
                 <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
               </div>
-              <nav class="settings-nav" aria-label="${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+              <nav class="settings-nav" aria-label="${esc8(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="general">${withIcon("settings", t("SETTINGS_LABELS.GENERAL", "Allgemein"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="security">${withIcon("key", t("SETTINGS_LABELS.SECURITY", "Sicherheit"))}</button>
@@ -3508,7 +4487,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
               <li><span>N\xE4chste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
@@ -3548,7 +4527,8 @@ function createView(root3, actions) {
             <h2 id="confirm-title" class="title title-md">Wirklich l\xF6schen?</h2>
             <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" value="cancel">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" value="cancel">${esc8(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" value="alt" id="confirm-alt" hidden></button>
               <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             </div>
           </div>
@@ -3558,7 +4538,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <label class="sr" for="picker-q">Ordner suchen</label>
             <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
@@ -3570,7 +4550,7 @@ function createView(root3, actions) {
             <h2 id="prompt-title" class="title title-md"></h2>
             <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" data-action="close-dialog">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" data-action="close-dialog">${esc8(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("check", "\xDCbernehmen")}</button>
             </div>
           </form>
@@ -3581,7 +4561,7 @@ function createView(root3, actions) {
               <h2 id="lightbox-title" class="title title-md"></h2>
               <span class="spacer"></span>
               <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab \xF6ffnen" title="In neuem Tab \xF6ffnen">${icon("external")}</a>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <div class="lightbox-body" id="lightbox-body"></div>
           </div>
@@ -3589,9 +4569,9 @@ function createView(root3, actions) {
         <dialog id="adv-search" class="dialog-wide" aria-labelledby="adv-title">
           <form class="dialog-body" data-action="adv-search-form">
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
-              <h2 id="adv-title" class="title title-md">${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}</h2>
+              <h2 id="adv-title" class="title title-md">${esc8(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <div id="adv-body"></div>
           </form>
@@ -3599,11 +4579,11 @@ function createView(root3, actions) {
         <dialog id="folder-dlg" aria-labelledby="folder-dlg-title">
           <form class="dialog-body" data-action="folder-dlg-form">
             <h2 id="folder-dlg-title" class="title title-md"></h2>
-            <label class="field"><span>${esc7(t("GLOBAL.NAME", "Name"))}</span><input id="folder-dlg-name" type="text" required autocomplete="off"></label>
-            <label class="field"><span>${esc7(t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "\xDCbergeordneter Ordner"))}</span><select id="folder-dlg-parent"></select></label>
-            <label class="check"><input type="checkbox" id="folder-dlg-sub" checked> ${esc7(t("FOLDERS_UI.SUBSCRIBE", "Abonnieren"))}</label>
+            <label class="field"><span>${esc8(t("GLOBAL.NAME", "Name"))}</span><input id="folder-dlg-name" type="text" required autocomplete="off"></label>
+            <label class="field"><span>${esc8(t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "\xDCbergeordneter Ordner"))}</span><select id="folder-dlg-parent"></select></label>
+            <label class="check"><input type="checkbox" id="folder-dlg-sub" checked> ${esc8(t("FOLDERS_UI.SUBSCRIBE", "Abonnieren"))}</label>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" data-action="close-dialog">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" data-action="close-dialog">${esc8(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("folder-plus", t("POPUPS_CREATE_FOLDER.BUTTON_CREATE", "Anlegen"))}</button>
             </div>
           </form>
@@ -3613,7 +4593,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="acl-title" class="title title-md"></h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <div id="acl-body"></div>
           </div>
@@ -3622,7 +4602,7 @@ function createView(root3, actions) {
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
-          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc7(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc8(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button></li>
         </ul>
       </div>`;
     const next = root3.querySelector(".shell");
@@ -3643,6 +4623,13 @@ function createView(root3, actions) {
       }
     });
     composer.configure(composePrefs, composeIdentities);
+    book = mountBook(next.querySelector("#book"), {
+      confirm: (title, text2, ok, danger = true) => chooseDialog(title, text2, ok, "", danger).then((value) => value === "ok"),
+      choose: (title, text2, ok, alt) => chooseDialog(title, text2, ok, alt, false),
+      compose: (to) => actions.act("compose-to", { to }),
+      pane: (name) => pane(name),
+      wide
+    });
     next.querySelector("#folder-title").textContent = folderName;
     next.querySelector("#reader-place").textContent = folderName;
     const search = next.querySelector("#search");
@@ -3752,10 +4739,10 @@ function createView(root3, actions) {
     const menu = shell?.querySelector("#view-menu");
     const button3 = shell?.querySelector("[data-action='view-menu']");
     if (!menu || !button3) return;
-    const sorts = listMode.sortable && !listMode.threadOpen ? `<p class="menu-label mono">${esc7(t("MESSAGE_LIST.SORT", "Sortieren"))}</p>` + SORTS.map(([value, key, fallback]) => `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${listMode.sort === value ? "true" : "false"}" data-action="sort" data-sort="${esc7(value)}">${icon(listMode.sort === value ? "check" : "sort")}<span>${esc7(t(key, fallback))}</span></button>`).join("") : "";
-    const threads = listMode.threadsAvailable ? `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.useThreads ? "true" : "false"}" data-action="threads-toggle">${icon(listMode.useThreads ? "checkbox-checked" : "checkbox")}<span>${esc7(t("SETTINGS_GENERAL.USE_THREADS", "Als Unterhaltungen anzeigen"))}</span></button>` : "";
-    const group2 = `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.grouped ? "true" : "false"}" data-action="group-toggle">${icon(listMode.grouped ? "checkbox-checked" : "checkbox")}<span>${esc7(t("FOLDERS_UI.GROUP_BY_DATE", "Nach Datum gruppieren"))}</span></button>`;
-    menu.innerHTML = sorts + (sorts ? `<hr class="menu-sep">` : "") + `<p class="menu-label mono">${esc7(t("FOLDERS_UI.VIEW", "Ansicht"))}</p>` + threads + group2;
+    const sorts = listMode.sortable && !listMode.threadOpen ? `<p class="menu-label mono">${esc8(t("MESSAGE_LIST.SORT", "Sortieren"))}</p>` + SORTS.map(([value, key, fallback]) => `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${listMode.sort === value ? "true" : "false"}" data-action="sort" data-sort="${esc8(value)}">${icon(listMode.sort === value ? "check" : "sort")}<span>${esc8(t(key, fallback))}</span></button>`).join("") : "";
+    const threads = listMode.threadsAvailable ? `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.useThreads ? "true" : "false"}" data-action="threads-toggle">${icon(listMode.useThreads ? "checkbox-checked" : "checkbox")}<span>${esc8(t("SETTINGS_GENERAL.USE_THREADS", "Als Unterhaltungen anzeigen"))}</span></button>` : "";
+    const group2 = `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.grouped ? "true" : "false"}" data-action="group-toggle">${icon(listMode.grouped ? "checkbox-checked" : "checkbox")}<span>${esc8(t("FOLDERS_UI.GROUP_BY_DATE", "Nach Datum gruppieren"))}</span></button>`;
+    menu.innerHTML = sorts + (sorts ? `<hr class="menu-sep">` : "") + `<p class="menu-label mono">${esc8(t("FOLDERS_UI.VIEW", "Ansicht"))}</p>` + threads + group2;
     button3.hidden = false;
   }
   function folderButtons() {
@@ -3812,14 +4799,23 @@ function createView(root3, actions) {
     };
     shell.addEventListener("click", (event) => {
       const target = event.target.closest("[data-action], [data-folder], [data-uid]");
+      if (!target?.closest("#book-menu, #book-add, [data-op='more'], [data-op='add-menu']")) {
+        shell?.querySelectorAll("#book-menu, #book-add").forEach((menu2) => {
+          menu2.hidden = true;
+        });
+        shell?.querySelectorAll("[data-op='more'], [data-op='add-menu']").forEach((button3) => button3.setAttribute("aria-expanded", "false"));
+      }
       if (anyMenuOpen() && !target?.closest(".account, .bar-more, #addr-menu")) closeMenu();
       if (!target) return;
       const action = target.dataset.action;
       if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
       if (target.dataset.folder && !action) {
-        actions.selectFolder(target.dataset.folder);
-        if (!wide()) pane("list");
-        if (!docked()) setSidebar(false);
+        void (async () => {
+          if (!await closeBook()) return;
+          actions.selectFolder(target.dataset.folder || "");
+          if (!wide()) pane("list");
+          if (!docked()) setSidebar(false);
+        })();
       } else if (target.dataset.uid) {
         const mouse = event;
         if (mouse.shiftKey || mouse.ctrlKey || mouse.metaKey) {
@@ -3997,6 +4993,7 @@ function createView(root3, actions) {
             const ok_ = dialog.querySelector("#confirm-ok");
             ok_.className = "danger";
             ok_.innerHTML = withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"));
+            dialog.querySelector("#confirm-alt").hidden = true;
             dialog.returnValue = "";
             dialog.showModal();
             const ok = await new Promise((resolve) => {
@@ -4017,7 +5014,27 @@ function createView(root3, actions) {
       else if (action === "pane-folders") pane("folders");
       else if (action === "pane-search") {
         pane("list");
-        (shell?.querySelector("#search")).focus();
+        const field2 = shell?.dataset.surface === "contacts" ? "#book-q" : "#search";
+        shell?.querySelector(field2)?.focus({ preventScroll: true });
+      } else if (action === "test-sync" || action === "sync-now") {
+        const form2 = shell?.querySelector("form[data-kind='save-sync']");
+        if (!form2) return;
+        const data = {};
+        new FormData(form2).forEach((value, key) => {
+          data[key] = String(value);
+        });
+        void actions.settings?.(action, data);
+      } else if (action === "open-book") {
+        closeMenu();
+        void openBook();
+      } else if (action === "close-book") {
+        void closeBook();
+      } else if (action === "book") {
+        const data = {};
+        Object.entries(target.dataset).forEach(([key, value]) => {
+          if (value != null) data[key] = value;
+        });
+        void book?.onAction(data.op || "", target, event);
       } else if (action === "compose") actions.compose();
       else if (action === "reply") actions.reply(false);
       else if (action === "reply-all") actions.reply(true);
@@ -4059,6 +5076,10 @@ function createView(root3, actions) {
         return;
       }
       if (form2.dataset.action === "folder-dlg-form") return;
+      if (form2.dataset.action === "book-search") {
+        event.preventDefault();
+        return;
+      }
       if (form2.dataset.action === "search") {
         event.preventDefault();
         actions.search(form2.querySelector("#search").value.trim());
@@ -4135,13 +5156,22 @@ function createView(root3, actions) {
     });
     shell.addEventListener("change", (event) => {
       const input2 = event.target;
+      const syncForm = input2.closest("form[data-kind='save-sync']");
+      if (syncForm) {
+        const data = {};
+        new FormData(syncForm).forEach((value2, key) => {
+          data[key] = String(value2);
+        });
+        void actions.settings?.("save-sync", data);
+        return;
+      }
       if (input2.name === "appearance") applyAppearance(input2.value);
-      const pref = input2.dataset.pref || event.target.dataset?.pref;
-      if (!pref) return;
+      const pref2 = input2.dataset.pref || event.target.dataset?.pref;
+      if (!pref2) return;
       const control = event.target;
       let value = "value" in control ? control.value : "";
       if (control instanceof HTMLInputElement && control.type === "checkbox") value = control.checked ? "1" : "0";
-      if (pref === "DesktopNotifications" && value === "1" && "Notification" in window && Notification.permission !== "granted") {
+      if (pref2 === "DesktopNotifications" && value === "1" && "Notification" in window && Notification.permission !== "granted") {
         void Notification.requestPermission().then((state) => {
           const slot = shell?.querySelector("#settings-error");
           if (state === "denied" && slot) {
@@ -4151,7 +5181,7 @@ function createView(root3, actions) {
           }
         });
       }
-      void actions.settings?.("pref", { key: pref, value });
+      void actions.settings?.("pref", { key: pref2, value });
     });
     shell.addEventListener("dragstart", (event) => {
       const row2 = event.target.closest("[data-sort]");
@@ -4201,12 +5231,32 @@ function createView(root3, actions) {
           setSidebar(false);
           return;
         }
+        const bookMenu = shell.querySelector("#book-menu:not([hidden]), #book-add:not([hidden])");
+        if (bookMenu) {
+          bookMenu.hidden = true;
+          const opener2 = shell.querySelector(bookMenu.id === "book-add" ? "[data-op='add-menu']" : "[data-op='more']");
+          opener2?.setAttribute("aria-expanded", "false");
+          opener2?.focus({ preventScroll: true });
+          return;
+        }
+        if (shell.dataset.surface === "contacts") {
+          if (!wide() && shell.dataset.pane === "reader") {
+            pane("list");
+            return;
+          }
+          void closeBook();
+          return;
+        }
         if (!typing && listMode.threadOpen) actions.act("thread-back", {});
         return;
       }
       if (typing || shell.querySelector("dialog[open]")) return;
       const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid;
       if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
+      if (shell.dataset.surface === "contacts" && event.key !== "\\" && event.key !== "?") {
+        book?.onKey(event);
+        return;
+      }
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
         event.preventDefault();
@@ -4362,8 +5412,8 @@ function createView(root3, actions) {
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
       filters.innerHTML = cats.map(
-        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc7(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc7(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc8(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc8(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
@@ -4404,13 +5454,13 @@ function createView(root3, actions) {
       sheet.hidden = true;
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc7(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc7(flags.provider)}</span>
+          <span class="title title-md">${esc8(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc8(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc8(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc7(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc8(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
             <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
             <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
@@ -4419,8 +5469,8 @@ function createView(root3, actions) {
         </div>
         <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <textarea id="ask" rows="2" placeholder="${esc7(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
-          <button type="submit" class="ink-btn">${esc7(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <textarea id="ask" rows="2" placeholder="${esc8(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc8(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
         <p class="error" id="chat-error" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -4436,16 +5486,16 @@ function createView(root3, actions) {
           <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
           <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc7(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc8(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
         <div class="tones" role="toolbar" aria-label="Ton">
-          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc7(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
+          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc8(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
           <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
         </div>
-        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc7(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc8(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
         <p class="quiet" id="draft-status"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
@@ -4456,7 +5506,7 @@ function createView(root3, actions) {
         <h2 class="title title-md">Assistent</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
-          <button type="button" class="text-btn" value="cancel">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="text-btn" value="cancel">${esc8(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
           <button type="button" class="ink-btn" value="ok">Fortfahren</button>
         </div>
       </div>`;
@@ -4477,7 +5527,7 @@ function createView(root3, actions) {
     shell?.querySelectorAll("[data-section]").forEach((button3) => {
       const id = button3.dataset.section || "";
       button3.setAttribute("aria-pressed", id === section ? "true" : "false");
-      if (id === "contacts") button3.hidden = !snap?.caps.contacts;
+      if (id === "contacts") button3.hidden = !snap?.app.ContactsSync;
       if (id === "filters") button3.hidden = !snap?.caps.sieve;
       if (id === "assistant") button3.hidden = !(snap?.app.Plugins || {})["ai-copilot"];
     });
@@ -4590,7 +5640,7 @@ function createView(root3, actions) {
       const parent = dialog.querySelector("#folder-dlg-parent");
       const sub = dialog.querySelector("#folder-dlg-sub");
       dialog.querySelector("#folder-dlg-title").textContent = options.title;
-      parent.innerHTML = options.parents.map((item) => `<option value="${esc7(item.value)}"${item.value === options.parent ? " selected" : ""}>${esc7(item.label)}</option>`).join("");
+      parent.innerHTML = options.parents.map((item) => `<option value="${esc8(item.value)}"${item.value === options.parent ? " selected" : ""}>${esc8(item.label)}</option>`).join("");
       name.value = "";
       sub.checked = true;
       dialog.returnValue = "";
@@ -4619,20 +5669,20 @@ function createView(root3, actions) {
       if (box) {
         box.innerHTML = rows.map((row2) => {
           const subject = row2.subject || "(ohne Betreff)";
-          const group2 = row2.group ? `<h2 class="list-group mono">${esc7(row2.group)}</h2>` : "";
+          const group2 = row2.group ? `<h2 class="list-group mono">${esc8(row2.group)}</h2>` : "";
           const threadText = row2.threadCount ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung \xF6ffnen")}: ${row2.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row2.threadUnseen ? `, ${row2.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : "";
-          const thread = row2.threadCount ? `<button type="button" class="msg-thread${row2.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row2.uid}" aria-label="${esc7(`${threadText} \u2013 ${subject}`)}" title="${esc7(threadText)} (T)">${icon("thread")}<span>${row2.threadCount}</span></button>` : "";
+          const thread = row2.threadCount ? `<button type="button" class="msg-thread${row2.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row2.uid}" aria-label="${esc8(`${threadText} \u2013 ${subject}`)}" title="${esc8(threadText)} (T)">${icon("thread")}<span>${row2.threadCount}</span></button>` : "";
           return `${group2}
           <div class="msg-row${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
-            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc7(subject)}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc8(subject)}">
             <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
-              <span class="who">${esc7(row2.who)}</span>
-              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc7(row2.when)}</span>
-              <span class="subj">${esc7(subject)}${categoryMark(row2.category)}</span>
-              <span class="peek">${esc7(row2.preview)}</span>
+              <span class="who">${esc8(row2.who)}</span>
+              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc8(row2.when)}</span>
+              <span class="subj">${esc8(subject)}${categoryMark(row2.category)}</span>
+              <span class="peek">${esc8(row2.preview)}</span>
             </button>
             ${thread}
-            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc7(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc8(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
           </div>`;
         }).join("");
       }
@@ -4687,7 +5737,7 @@ function createView(root3, actions) {
       if (!box) return;
       const others = items.filter((item) => !item.current);
       box.innerHTML = others.length ? `<p class="menu-label mono">Konten</p>` + others.map(
-        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc7(item.email)}">${icon("user")}<span class="grow">${esc7(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
+        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc8(item.email)}">${icon("user")}<span class="grow">${esc8(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
       ).join("") + `<hr class="menu-sep">` : "";
     },
     pickFolder(title, folders, exclude) {
@@ -4700,7 +5750,7 @@ function createView(root3, actions) {
         const q = query.value.trim().toLowerCase();
         const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
         list.innerHTML = rows.map(
-          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc7(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON2[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc7(q ? folder.fullName : folder.name)}</span></button>`
+          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc8(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON2[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc8(q ? folder.fullName : folder.name)}</span></button>`
         ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
       };
       query.value = "";
@@ -4761,20 +5811,17 @@ function createView(root3, actions) {
       });
     },
     confirm(title, text2, ok, danger = true) {
-      const dialog = shell?.querySelector("#confirm");
-      if (!dialog) return Promise.resolve(false);
-      dialog.querySelector("#confirm-title").textContent = title;
-      const p = dialog.querySelector("#confirm-text");
-      p.hidden = !text2;
-      p.textContent = text2;
-      const button3 = dialog.querySelector("#confirm-ok");
-      button3.className = danger ? "danger" : "ink-btn";
-      button3.innerHTML = withIcon(danger ? "delete" : "check", ok);
-      dialog.returnValue = "";
-      dialog.showModal();
-      return new Promise((resolve) => {
-        dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+      return chooseDialog(title, text2, ok, "", danger).then((value) => value === "ok");
+    },
+    setBook(allowed, sync, mode) {
+      shell?.querySelectorAll("[data-book-entry]").forEach((button3) => {
+        button3.hidden = !allowed;
       });
+      book?.setSync(sync, mode);
+      if (!allowed) void closeBook();
+    },
+    reloadBook() {
+      return book?.reload() || Promise.resolve();
     },
     preview(name, url, kind) {
       const dialog = shell?.querySelector("#lightbox");
@@ -5053,13 +6100,13 @@ function createView(root3, actions) {
         dialog.id = "reauth";
         dialog.innerHTML = `
           <form class="dialog-body">
-            <h2 class="title title-md">${esc7(t("LOGIN.SESSION", "Die Sitzung ist abgelaufen"))}</h2>
-            <p class="quiet">${esc7(t("LOGIN.SESSION_HINT", "Melden Sie sich erneut an. Der offene Entwurf bleibt erhalten."))}</p>
-            <label class="field"><span>${esc7(t("GLOBAL.EMAIL", "E-Mail"))}</span><input name="email" type="email" autocomplete="username" required></label>
-            <label class="field"><span>${esc7(t("GLOBAL.PASSWORD", "Passwort"))}</span><input name="password" type="password" autocomplete="current-password" required></label>
-            <label class="field"><span>${esc7(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>
+            <h2 class="title title-md">${esc8(t("LOGIN.SESSION", "Die Sitzung ist abgelaufen"))}</h2>
+            <p class="quiet">${esc8(t("LOGIN.SESSION_HINT", "Melden Sie sich erneut an. Der offene Entwurf bleibt erhalten."))}</p>
+            <label class="field"><span>${esc8(t("GLOBAL.EMAIL", "E-Mail"))}</span><input name="email" type="email" autocomplete="username" required></label>
+            <label class="field"><span>${esc8(t("GLOBAL.PASSWORD", "Passwort"))}</span><input name="password" type="password" autocomplete="current-password" required></label>
+            <label class="field"><span>${esc8(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>
             <p class="error" data-for="reauth" hidden></p>
-            <div class="dialog-actions"><button type="submit" class="ink-btn">${esc7(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button></div>
+            <div class="dialog-actions"><button type="submit" class="ink-btn">${esc8(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button></div>
           </form>`;
         dialog.addEventListener("submit", (event) => {
           event.preventDefault();
@@ -5245,7 +6292,6 @@ var Session = class {
   mainEmail = "";
   caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
   desk = null;
-  contactSearch = "";
   prefs = {
     viewImages: "ask",
     whitelist: "",
@@ -5501,6 +6547,8 @@ var Session = class {
     const cycle = String(data.hourCycle || "");
     hourCycle = cycle === "h12" || cycle === "h23" ? cycle : void 0;
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    const sync = data.ContactsSync;
+    this.view.setBook(this.caps.contacts, Boolean(sync && typeof sync === "object"), Number(sync?.Mode || 0));
     this.view.setLayout(Number(data.Layout ?? 1));
     this.view.setChecks(this.prefs.useChecks);
     this.armLogout();
@@ -5524,11 +6572,30 @@ var Session = class {
       return;
     }
     try {
-      if (name === "open") this.contactSearch = "";
-      if (name === "search-contacts") this.contactSearch = data.search || "";
-      if (name === "open" || name === "search-contacts") {
-        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
+      if (name === "open") {
+        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
         this.view.showSettings(this.desk);
+        return;
+      }
+      if (name === "test-sync") {
+        await call("TestContactsSyncData", { Mode: Number(data.Mode || 0), Url: data.Url || "", User: data.User || "", Password: data.Password || "" });
+        this.view.settingsNotice(t("CONTACTS.TEST_OK", "Die Verbindung steht."));
+        return;
+      }
+      if (name === "sync-now") {
+        if (this.desk) {
+          await applyDesk("save-sync", data, this.desk);
+          this.view.showSettings(this.desk);
+        }
+        if (Number(data.Mode || 0) === 0) {
+          this.view.settingsNotice("Die Synchronisierung ist aus.");
+          this.view.setBook(this.caps.contacts, true, 0);
+          return;
+        }
+        await syncContacts();
+        this.view.setBook(this.caps.contacts, true, Number(data.Mode || 0));
+        this.view.settingsNotice(t("CONTACTS.SYNC_OK", "Synchronisiert."));
+        await this.view.reloadBook();
         return;
       }
       if (name === "pref") {
@@ -5548,7 +6615,14 @@ var Session = class {
         await this.enter(await loadApp());
         return;
       }
-      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
+      if (next === "keep") {
+        this.view.showSettings(this.desk);
+        this.view.settingsSaved();
+        const sync = this.desk.app.ContactsSync;
+        if (sync && typeof sync === "object") this.view.setBook(this.caps.contacts, true, Number(sync.Mode || 0));
+        return;
+      }
+      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
       this.view.showSettings(this.desk);
     } catch (error) {
       this.view.settingsNotice(explain(error));
@@ -5683,7 +6757,7 @@ var Session = class {
   }
   folderName(folder) {
     if (!folder) return "";
-    return displayName(folder, this.roleOf(folder));
+    return displayName2(folder, this.roleOf(folder));
   }
   /** Eltern für „Neuer Ordner“: vorhandene Ordner mit Unterordnern erlaubt. */
   parentChoices() {
@@ -7177,10 +8251,16 @@ ${body}`
             card = writeProp(card, "email", data.email);
             await call("ContactSave", { uid: "", jCard: card });
             this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugef\xFCgt.`);
+            await this.view.reloadBook();
           } catch (error) {
             this.view.notice(explain(error));
           }
         }
+        return;
+      case "compose-to":
+        this.replyKind = "";
+        this.draftRef = null;
+        this.view.openCompose({ title: "Neue Nachricht", to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
         return;
       case "accounts":
         await this.loadAccounts();
