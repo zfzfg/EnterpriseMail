@@ -181,9 +181,9 @@ async function streamEvents(path, params, onEvent, signal) {
   }
 }
 function b64Json(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const bytes2 = new TextEncoder().encode(JSON.stringify(value));
   let binary = "";
-  bytes.forEach((byte) => {
+  bytes2.forEach((byte) => {
     binary += String.fromCharCode(byte);
   });
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -675,8 +675,8 @@ function externalUrls(html) {
   return [...urls];
 }
 function plainToHtml(text2, collapse) {
-  const esc6 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
-  const linkify = (value) => esc6(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
+  const esc8 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+  const linkify = (value) => esc8(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
     const clean = stripTracking(url.replace(/&amp;/g, "&")).replace(/&/g, "&amp;");
     return `<a href="${clean}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
@@ -1293,13 +1293,13 @@ function identityForm(item, caps) {
 }
 function lookSection() {
   const current = readAppearance();
-  const choice = (value, label2) => `<label class="check"><input type="radio" name="appearance" value="${value}"${current === value ? " checked" : ""}> ${label2}</label>`;
+  const choice2 = (value, label2) => `<label class="check"><input type="radio" name="appearance" value="${value}"${current === value ? " checked" : ""}> ${label2}</label>`;
   return `
     <p class="mono">${esc2(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
     <fieldset class="choices">
-      ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
-      ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
-      ${choice("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
+      ${choice2("system", t("SETTINGS_DESK.SYSTEM", "System"))}
+      ${choice2("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
+      ${choice2("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
     </fieldset>
     <p class="mono">${esc2(t("SETTINGS_GENERAL.MAILTO_LINKS", "E-Mail-Adressen"))}</p>
     <p class="quiet">${esc2(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links k\xF6nnen direkt hier eine neue Nachricht \xF6ffnen."))}</p>
@@ -1411,21 +1411,646 @@ function renderDesk(section, snap, edit) {
     <details><summary>${esc2(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
 }
 
+// src/folders.ts
+var KOLAB_KEYS = ["/private/vendor/kolab/folder-type", "/shared/vendor/kolab/folder-type"];
+var KOLAB_TYPES = {
+  configuration: "CONFIGURATION",
+  event: "CALENDAR",
+  contact: "CONTACTS",
+  task: "TASKS",
+  note: "NOTES",
+  file: "FILES",
+  journal: "JOURNAL"
+};
+var KOLAB_LABEL = {
+  configuration: "Konfiguration",
+  event: "Kalender",
+  contact: "Kontakte",
+  task: "Aufgaben",
+  note: "Aufzeichnungen",
+  file: "Dateien",
+  journal: "Tagebuch"
+};
+var ROLE_ICON = {
+  inbox: "inbox",
+  sent: "sent",
+  drafts: "drafts",
+  trash: "trash",
+  archive: "archive",
+  junk: "spam",
+  spam: "spam"
+};
+var ACL_RIGHTS = [
+  ["l", "Ordner sehen"],
+  ["r", "Mails lesen"],
+  ["s", "Gelesen-Status setzen"],
+  ["w", "Andere Merker setzen"],
+  ["i", "Mails einf\xFCgen"],
+  ["p", "An den Ordner senden"],
+  ["k", "Unterordner anlegen"],
+  ["x", "Ordner l\xF6schen oder umbenennen"],
+  ["t", "Als gel\xF6scht markieren"],
+  ["e", "Gel\xF6schte endg\xFCltig entfernen"],
+  ["a", "Rechte verwalten"]
+];
+function esc3(value) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char] ?? char);
+}
+function collection(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const list = value["@Collection"];
+    if (Array.isArray(list)) return list;
+  }
+  return [];
+}
+function bytes(value) {
+  if (!value) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toLocaleString("de-DE", { maximumFractionDigits: size < 10 && unit ? 1 : 0 })} ${units[unit]}`;
+}
+function parentOf(fullName, delimiter) {
+  if (!delimiter) return "";
+  const at = fullName.lastIndexOf(delimiter);
+  return at > 0 ? fullName.slice(0, at) : "";
+}
+function parseFolders(result) {
+  const map = /* @__PURE__ */ new Map();
+  collection(result).forEach((item) => {
+    const fullName = String(item.fullName || "");
+    if (!fullName) return;
+    const attributes = (Array.isArray(item.attributes) ? item.attributes : []).map((value) => String(value).toLowerCase());
+    const metadata = {};
+    if (item.metadata && typeof item.metadata === "object") {
+      Object.entries(item.metadata).forEach(([key, value]) => {
+        if (value != null) metadata[key] = String(value);
+      });
+    }
+    const delimiter = String(item.delimiter || "");
+    const exists = !attributes.includes("\\nonexistent");
+    const kolab = (metadata[KOLAB_KEYS[0]] || metadata[KOLAB_KEYS[1]] || "").split(".")[0];
+    map.set(fullName, {
+      fullName,
+      name: String(item.name || fullName.split(delimiter || "\0").pop() || fullName),
+      delimiter,
+      role: String(item.role || "").toLowerCase(),
+      unread: Number(item.unreadEmails || 0),
+      total: Number(item.totalEmails || 0),
+      uidNext: Number(item.uidNext || 0),
+      size: Number(item.size || 0),
+      subscribed: attributes.includes("\\subscribed"),
+      exists,
+      selectable: exists && !attributes.includes("\\noselect"),
+      noInferiors: attributes.includes("\\noinferiors"),
+      checkable: Boolean(item.checkable),
+      kolabType: kolab && kolab !== "mail" ? kolab : "",
+      metadata,
+      constructed: false,
+      parent: parentOf(fullName, delimiter),
+      depth: 0
+    });
+  });
+  [...map.values()].forEach((folder) => {
+    let parent = folder.parent;
+    while (parent && !map.has(parent)) {
+      map.set(parent, {
+        fullName: parent,
+        name: parent.split(folder.delimiter).pop() || parent,
+        delimiter: folder.delimiter,
+        role: "",
+        unread: 0,
+        total: 0,
+        uidNext: 0,
+        size: 0,
+        subscribed: false,
+        exists: false,
+        selectable: false,
+        noInferiors: false,
+        checkable: false,
+        kolabType: "",
+        metadata: {},
+        constructed: true,
+        parent: parentOf(parent, folder.delimiter),
+        depth: 0
+      });
+      parent = parentOf(parent, folder.delimiter);
+    }
+  });
+  map.forEach((folder) => {
+    let depth = 0;
+    let parent = folder.parent;
+    while (parent) {
+      depth += 1;
+      parent = map.get(parent)?.parent || "";
+    }
+    folder.depth = depth;
+  });
+  const quota = (value) => value == null || value === "" ? null : Number(value);
+  return {
+    folders: [...map.values()],
+    quotaUsage: quota(result.quotaUsage),
+    quotaLimit: quota(result.quotaLimit),
+    capabilities: (Array.isArray(result.capabilities) ? result.capabilities : []).map((value) => String(value).toUpperCase())
+  };
+}
+var ROLE_RANK = { inbox: 0, sent: 1, drafts: 2, junk: 3, spam: 3, trash: 4, archive: 5 };
+function buildTree(folders, roleOf) {
+  const nodes = new Map(folders.map((info) => [info.fullName, { info, children: [] }]));
+  const roots = [];
+  nodes.forEach((node) => {
+    const parent = node.info.parent ? nodes.get(node.info.parent) : void 0;
+    (parent ? parent.children : roots).push(node);
+  });
+  const rank = (node) => ROLE_RANK[roleOf(node.info)] ?? 10;
+  const sort = (list) => {
+    list.sort((a, b) => rank(a) - rank(b) || a.info.name.localeCompare(b.info.name, "de", { sensitivity: "base" }));
+    list.forEach((node) => sort(node.children));
+  };
+  sort(roots);
+  return roots;
+}
+var SYSTEM_NAME = {
+  inbox: ["FOLDER_LIST.INBOX_NAME", "Posteingang"],
+  sent: ["FOLDER_LIST.SENT_NAME", "Gesendet"],
+  drafts: ["FOLDER_LIST.DRAFTS_NAME", "Entw\xFCrfe"],
+  junk: ["FOLDERS_UI.ROLE_JUNK", "Spam"],
+  trash: ["FOLDER_LIST.TRASH_NAME", "Papierkorb"],
+  archive: ["FOLDER_LIST.ARCHIVE_NAME", "Archiv"]
+};
+function displayName(folder, role) {
+  const system = SYSTEM_NAME[role];
+  return system && folder.depth === 0 ? t(system[0], system[1]) : folder.name;
+}
+function folderPath(folder) {
+  return folder.delimiter ? folder.fullName.split(folder.delimiter).join(" / ") : folder.fullName;
+}
+function flattenTree(roots, options) {
+  const query = options.filter.trim().toLowerCase();
+  const rows = [];
+  const matches = (node) => !query || node.info.name.toLowerCase().includes(query) || node.info.fullName.toLowerCase().includes(query) || node.children.some(matches);
+  const walk = (list, depth) => {
+    list.forEach((node) => {
+      if (options.hidden(node.info) || !matches(node)) return;
+      const children = node.children.filter((child) => !options.hidden(child.info));
+      const collapsed = !query && options.collapsed.has(node.info.fullName);
+      rows.push({
+        info: node.info,
+        depth,
+        role: options.roleOf(node.info),
+        hasChildren: children.length > 0,
+        collapsed,
+        current: node.info.fullName === options.current,
+        path: folderPath(node.info),
+        actions: options.actions(node.info, children.length > 0)
+      });
+      if (!collapsed) walk(children, depth + 1);
+    });
+  };
+  walk(roots, 0);
+  return rows;
+}
+function renderSidebarRows(rows, filtering) {
+  if (!rows.length) return `<p class="quiet folder-empty">${esc3(filtering ? t("FOLDERS_UI.NO_MATCH", "Kein Ordner gefunden.") : t("FOLDERS_UI.EMPTY", "Keine Ordner."))}</p>`;
+  return rows.map((row2) => {
+    const name = displayName(row2.info, row2.role);
+    const target = esc3(row2.info.fullName);
+    const toggle = row2.hasChildren ? `<button type="button" class="icon-btn ftoggle" data-action="f-toggle" data-target="${target}" tabindex="-1" aria-expanded="${row2.collapsed ? "false" : "true"}" aria-label="${esc3(`${t("FOLDERS_UI.SUBFOLDERS_OF", "Unterordner von")} ${name}`)}" title="${esc3(row2.collapsed ? t("FOLDERS_UI.EXPAND", "Aufklappen") : t("FOLDERS_UI.COLLAPSE", "Zuklappen"))}">${icon(row2.collapsed ? "chevron-right" : "chevron-down")}</button>` : `<span class="ftoggle" aria-hidden="true"></span>`;
+    const count = row2.info.unread > 0 ? `<span class="count" aria-label="${row2.info.unread} ${esc3(t("FOLDERS_UI.UNREAD", "ungelesen"))}">${row2.info.unread}</span>` : "";
+    const symbol = icon(ROLE_ICON[row2.role] || (row2.hasChildren && !row2.collapsed ? "folder-open" : "folder"));
+    const pathNote = filtering && row2.depth > 0 ? `<span class="sr"> (${esc3(row2.path)})</span>` : "";
+    const label2 = `${symbol}<span class="folder-name">${esc3(name)}${pathNote}</span>${count}`;
+    const main = row2.info.selectable ? `<button type="button" class="folder" data-folder="${target}" data-depth="${row2.depth}" aria-current="${row2.current ? "page" : "false"}" title="${esc3(row2.path)}">${label2}</button>` : `<button type="button" class="folder is-group" data-action="f-toggle" data-target="${target}" data-depth="${row2.depth}" title="${esc3(`${row2.path} \xB7 ${t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar")}`)}"${row2.hasChildren ? ` aria-expanded="${row2.collapsed ? "false" : "true"}"` : " disabled"}>${label2}</button>`;
+    const more = row2.actions.length ? `<button type="button" class="icon-btn fmore" data-action="f-menu" data-target="${target}" aria-haspopup="menu" aria-expanded="false" aria-label="${esc3(`${t("FOLDERS_UI.ACTIONS_FOR", "Aktionen f\xFCr")} ${name}`)}" title="${esc3(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}">${icon("more")}</button>` : "";
+    return `<div class="frow" style="--depth:${row2.depth}" data-row="${target}">${toggle}${main}${more}</div>`;
+  }).join("");
+}
+function quotaText(quota) {
+  const pct = quota.limit > 0 ? Math.min(100, Math.round(quota.used / quota.limit * 100)) : 0;
+  return `${bytes(quota.used)} ${t("FOLDERS_UI.OF", "von")} ${bytes(quota.limit)} ${t("FOLDERS_UI.USED", "belegt")} (${pct} %)`;
+}
+function renderQuota(quota) {
+  if (!quota || !quota.limit) return "";
+  const pct = Math.min(100, Math.round(quota.used / quota.limit * 100));
+  return `<p class="mono quota-label">${esc3(t("FOLDERS_UI.QUOTA", "Speicher"))}</p>
+    <div class="quota-bar${pct >= 90 ? " full" : ""}" aria-hidden="true"><span style="width:${pct}%"></span></div>
+    <p class="quiet quota-text">${esc3(quotaText(quota))}</p>`;
+}
+var ACTION_LABEL = {
+  "create-sub": ["folder-plus", "FOLDERS_UI.NEW_SUBFOLDER", "Neuer Unterordner"],
+  rename: ["edit-as-new", "FOLDERS_UI.RENAME", "Umbenennen"],
+  "read-all": ["mark-read", "MESSAGE_LIST.MENU_SET_ALL_SEEN", "Alle als gelesen markieren"],
+  clear: ["delete-forever", "MESSAGE_LIST.BUTTON_EMPTY_FOLDER", "Ordner leeren"],
+  settings: ["settings", "FOLDERS_UI.FOLDER_SETTINGS", "Ordnereinstellungen"]
+};
+function renderFolderMenu(target, actions) {
+  return actions.map((action) => {
+    const [name, key, fallback] = ACTION_LABEL[action];
+    return `<li><button type="button" class="menu-item${action === "clear" ? " danger-item" : ""}" role="menuitem" data-action="f-${action}" data-target="${esc3(target)}">${icon(name)}<span>${esc3(t(key, fallback))}</span></button></li>`;
+  }).join("");
+}
+function option(value, label2, selected) {
+  return `<option value="${esc3(value)}"${selected ? " selected" : ""}>${esc3(label2)}</option>`;
+}
+function select(name, label2, options) {
+  return `<label class="field"><span>${esc3(label2)}</span><select name="${name}">${options}</select></label>`;
+}
+function check2(name, label2, on2) {
+  return `<label class="check"><input type="checkbox" name="${name}"${on2 ? " checked" : ""}> ${esc3(label2)}</label>`;
+}
+function deskButton(action, iconName, label2, attrs, danger = false, pressed, compact = false) {
+  const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${esc3(value)}"`).join("");
+  const press = pressed == null ? "" : ` aria-pressed="${pressed ? "true" : "false"}"`;
+  const text2 = compact ? `<span class="sr">${esc3(label2)}</span>` : `<span class="btn-label">${esc3(label2)}</span>`;
+  const tip = compact ? ` title="${esc3(label2)}"` : "";
+  return `<button type="button" class="${danger ? "danger" : "text-btn"}${compact ? " icon-only" : ""}" data-action="${action}"${extra}${press}${tip}>${icon(iconName)}${text2}</button>`;
+}
+function indentLabel(row2) {
+  return `${"\xA0\xA0".repeat(row2.depth)}${displayName(row2.info, row2.role)}`;
+}
+function parentOptions(rows, selected, exclude = "") {
+  const top = option("", t("FOLDERS_UI.TOP_LEVEL", "Oberste Ebene"), !selected);
+  return top + rows.filter((row2) => row2.info.exists && !row2.info.noInferiors && (!exclude || row2.info.fullName !== exclude && !row2.info.fullName.startsWith(exclude + row2.info.delimiter))).map((row2) => option(row2.info.fullName, indentLabel(row2), row2.info.fullName === selected)).join("");
+}
+function kolabLabel(type) {
+  return type ? `Kolab ${t(`SETTINGS_FOLDERS.TYPE_${KOLAB_TYPES[type] || ""}`, KOLAB_LABEL[type] || type)}` : "";
+}
+function renderFolderDesk(desk, edit) {
+  const error = `<p class="error" id="settings-error" hidden></p>`;
+  if (!desk) return `${error}<p class="quiet">${esc3(t("SETTINGS_FOLDERS.LOADING_PROCESS", "Ordnerliste wird geladen"))} \u2026</p>`;
+  const note2 = desk.notice ? `<p class="quiet">${esc3(desk.notice)}</p>` : "";
+  const quota = desk.quota && desk.quota.limit ? `<p class="quiet">${esc3(t("FOLDERS_UI.QUOTA", "Speicher"))}: ${esc3(quotaText(desk.quota))}</p>` : "";
+  const editing = edit?.kind === "folder" && !edit.fresh ? desk.rows.find((row2) => row2.info.fullName === edit.id) : void 0;
+  const creating = edit?.kind === "folder" && edit.fresh;
+  const rows = desk.rows.map((row2) => {
+    const name = displayName(row2.info, row2.role);
+    const meta = [
+      row2.info.selectable ? `${row2.info.total} ${row2.info.total === 1 ? t("FOLDERS_UI.MAIL", "Mail") : t("FOLDERS_UI.MAILS", "Mails")}${row2.info.unread ? `, ${row2.info.unread} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar"),
+      row2.role && row2.role !== "inbox" ? t(`FOLDERS_UI.ROLE_${row2.role.toUpperCase()}`, { sent: "Gesendet", drafts: "Entw\xFCrfe", junk: "Spam", spam: "Spam", trash: "Papierkorb", archive: "Archiv" }[row2.role] || row2.role) : "",
+      row2.info.exists && !row2.info.subscribed ? t("FOLDERS_UI.NOT_SUBSCRIBED", "nicht abonniert") : "",
+      row2.info.checkable ? t("FOLDERS_UI.CHECKED", "wird gepr\xFCft") : "",
+      kolabLabel(row2.info.kolabType)
+    ].filter(Boolean).join(" \xB7 ");
+    const actions = [
+      row2.info.exists ? deskButton("settings-edit", "compose", t("SETTINGS_DESK.EDIT", "Bearbeiten"), { kind: "folder", id: row2.info.fullName }) : "",
+      row2.info.selectable && row2.role !== "inbox" ? deskButton("f-subscribe", row2.info.subscribed ? "eye" : "eye-off", row2.info.subscribed ? t("SETTINGS_FOLDERS.BUTTON_UNSUBSCRIBE", "Abonnement beenden") : t("SETTINGS_FOLDERS.BUTTON_SUBSCRIBE", "Abonnieren"), { target: row2.info.fullName }, false, row2.info.subscribed, true) : "",
+      row2.info.selectable ? deskButton("f-checkable", row2.info.checkable ? "bell" : "bell-off", row2.info.checkable ? t("FOLDERS_UI.CHECK_OFF", "Nicht mehr pr\xFCfen") : t("FOLDERS_UI.CHECK_ON", "Auf neue Mail pr\xFCfen"), { target: row2.info.fullName }, false, row2.info.checkable, true) : "",
+      desk.acl && row2.info.exists ? deskButton("f-acl", "folder-shared", t("FOLDERS_UI.SHARING", "Freigaben"), { target: row2.info.fullName }, false, void 0, true) : "",
+      row2.canClear ? deskButton("f-clear", "delete-forever", t("MESSAGE_LIST.BUTTON_EMPTY_FOLDER", "Ordner leeren"), { target: row2.info.fullName }, true, void 0, true) : "",
+      row2.canDelete ? deskButton("f-delete", "delete", t("GLOBAL.DELETE", "L\xF6schen"), { target: row2.info.fullName }, true, void 0, true) : ""
+    ].join("");
+    const indent = `style="padding-left:${row2.depth * 16}px"`;
+    return `<li class="set-row folder-set-row"><span class="grow" ${indent}><strong title="${esc3(folderPath(row2.info))}">${icon(ROLE_ICON[row2.role] || "folder")} ${esc3(name)}</strong>${meta ? `<span class="quiet">${esc3(meta)}</span>` : ""}</span>${actions}</li>${editing === row2 ? "<!--EDIT-->" : ""}`;
+  }).join("");
+  const subscribeLabel = t("FOLDERS_UI.SUBSCRIBE", "Abonnieren");
+  const createForm = `<form class="fields" data-action="settings-form" data-kind="folder-create">
+      <p class="mono">${esc3(t("POPUPS_CREATE_FOLDER.TITLE_CREATE_FOLDER", "Ordner anlegen"))}</p>
+      <label class="field"><span>${esc3(t("GLOBAL.NAME", "Name"))}</span><input name="folder" type="text" required autocomplete="off"></label>
+      ${select("parent", t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "\xDCbergeordneter Ordner"), parentOptions(desk.rows, edit?.id || ""))}
+      ${check2("subscribe", subscribeLabel, true)}
+      <div class="dialog-actions"><button type="button" class="text-btn" data-action="settings-cancel">${esc3(t("GLOBAL.CANCEL", "Abbrechen"))}</button><button type="submit" class="ink-btn">${icon("folder-plus")}<span class="btn-label">${esc3(t("POPUPS_CREATE_FOLDER.BUTTON_CREATE", "Anlegen"))}</span></button></div>
+    </form>`;
+  const kolabTypes = desk.kolab ? Object.keys(KOLAB_TYPES) : [];
+  const editForm = editing ? `<form class="fields" data-action="settings-form" data-kind="folder-save">
+      <p class="mono">${esc3(folderPath(editing.info))}</p>
+      <input type="hidden" name="oldName" value="${esc3(editing.info.fullName)}">
+      ${editing.canRename ? `<label class="field"><span>${esc3(t("GLOBAL.NAME", "Name"))}</span><input name="name" type="text" value="${esc3(editing.info.name)}" required autocomplete="off"></label>
+      ${select("parent", t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "\xDCbergeordneter Ordner"), parentOptions(desk.rows, editing.info.parent, editing.info.fullName))}` : `<input type="hidden" name="name" value="${esc3(editing.info.name)}"><input type="hidden" name="parent" value="${esc3(editing.info.parent)}"><p class="quiet">${esc3(t("FOLDERS_UI.SYSTEM_NO_RENAME", "Systemordner werden nicht umbenannt."))}</p>`}
+      ${editing.role === "inbox" ? `<input type="hidden" name="subscribe" value="1">` : check2("subscribe", subscribeLabel, editing.info.subscribed)}
+      ${editing.info.selectable ? check2("checkable", t("FOLDERS_UI.CHECK_ON", "Auf neue Mail pr\xFCfen"), editing.info.checkable) : ""}
+      ${kolabTypes.length ? select("kolab", t("FOLDERS_UI.KOLAB_TYPE", "Kolab-Typ"), option("", t("FOLDERS_UI.KOLAB_MAIL", "Mail"), !editing.info.kolabType) + kolabTypes.map((type) => option(type, kolabLabel(type), type === editing.info.kolabType)).join("")) : ""}
+      <div class="dialog-actions"><button type="button" class="text-btn" data-action="settings-cancel">${esc3(t("GLOBAL.CANCEL", "Abbrechen"))}</button><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc3(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
+    </form>` : "";
+  const selectable = desk.rows.filter((row2) => row2.info.selectable && row2.role !== "inbox");
+  const systemSelect = (name, label2) => select(
+    name,
+    label2,
+    option("", t("FOLDERS_UI.AUTOMATIC", "Automatisch (nach Rolle)"), !desk.system[name]) + selectable.map((row2) => option(row2.info.fullName, indentLabel(row2), row2.info.fullName === desk.system[name])).join("")
+  );
+  const systemForm = `<details><summary>${esc3(t("SETTINGS_FOLDERS.BUTTON_SYSTEM", "Systemordner"))}</summary>
+    <form class="fields" data-action="settings-form" data-kind="folder-system">
+      <p class="quiet">${esc3(t("POPUPS_SYSTEM_FOLDERS.TITLE_SYSTEM_FOLDERS", "W\xE4hlen Sie die Systemordner aus"))}</p>
+      ${systemSelect("sent", t("FOLDER_LIST.SENT_NAME", "Gesendet"))}
+      ${systemSelect("drafts", t("FOLDER_LIST.DRAFTS_NAME", "Entw\xFCrfe"))}
+      ${systemSelect("junk", t("FOLDERS_UI.ROLE_JUNK", "Spam"))}
+      ${systemSelect("trash", t("FOLDER_LIST.TRASH_NAME", "Papierkorb"))}
+      ${systemSelect("archive", t("FOLDER_LIST.ARCHIVE_NAME", "Archiv"))}
+      <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc3(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
+    </form></details>`;
+  const optionsForm = `<form class="fields" data-action="settings-form" data-kind="folder-options">
+      ${check2("hideUnsubscribed", t("SETTINGS_FOLDERS.HIDE_UNSUBSCRIBED", "Nicht abonnierte Ordner ausblenden"), desk.hideUnsubscribed)}
+      ${desk.kolab ? check2("unhideKolab", t("SETTINGS_FOLDERS.UNHIDE_KOLAB_FOLDERS", "Kolab-Ordner anzeigen"), desk.unhideKolab) : ""}
+      <div class="dialog-actions"><button type="submit" class="text-btn">${icon("save")}<span class="btn-label">${esc3(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
+    </form>`;
+  const add = creating ? createForm : deskButton("settings-edit", "folder-plus", t("SETTINGS_FOLDERS.BUTTON_CREATE", "Ordner anlegen"), { kind: "folder", fresh: "1", id: "" });
+  return `${error}<p class="mono">${esc3(t("SETTINGS_FOLDERS.LEGEND_FOLDERS", "Ordnerliste"))}</p>${note2}${quota}
+    ${optionsForm}
+    ${add}
+    <ul class="set-list">${rows.replace("<!--EDIT-->", editForm ? `<li class="set-edit">${editForm}</li>` : "")}</ul>
+    ${systemForm}`;
+}
+function parseAcl(result) {
+  return collection(result).map((item) => ({
+    identifier: String(item.identifier || ""),
+    rights: String(item.rights || ""),
+    mine: Boolean(item.mine)
+  }));
+}
+function explainRights(rights) {
+  const parts = ACL_RIGHTS.filter(([letter]) => rights.includes(letter)).map(([letter, fallback]) => t(`IMAP.ACL_${letter.toUpperCase()}`, fallback));
+  return parts.join(", ") || t("FOLDERS_UI.NO_RIGHTS", "keine Rechte");
+}
+function renderAcl(folder, entries, error) {
+  const mine = entries.find((entry) => entry.mine);
+  const canAdmin = Boolean(mine?.rights.includes("a"));
+  const others = entries.filter((entry) => !entry.mine);
+  const list = others.map((entry) => `<li class="set-row"><span class="grow"><strong>${esc3(entry.identifier)}</strong><span class="quiet">${esc3(explainRights(entry.rights))}</span></span>${canAdmin ? deskButton("f-acl-delete", "delete", t("GLOBAL.DELETE", "L\xF6schen"), { target: folder, id: entry.identifier }, true) : ""}</li>`).join("");
+  const form2 = canAdmin ? `<form class="fields" data-action="settings-form" data-kind="folder-acl-set">
+      <input type="hidden" name="folder" value="${esc3(folder)}">
+      <label class="field"><span>${esc3(t("FOLDERS_UI.ACL_IDENTIFIER", "Benutzer oder Gruppe"))}</span><input name="identifier" type="text" required autocomplete="off"></label>
+      <fieldset class="choices acl-rights"><legend class="mono">${esc3(t("IMAP.ACL_RIGHTS", "Rechte"))}</legend>
+        ${ACL_RIGHTS.map(([letter, fallback]) => check2(`r_${letter}`, `${letter} \xB7 ${t(`IMAP.ACL_${letter.toUpperCase()}`, fallback)}`, letter === "l" || letter === "r")).join("")}
+      </fieldset>
+      <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("check")}<span class="btn-label">${esc3(t("FOLDERS_UI.ACL_SAVE", "Freigabe speichern"))}</span></button></div>
+    </form>` : `<p class="quiet">${esc3(t("FOLDERS_UI.ACL_READONLY", "Sie d\xFCrfen die Freigaben dieses Ordners nicht \xE4ndern."))}</p>`;
+  return `${error ? `<p class="error">${esc3(error)}</p>` : ""}
+    ${mine ? `<p class="quiet">${esc3(t("FOLDERS_UI.ACL_MINE", "Ihre Rechte"))}: ${esc3(explainRights(mine.rights))}</p>` : ""}
+    <ul class="set-list">${list}</ul>${list ? "" : `<p class="quiet">${esc3(t("FOLDERS_UI.ACL_NONE", "Keine weiteren Freigaben."))}</p>`}
+    ${form2}`;
+}
+
+// src/search.ts
+var QUICK_FLAGS = ["unseen", "flagged", "attachment"];
+var PERIODS = [
+  ["", "SEARCH.DATE_ALL", "Alle"],
+  ["3", "SEARCH.SINCE_3_DAYS", "Nicht \xE4lter als 3 Tage"],
+  ["7", "SEARCH.SINCE_7_DAYS", "Nicht \xE4lter als eine Woche"],
+  ["30", "SEARCH.SINCE_MONTH", "Nicht \xE4lter als ein Monat"],
+  ["90", "SEARCH.SINCE_3_MONTHS", "Nicht \xE4lter als 3 Monate"],
+  ["180", "SEARCH.SINCE_6_MONTHS", "Nicht \xE4lter als 6 Monate"],
+  ["365", "SEARCH.SINCE_YEAR", "Nicht \xE4lter als ein Jahr"],
+  ["-3", "SEARCH.BEFORE_3_DAYS", "\xC4lter als 3 Tage"],
+  ["-7", "SEARCH.BEFORE_7_DAYS", "\xC4lter als eine Woche"],
+  ["-30", "SEARCH.BEFORE_MONTH", "\xC4lter als ein Monat"],
+  ["-90", "SEARCH.BEFORE_3_MONTHS", "\xC4lter als 3 Monate"],
+  ["-180", "SEARCH.BEFORE_6_MONTHS", "\xC4lter als 6 Monate"],
+  ["-365", "SEARCH.BEFORE_YEAR", "\xC4lter als ein Jahr"]
+];
+var FLAG_KEYS = /* @__PURE__ */ new Set(["attachment", "unseen", "flagged", "answered", "unanswered"]);
+var VALUE_KEYS = ["from", "to", "subject", "text", "keyword", "since", "before", "larger", "smaller", "in"];
+function emptyCriteria() {
+  return {
+    from: "",
+    to: "",
+    subject: "",
+    text: "",
+    keyword: "",
+    since: "",
+    until: "",
+    period: "",
+    larger: "",
+    smaller: "",
+    attachment: false,
+    unseen: false,
+    flagged: false,
+    replied: "",
+    subtree: ""
+  };
+}
+function encodeValue(value) {
+  return value.replace(/[%&+=#]/g, (char) => encodeURIComponent(char));
+}
+function decodeValue(value) {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "));
+  } catch {
+    return value;
+  }
+}
+function isoDate(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+function shiftDay(iso, days) {
+  const date = /* @__PURE__ */ new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setDate(date.getDate() + days);
+  return isoDate(date);
+}
+function isStructured(query) {
+  const parts = query.split("&").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => {
+    const name = part.split("=")[0].toLowerCase();
+    return part.includes("=") ? VALUE_KEYS.includes(name) || /^[a-z_[\]]+$/.test(name) : FLAG_KEYS.has(name);
+  });
+}
+function parseSearch(query) {
+  const result = emptyCriteria();
+  const trimmed = query.trim();
+  if (!trimmed) return result;
+  if (!isStructured(trimmed)) {
+    result.text = trimmed;
+    return result;
+  }
+  trimmed.split("&").forEach((part) => {
+    if (!part) return;
+    const at = part.indexOf("=");
+    const name = (at < 0 ? part : part.slice(0, at)).toLowerCase();
+    const value = at < 0 ? "" : decodeValue(part.slice(at + 1));
+    switch (name) {
+      case "from":
+      case "to":
+      case "subject":
+      case "text":
+      case "keyword":
+      case "larger":
+      case "smaller":
+        result[name] = value;
+        break;
+      case "since":
+        result.since = value;
+        break;
+      case "before":
+        result.until = shiftDay(value, -1);
+        break;
+      case "in":
+        result.subtree = value === "subtree" || value === "subtree-one" ? value : "";
+        break;
+      case "attachment":
+        result.attachment = true;
+        break;
+      case "unseen":
+        result.unseen = true;
+        break;
+      case "flagged":
+        result.flagged = true;
+        break;
+      case "answered":
+        result.replied = "yes";
+        break;
+      case "unanswered":
+        result.replied = "no";
+        break;
+      default:
+        break;
+    }
+  });
+  return result;
+}
+function serializeSearch(c, multisearch) {
+  const parts = [];
+  const add = (name, value) => {
+    if (value.trim()) parts.push(`${name}=${encodeValue(value.trim())}`);
+  };
+  add("from", c.from);
+  add("to", c.to);
+  add("subject", c.subject);
+  add("text", c.text);
+  add("keyword", c.keyword);
+  if (multisearch && c.subtree) parts.push(`in=${c.subtree}`);
+  const days = Number(c.period || 0);
+  if (days > 0) {
+    add("since", shiftDay(isoDate(/* @__PURE__ */ new Date()), -days));
+  } else if (days < 0) {
+    add("before", shiftDay(isoDate(/* @__PURE__ */ new Date()), days));
+  } else {
+    add("since", c.since);
+    if (c.until) add("before", shiftDay(c.until, 1));
+  }
+  add("larger", c.larger.replace(/\s+/g, "").toUpperCase());
+  add("smaller", c.smaller.replace(/\s+/g, "").toUpperCase());
+  if (c.attachment) parts.push("attachment");
+  if (c.unseen) parts.push("unseen");
+  if (c.flagged) parts.push("flagged");
+  if (c.replied === "yes") parts.push("answered");
+  if (c.replied === "no") parts.push("unanswered");
+  return parts.join("&");
+}
+function activeQuick(query) {
+  const c = parseSearch(query);
+  return new Set(QUICK_FLAGS.filter((flag) => c[flag]));
+}
+function toggleQuick(query, flag, multisearch) {
+  const c = parseSearch(query);
+  c[flag] = !c[flag];
+  return serializeSearch(c, multisearch);
+}
+function esc4(value) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char] ?? char);
+}
+function sizeParts(value) {
+  const match = /^(\d+(?:[.,]\d+)?)\s*([KM]?)$/i.exec(value.trim());
+  return match ? [match[1], (match[2] || "K").toUpperCase()] : ["", "K"];
+}
+function sizeField(name, label2, value) {
+  const [num, unit] = sizeParts(value);
+  return `<div class="field size-field"><span>${esc4(label2)}</span><div class="size-row">
+    <input name="${name}" type="number" min="0" step="1" inputmode="numeric" value="${esc4(num)}" aria-label="${esc4(label2)}">
+    <select name="${name}Unit" aria-label="${esc4(t("SEARCH_UI.UNIT", "Einheit"))}"><option value="K"${unit === "K" ? " selected" : ""}>KB</option><option value="M"${unit === "M" ? " selected" : ""}>MB</option></select>
+  </div></div>`;
+}
+function input(name, label2, value, type = "text", extra = "") {
+  return `<label class="field"><span>${esc4(label2)}</span><input name="${name}" type="${type}" value="${esc4(value)}" autocomplete="off" ${extra}></label>`;
+}
+function choice(name, label2, on2) {
+  return `<label class="check"><input type="checkbox" name="${name}"${on2 ? " checked" : ""}> ${esc4(label2)}</label>`;
+}
+function renderSearchForm(c, options) {
+  const periodOptions = PERIODS.map(([value, key, fallback]) => `<option value="${value}"${c.period === value ? " selected" : ""}>${esc4(t(key, fallback))}</option>`).join("");
+  const replied = [["", t("SEARCH_UI.ANY", "Egal")], ["yes", t("GLOBAL.YES", "Ja")], ["no", t("GLOBAL.NO", "Nein")]].map(([value, label2]) => `<option value="${value}"${c.replied === value ? " selected" : ""}>${esc4(label2)}</option>`).join("");
+  const keywordList = options.keywords.length ? `<datalist id="adv-keywords">${options.keywords.map((word) => `<option value="${esc4(word)}"></option>`).join("")}</datalist>` : "";
+  const subtree = options.multisearch ? `<label class="field"><span>${esc4(t("SEARCH.SUBFOLDERS", "Unterordner"))}</span><select name="subtree">
+        <option value=""${!c.subtree ? " selected" : ""}>${esc4(t("SEARCH.SUBFOLDERS_NONE", "Keine"))}</option>
+        <option value="subtree-one"${c.subtree === "subtree-one" ? " selected" : ""}>${esc4(t("SEARCH.SUBFOLDERS_SUBTREE_ONE", "Eine Ebene"))}</option>
+        <option value="subtree"${c.subtree === "subtree" ? " selected" : ""}>${esc4(t("SEARCH.SUBFOLDERS_SUBTREE", "Alle"))}</option>
+      </select></label>` : "";
+  return `
+    <div class="adv-grid">
+      ${input("from", t("GLOBAL.FROM", "Von"), c.from)}
+      ${input("to", t("GLOBAL.TO", "An"), c.to)}
+      ${input("subject", t("GLOBAL.SUBJECT", "Betreff"), c.subject)}
+      ${input("text", t("SEARCH.TEXT", "Text"), c.text)}
+      ${input("keyword", t("SEARCH.KEYWORD", "Schlagwort"), c.keyword, "text", options.keywords.length ? `list="adv-keywords"` : "")}${keywordList}
+      <label class="field"><span>${esc4(t("SEARCH_UI.PERIOD", "Zeitraum"))}</span><select name="period">${periodOptions}</select></label>
+      ${input("since", t("SEARCH_UI.DATE_FROM", "Datum von"), c.since, "date")}
+      ${input("until", t("SEARCH_UI.DATE_TO", "Datum bis"), c.until, "date")}
+      ${sizeField("larger", t("SEARCH_UI.MIN_SIZE", "Mindestgr\xF6\xDFe"), c.larger)}
+      ${sizeField("smaller", t("SEARCH_UI.MAX_SIZE", "H\xF6chstgr\xF6\xDFe"), c.smaller)}
+      <label class="field"><span>${esc4(t("SEARCH.REPLIED", "Beantwortet"))}</span><select name="replied">${replied}</select></label>
+      ${subtree}
+    </div>
+    <fieldset class="choices">
+      ${choice("attachment", t("SEARCH.HAS_ATTACHMENT", "Anhang vorhanden"), c.attachment)}
+      ${choice("unseen", t("SEARCH.UNSEEN", "Ungelesen"), c.unseen)}
+      ${choice("flagged", t("SEARCH.FLAGGED", "Markiert"), c.flagged)}
+    </fieldset>
+    <p class="quiet">${esc4(t("SEARCH_UI.PERIOD_HINT", "Ein Zeitraum ersetzt \u201EDatum von\u201C und \u201EDatum bis\u201C."))}</p>
+    <div class="dialog-actions">
+      <button type="button" class="text-btn" data-action="adv-reset">${icon("close")}<span class="btn-label">${esc4(t("SEARCH_UI.RESET", "Zur\xFCcksetzen"))}</span></button>
+      <button type="button" class="text-btn" data-action="close-dialog">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+      <button type="submit" class="ink-btn">${icon("search")}<span class="btn-label">${esc4(t("GLOBAL.SEARCH", "Suchen"))}</span></button>
+    </div>`;
+}
+function readSearchForm(form2) {
+  const data = new FormData(form2);
+  const get = (name) => String(data.get(name) || "").trim();
+  const size = (name) => {
+    const value = get(name);
+    return value ? `${Math.max(0, Math.round(Number(value.replace(",", ".")) || 0))}${get(`${name}Unit`) || "K"}` : "";
+  };
+  const replied = get("replied");
+  const subtree = get("subtree");
+  return {
+    from: get("from"),
+    to: get("to"),
+    subject: get("subject"),
+    text: get("text"),
+    keyword: get("keyword"),
+    since: get("since"),
+    until: get("until"),
+    period: get("period"),
+    larger: size("larger"),
+    smaller: size("smaller"),
+    attachment: data.get("attachment") === "on",
+    unseen: data.get("unseen") === "on",
+    flagged: data.get("flagged") === "on",
+    replied: replied === "yes" || replied === "no" ? replied : "",
+    subtree: subtree === "subtree" || subtree === "subtree-one" ? subtree : ""
+  };
+}
+
 // src/compose.ts
 var ADDRESS = /^(?:[^\s@]+@[^\s@]+\.[^\s@]+|[^\s@]+@[^\s@]+)$/;
 var ALLOWED_TAGS2 = /* @__PURE__ */ new Set(["A", "B", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "I", "LI", "OL", "P", "PRE", "S", "STRONG", "U", "UL"]);
 var ALLOWED_ATTR = /* @__PURE__ */ new Set(["href", "title"]);
-function esc3(value) {
+function esc5(value) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
 }
 function button2(action, symbol, label2, extra = "") {
-  return `<button type="button" class="icon-btn" data-compose="${action}" aria-label="${esc3(label2)}" title="${esc3(label2)}" ${extra}>${icon(symbol)}</button>`;
+  return `<button type="button" class="icon-btn" data-compose="${action}" aria-label="${esc5(label2)}" title="${esc5(label2)}" ${extra}>${icon(symbol)}</button>`;
 }
-function sizeLabel(bytes) {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+function sizeLabel(bytes2) {
+  if (!bytes2) return "";
+  if (bytes2 < 1024) return `${bytes2} B`;
+  if (bytes2 < 1024 * 1024) return `${Math.round(bytes2 / 1024)} KB`;
+  return `${(bytes2 / 1024 / 1024).toFixed(1)} MB`;
 }
 function addresses(value) {
   const result = [];
@@ -1463,7 +2088,7 @@ function plainToHtml2(text2, quoted = false) {
   const quote2 = [];
   const flush = () => {
     if (quote2.length) {
-      const content = quote2.map((line2) => esc3(line2.replace(/^> ?/, ""))).join("<br>");
+      const content = quote2.map((line2) => esc5(line2.replace(/^> ?/, ""))).join("<br>");
       normal.push(`<blockquote>${content}</blockquote>`);
       quote2.length = 0;
     }
@@ -1472,14 +2097,14 @@ function plainToHtml2(text2, quoted = false) {
     if (quoted && /^>/.test(line2)) quote2.push(line2);
     else {
       flush();
-      normal.push(esc3(line2));
+      normal.push(esc5(line2));
     }
   });
   flush();
   return normal.join("<br>");
 }
 function markdownToHtml(text2) {
-  const escaped = esc3(text2.replace(/\r/g, ""));
+  const escaped = esc5(text2.replace(/\r/g, ""));
   const blocks = escaped.split(/\n{2,}/).map((block) => {
     if (/^```/.test(block)) return `<pre><code>${block.replace(/^```[^\n]*\n?|```$/g, "")}</code></pre>`;
     if (/^(?:&gt; ?)/.test(block)) return `<blockquote>${block.replace(/^&gt; ?/gm, "").replace(/\n/g, "<br>")}</blockquote>`;
@@ -1518,55 +2143,55 @@ var Composer = class {
   constructor(host, prefs, callbacks) {
     this.callbacks = callbacks;
     this.prefs = prefs;
-    host.innerHTML = `<section class="composer" hidden aria-label="${esc3(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}">
+    host.innerHTML = `<section class="composer" hidden aria-label="${esc5(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}">
       <form class="composer-form">
         <div class="composer-bar">
           ${button2("close", "close", t("GLOBAL.CLOSE", "Schlie\xDFen"))}
-          <span class="title title-md" id="compose-title">${esc3(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}</span><span class="spacer"></span>
+          <span class="title title-md" id="compose-title">${esc5(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}</span><span class="spacer"></span>
           ${button2("save", "save", t("COMPOSE.BUTTON_SAVE", "Entwurf speichern"))}
           ${button2("minimize", "minimize", t("COMPOSE.BUTTON_MINIMIZE", "Minimieren"))}
-          <button type="submit" class="ink-btn">${icon("send")}<span>${esc3(t("COMPOSE.BUTTON_SEND", "Senden"))}</span></button>
+          <button type="submit" class="ink-btn">${icon("send")}<span>${esc5(t("COMPOSE.BUTTON_SEND", "Senden"))}</span></button>
         </div>
         <div class="compose-scroll">
           <div class="fields compose-fields">
-            <label class="field"><span>${esc3(t("GLOBAL.FROM", "Von"))}</span><select name="identity" id="compose-identity"></select></label>
-            <div class="compose-recipient"><span class="field-label">${esc3(t("GLOBAL.TO", "An"))}</span><div class="recipient-box" data-recipient="to"></div><button type="button" class="text-btn compose-more" data-compose="more-fields">Cc \xB7 Bcc \xB7 ${esc3(t("GLOBAL.REPLY_TO", "Antwort an"))}</button></div>
-            <div class="compose-recipient" data-extra="cc" hidden><span class="field-label">${esc3(t("GLOBAL.CC", "Cc"))}</span><div class="recipient-box" data-recipient="cc"></div></div>
-            <div class="compose-recipient" data-extra="bcc" hidden><span class="field-label">${esc3(t("GLOBAL.BCC", "Bcc"))}</span><div class="recipient-box" data-recipient="bcc"></div></div>
-            <label class="field" data-extra="reply" hidden><span>${esc3(t("GLOBAL.REPLY_TO", "Antwort an"))}</span><input name="replyTo" type="email" autocomplete="email"></label>
-            <label class="field"><span>${esc3(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+            <label class="field"><span>${esc5(t("GLOBAL.FROM", "Von"))}</span><select name="identity" id="compose-identity"></select></label>
+            <div class="compose-recipient"><span class="field-label">${esc5(t("GLOBAL.TO", "An"))}</span><div class="recipient-box" data-recipient="to"></div><button type="button" class="text-btn compose-more" data-compose="more-fields">Cc \xB7 Bcc \xB7 ${esc5(t("GLOBAL.REPLY_TO", "Antwort an"))}</button></div>
+            <div class="compose-recipient" data-extra="cc" hidden><span class="field-label">${esc5(t("GLOBAL.CC", "Cc"))}</span><div class="recipient-box" data-recipient="cc"></div></div>
+            <div class="compose-recipient" data-extra="bcc" hidden><span class="field-label">${esc5(t("GLOBAL.BCC", "Bcc"))}</span><div class="recipient-box" data-recipient="bcc"></div></div>
+            <label class="field" data-extra="reply" hidden><span>${esc5(t("GLOBAL.REPLY_TO", "Antwort an"))}</span><input name="replyTo" type="email" autocomplete="email"></label>
+            <label class="field"><span>${esc5(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
           </div>
-          <ul class="compose-files" id="compose-files" aria-label="${esc3(t("GLOBAL.ATTACHMENTS", "Anh\xE4nge"))}" hidden></ul>
+          <ul class="compose-files" id="compose-files" aria-label="${esc5(t("GLOBAL.ATTACHMENTS", "Anh\xE4nge"))}" hidden></ul>
           <div class="compose-editor-wrap">
-            <div class="editor-tools" role="toolbar" aria-label="${esc3(t("COMPOSE.FORMAT_TEXT", "Text formatieren"))}">
+            <div class="editor-tools" role="toolbar" aria-label="${esc5(t("COMPOSE.FORMAT_TEXT", "Text formatieren"))}">
               ${button2("bold", "bold", t("COMPOSE.BOLD", "Fett"))}${button2("italic", "italic", t("COMPOSE.ITALIC", "Kursiv"))}${button2("underline", "underline", t("COMPOSE.UNDERLINE", "Unterstrichen"))}
               <span class="tool-separator"></span>${button2("insertUnorderedList", "list-bullet", t("COMPOSE.BULLETED_LIST", "Aufz\xE4hlung"))}${button2("insertOrderedList", "list-number", t("COMPOSE.NUMBERED_LIST", "Nummerierte Liste"))}
               ${button2("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button2("link", "link", t("COMPOSE.INSERT_LINK", "Link einf\xFCgen"))}${button2("removeFormat", "close", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
               <span class="spacer"></span><button type="button" class="seg" data-compose="mode" aria-pressed="false">HTML</button>
             </div>
-            <div class="compose-html" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc3(t("GLOBAL.TEXT", "Nachricht"))}" data-placeholder="${esc3(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></div>
-            <textarea class="compose-plain" name="body" aria-label="${esc3(t("GLOBAL.TEXT", "Nachricht"))}" placeholder="${esc3(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></textarea>
+            <div class="compose-html" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc5(t("GLOBAL.TEXT", "Nachricht"))}" data-placeholder="${esc5(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></div>
+            <textarea class="compose-plain" name="body" aria-label="${esc5(t("GLOBAL.TEXT", "Nachricht"))}" placeholder="${esc5(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></textarea>
           </div>
           <div class="compose-bottom">
             <input type="file" id="compose-upload" multiple hidden>
-            <button type="button" class="text-btn" data-compose="attach">${icon("attach")}<span>${esc3(t("COMPOSE.ATTACH_FILES", "Anh\xE4ngen"))}</span></button>
-            <details class="compose-options"><summary>${esc3(t("COMPOSE.SEND_OPTIONS", "Sendeoptionen"))}</summary><div class="compose-option-grid">
-              <label class="check"><input type="checkbox" name="important"> ${esc3(t("COMPOSE.BUTTON_MARK_AS_IMPORTANT", "Wichtig markieren"))}</label>
-              <label class="check"><input type="checkbox" name="receipt"> ${esc3(t("COMPOSE.BUTTON_REQUEST_READ_RECEIPT", "Lesebest\xE4tigung anfordern"))}</label>
-              <label class="check"><input type="checkbox" name="dsn"> ${esc3(t("COMPOSE.BUTTON_REQUEST_DSN", "Zustellbest\xE4tigung anfordern"))}</label>
-              <label class="check"><input type="checkbox" name="tls"> ${esc3(t("COMPOSE.BUTTON_REQUIRE_TLS", "TLS erzwingen"))}</label>
+            <button type="button" class="text-btn" data-compose="attach">${icon("attach")}<span>${esc5(t("COMPOSE.ATTACH_FILES", "Anh\xE4ngen"))}</span></button>
+            <details class="compose-options"><summary>${esc5(t("COMPOSE.SEND_OPTIONS", "Sendeoptionen"))}</summary><div class="compose-option-grid">
+              <label class="check"><input type="checkbox" name="important"> ${esc5(t("COMPOSE.BUTTON_MARK_AS_IMPORTANT", "Wichtig markieren"))}</label>
+              <label class="check"><input type="checkbox" name="receipt"> ${esc5(t("COMPOSE.BUTTON_REQUEST_READ_RECEIPT", "Lesebest\xE4tigung anfordern"))}</label>
+              <label class="check"><input type="checkbox" name="dsn"> ${esc5(t("COMPOSE.BUTTON_REQUEST_DSN", "Zustellbest\xE4tigung anfordern"))}</label>
+              <label class="check"><input type="checkbox" name="tls"> ${esc5(t("COMPOSE.BUTTON_REQUIRE_TLS", "TLS erzwingen"))}</label>
             </div></details>
             <span class="spacer"></span><span class="quiet live" id="compose-status"></span>
           </div>
           <p class="error" id="send-error" role="alert" hidden></p>
-          <p class="quiet compose-drop-hint">${esc3(t("COMPOSE.ATTACH_DROP_FILES_DESC", "Dateien hier ablegen, um sie anzuh\xE4ngen."))}</p>
+          <p class="quiet compose-drop-hint">${esc5(t("COMPOSE.ATTACH_DROP_FILES_DESC", "Dateien hier ablegen, um sie anzuh\xE4ngen."))}</p>
         </div>
       </form>
     </section>
-    <button type="button" class="compose-dock" hidden data-compose="restore">${icon("compose")}<span id="compose-dock-title">${esc3(t("COMPOSE.RESUME_DRAFT", "Entwurf fortsetzen"))}</span>${icon("chevron-up")}</button>
+    <button type="button" class="compose-dock" hidden data-compose="restore">${icon("compose")}<span id="compose-dock-title">${esc5(t("COMPOSE.RESUME_DRAFT", "Entwurf fortsetzen"))}</span>${icon("chevron-up")}</button>
     <dialog id="compose-close" aria-labelledby="compose-close-title"><div class="dialog-body">
-      <h2 id="compose-close-title" class="title title-md">${esc3(t("COMPOSE.SAVE_DRAFT", "Entwurf speichern?"))}</h2><p class="quiet">${esc3(t("COMPOSE.UNSAVED_WARNING", "Die \xC4nderungen gehen sonst verloren."))}</p>
-      <div class="dialog-actions compose-close-actions"><button type="button" class="text-btn" value="cancel">${esc3(t("COMPOSE.CONTINUE_WRITING", "Weiter schreiben"))}</button><button type="button" class="danger" value="discard">${esc3(t("COMPOSE.DISCARD", "Verwerfen"))}</button><button type="button" class="ink-btn" value="save">${icon("save")}<span>${esc3(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
+      <h2 id="compose-close-title" class="title title-md">${esc5(t("COMPOSE.SAVE_DRAFT", "Entwurf speichern?"))}</h2><p class="quiet">${esc5(t("COMPOSE.UNSAVED_WARNING", "Die \xC4nderungen gehen sonst verloren."))}</p>
+      <div class="dialog-actions compose-close-actions"><button type="button" class="text-btn" value="cancel">${esc5(t("COMPOSE.CONTINUE_WRITING", "Weiter schreiben"))}</button><button type="button" class="danger" value="discard">${esc5(t("COMPOSE.DISCARD", "Verwerfen"))}</button><button type="button" class="ink-btn" value="save">${icon("save")}<span>${esc5(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
     </div></dialog>`;
     this.root = host.querySelector(".composer");
     this.form = host.querySelector(".composer-form");
@@ -1600,23 +2225,23 @@ var Composer = class {
   configure(prefs, identities) {
     this.prefs = prefs;
     this.identities = identities;
-    const select = this.form.elements.namedItem("identity");
-    const current = select.value;
-    select.replaceChildren(...identities.map((identity) => {
-      const option = document.createElement("option");
-      option.value = identity.id;
-      option.textContent = `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`;
-      return option;
+    const select2 = this.form.elements.namedItem("identity");
+    const current = select2.value;
+    select2.replaceChildren(...identities.map((identity) => {
+      const option2 = document.createElement("option");
+      option2.value = identity.id;
+      option2.textContent = `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`;
+      return option2;
     }));
-    select.value = identities.some((item) => item.id === current) ? current : identities[0]?.id || "";
-    select.disabled = identities.length < 2;
+    select2.value = identities.some((item) => item.id === current) ? current : identities[0]?.id || "";
+    select2.disabled = identities.length < 2;
     this.editor.spellcheck = prefs.spellcheck;
     this.plain.spellcheck = prefs.spellcheck;
     hostSave(this.root).hidden = !prefs.draftsFolder;
   }
   makeRecipients(name) {
     const box = this.root.querySelector(`[data-recipient='${name}']`);
-    box.innerHTML = `<div class="recipient-chips"></div><input type="text" autocomplete="off" aria-label="${esc3(name === "to" ? "An" : name === "cc" ? "Cc" : "Bcc")}"><div class="recipient-suggestions" role="listbox" hidden></div>`;
+    box.innerHTML = `<div class="recipient-chips"></div><input type="text" autocomplete="off" aria-label="${esc5(name === "to" ? "An" : name === "cc" ? "Cc" : "Bcc")}"><div class="recipient-suggestions" role="listbox" hidden></div>`;
     const field2 = { name, box, input: box.querySelector("input"), list: box.querySelector(".recipient-suggestions"), values: [], suggestions: [], active: -1, timer: 0, request: 0 };
     this.fields.set(name, field2);
     field2.input.addEventListener("input", () => this.suggestions(field2));
@@ -1843,7 +2468,7 @@ ${signature}`;
   }
   paintRecipients(field2) {
     const chips = field2.box.querySelector(".recipient-chips");
-    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc3(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${esc3(value)}<button type="button" data-chip="${index}" aria-label="${esc3(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc5(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${esc5(value)}<button type="button" data-chip="${index}" aria-label="${esc5(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
     chips.querySelectorAll("button").forEach((button3) => button3.addEventListener("click", () => {
       field2.values.splice(Number(button3.dataset.chip), 1);
       this.paintRecipients(field2);
@@ -1875,7 +2500,7 @@ ${signature}`;
         if (request !== field2.request) return;
         field2.suggestions = (result || []).filter((row2) => row2?.[0]).map((row2) => row2[1] ? `${row2[1]} <${row2[0]}>` : row2[0]);
         field2.active = -1;
-        field2.list.innerHTML = field2.suggestions.map((value, index) => `<button type="button" role="option" aria-selected="false" data-suggestion="${index}">${esc3(value)}</button>`).join("");
+        field2.list.innerHTML = field2.suggestions.map((value, index) => `<button type="button" role="option" aria-selected="false" data-suggestion="${index}">${esc5(value)}</button>`).join("");
         field2.list.hidden = !field2.suggestions.length;
         field2.list.querySelectorAll("button").forEach((button3) => button3.addEventListener("mousedown", (event) => {
           event.preventDefault();
@@ -1965,7 +2590,7 @@ ${signature}`;
     box.hidden = !this.files.length;
     box.innerHTML = this.files.map((file, index) => {
       const action = file.state === "busy" ? t("COMPOSE.CANCEL_UPLOAD", "Upload von %NAME% abbrechen").replace("%NAME%", file.name) : t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", file.name);
-      return `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc3(file.error || file.name)}">${esc3(file.name)}</span><span class="quiet">${esc3(file.state === "error" ? file.error || t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Fehler") : file.size)}</span>${file.state === "busy" ? `<progress max="100" value="${file.progress || 0}" aria-label="${esc3(t("COMPOSE.UPLOAD_PROGRESS", "Upload-Fortschritt"))}"></progress>` : ""}<button type="button" class="icon-btn" data-file="${index}" aria-label="${esc3(action)}" title="${esc3(action)}">${icon("close")}</button></li>`;
+      return `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc5(file.error || file.name)}">${esc5(file.name)}</span><span class="quiet">${esc5(file.state === "error" ? file.error || t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Fehler") : file.size)}</span>${file.state === "busy" ? `<progress max="100" value="${file.progress || 0}" aria-label="${esc5(t("COMPOSE.UPLOAD_PROGRESS", "Upload-Fortschritt"))}"></progress>` : ""}<button type="button" class="icon-btn" data-file="${index}" aria-label="${esc5(action)}" title="${esc5(action)}">${icon("close")}</button></li>`;
     }).join("");
     box.querySelectorAll("[data-file]").forEach((button3) => button3.addEventListener("click", () => {
       const index = Number(button3.dataset.file);
@@ -2139,7 +2764,7 @@ ${signature}`;
   setBusy(busy, status) {
     const submit = this.form.querySelector("button[type='submit']");
     submit.disabled = busy;
-    submit.innerHTML = `${icon(busy ? "loading" : "send")}<span>${esc3(busy && this.sending ? t("COMPOSE.SENDING", "Wird gesendet \u2026") : t("COMPOSE.BUTTON_SEND", "Senden"))}</span>`;
+    submit.innerHTML = `${icon(busy ? "loading" : "send")}<span>${esc5(busy && this.sending ? t("COMPOSE.SENDING", "Wird gesendet \u2026") : t("COMPOSE.BUTTON_SEND", "Senden"))}</span>`;
     this.setStatus(status);
   }
   setStatus(text2) {
@@ -2165,19 +2790,19 @@ function hostSave(root3) {
 }
 
 // src/reader.ts
-function esc4(value) {
+function esc6(value) {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 function person(item) {
   const text2 = item.name ? `${item.name} <${item.email}>` : item.email;
-  return `<button type="button" class="addr" data-action="m-address" data-email="${esc4(item.email)}" data-name="${esc4(item.name)}" title="${esc4(item.email)}">${esc4(item.name || item.email)}</button><span class="sr">${esc4(text2)}</span>`;
+  return `<button type="button" class="addr" data-action="m-address" data-email="${esc6(item.email)}" data-name="${esc6(item.name)}" title="${esc6(item.email)}">${esc6(item.name || item.email)}</button><span class="sr">${esc6(text2)}</span>`;
 }
 function people(list) {
   return list.map(person).join('<span class="sep">, </span>');
 }
 function line(label2, list) {
   if (!list.length) return "";
-  return `<div class="head-line"><span class="head-key mono">${esc4(label2)}</span><span class="head-val">${people(list)}</span></div>`;
+  return `<div class="head-line"><span class="head-key mono">${esc6(label2)}</span><span class="head-val">${people(list)}</span></div>`;
 }
 var FILE_ICON = {
   image: "image",
@@ -2188,21 +2813,21 @@ var FILE_ICON = {
   other: "attachment"
 };
 function bar(kind, iconName, text2, actions) {
-  return `<div class="note-bar" data-kind="${kind}" role="status">${icon(iconName)}<span class="grow">${esc4(text2)}</span>${actions}</div>`;
+  return `<div class="note-bar" data-kind="${kind}" role="status">${icon(iconName)}<span class="grow">${esc6(text2)}</span>${actions}</div>`;
 }
 function textButton(action, label2, extra = "") {
-  return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc4(label2)}</button>`;
+  return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc6(label2)}</button>`;
 }
 function renderReader(body, data, expanded) {
   const tags = data.keywords.map(
-    (tag) => `<span class="tag">${icon("tag")}<span>${esc4(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc4(tag)}" aria-label="Schlagwort ${esc4(tag)} entfernen">${icon("close")}</button></span>`
+    (tag) => `<span class="tag">${icon("tag")}<span>${esc6(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc6(tag)}" aria-label="Schlagwort ${esc6(tag)} entfernen">${icon("close")}</button></span>`
   ).join("");
   const from = data.from[0];
   const summary = `
     <div class="head-line head-main">
       <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
       <span class="spacer"></span>
-      <time class="quiet" title="${esc4(data.whenFull)}">${esc4(data.when)}</time>
+      <time class="quiet" title="${esc6(data.whenFull)}">${esc6(data.when)}</time>
       <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
   const details = expanded ? `
@@ -2212,8 +2837,8 @@ function renderReader(body, data, expanded) {
       ${line("Cc", data.cc)}
       ${line("Bcc", data.bcc)}
       ${line("Antwort an", data.replyTo)}
-      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc4(data.whenFull)}</span></div>
-      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc4(data.size)}</span></div>` : ""}
+      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc6(data.whenFull)}</span></div>
+      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc6(data.size)}</span></div>` : ""}
     </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
   const bars = [];
   if (data.deleted) bars.push(bar("deleted", "trash", "Als gel\xF6scht markiert.", textButton("m-restore", "Wiederherstellen")));
@@ -2254,10 +2879,10 @@ function renderReader(body, data, expanded) {
     <section class="cal-card" aria-label="Termin">
       ${icon("calendar", "Termin")}
       <div class="grow">
-        <p class="cal-title">${esc4(data.calendar.summary || "Termin")}</p>
-        <p class="quiet">${esc4([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
-        ${data.calendar.location ? `<p class="quiet">${esc4(data.calendar.location)}</p>` : ""}
-        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc4(data.calendar.organizer)}</p>` : ""}
+        <p class="cal-title">${esc6(data.calendar.summary || "Termin")}</p>
+        <p class="quiet">${esc6([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
+        ${data.calendar.location ? `<p class="quiet">${esc6(data.calendar.location)}</p>` : ""}
+        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc6(data.calendar.organizer)}</p>` : ""}
       </div>
     </section>` : "";
   const files = data.files.length ? `
@@ -2268,18 +2893,18 @@ function renderReader(body, data, expanded) {
       <ul class="file-list${data.simpleFiles ? " simple" : ""}">
         ${data.files.map((file) => `
           <li class="file">
-            ${file.thumb && !data.simpleFiles ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc4(file.name)} ansehen"><img src="${esc4(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
+            ${file.thumb && !data.simpleFiles ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc6(file.name)} ansehen"><img src="${esc6(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">
-              ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc4(file.name)}">${esc4(file.name)}</button>` : `<span class="file-name" title="${esc4(file.name)}">${esc4(file.name)}</span>`}
-              <span class="quiet">${esc4(file.size)}</span>
+              ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc6(file.name)}">${esc6(file.name)}</button>` : `<span class="file-name" title="${esc6(file.name)}">${esc6(file.name)}</span>`}
+              <span class="quiet">${esc6(file.size)}</span>
             </span>
-            <a class="icon-btn" href="${esc4(file.href)}" download="${esc4(file.name)}" aria-label="${esc4(file.name)} laden" title="Laden">${icon("download")}</a>
+            <a class="icon-btn" href="${esc6(file.href)}" download="${esc6(file.name)}" aria-label="${esc6(file.name)} laden" title="Laden">${icon("download")}</a>
           </li>`).join("")}
       </ul>
     </section>` : "";
   body.innerHTML = `
     <header class="letter-head">
-      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc4(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc6(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
       <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
@@ -2296,7 +2921,7 @@ function renderReader(body, data, expanded) {
   body.append(frame);
 }
 function renderBulk(body, data) {
-  const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc4(label2)}</span></button>`;
+  const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc6(label2)}</span></button>`;
   body.innerHTML = `
     <div class="bulk">
       <p class="title title-md">${data.count} Mails ausgew\xE4hlt</p>
@@ -2319,6 +2944,18 @@ function renderBulk(body, data) {
 }
 
 // src/view.ts
+var SORTS = [
+  ["", "MESSAGE_LIST.SORT_DATE_DESC", "Datum absteigend"],
+  ["DATE", "MESSAGE_LIST.SORT_DATE_ASC", "Datum aufsteigend"],
+  ["FROM", "MESSAGE_LIST.SORT_FROM_ASC", "Von A-Z"],
+  ["REVERSE FROM", "MESSAGE_LIST.SORT_FROM_DESC", "Von Z-A"],
+  ["REVERSE SIZE", "MESSAGE_LIST.SORT_SIZE_DESC", "Gr\xF6\xDFe absteigend"],
+  ["SIZE", "MESSAGE_LIST.SORT_SIZE_ASC", "Gr\xF6\xDFe aufsteigend"],
+  ["SUBJECT", "MESSAGE_LIST.SORT_SUBJECT_ASC", "Betreff A-Z"],
+  ["REVERSE SUBJECT", "MESSAGE_LIST.SORT_SUBJECT_DESC", "Betreff Z-A"],
+  ["REVERSE ARRIVAL", "MESSAGE_LIST.SORT_ARRIVAL_DESC", "Eingang absteigend"],
+  ["ARRIVAL", "MESSAGE_LIST.SORT_ARRIVAL_ASC", "Eingang aufsteigend"]
+];
 var CATEGORY = {
   needs_reply: "Antwort n\xF6tig",
   personal: "F\xFCr mich",
@@ -2329,7 +2966,7 @@ var CATEGORY = {
 function categoryMark(category) {
   if (!category || !CATEGORY[category]) return "";
   const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
-  return `<span class="cat">${mark}${esc5(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
+  return `<span class="cat">${mark}${esc7(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 function rowMarks(row2) {
   const marks = [
@@ -2341,7 +2978,7 @@ function rowMarks(row2) {
   const html = marks.filter(([on2]) => on2).map(([, name, label2]) => icon(name, label2)).join("");
   return html ? `<span class="marks">${html}</span>` : "";
 }
-function esc5(value) {
+function esc7(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -2351,9 +2988,9 @@ function esc5(value) {
   })[char] ?? char);
 }
 function withIcon(name, label2) {
-  return `${icon(name)}<span class="btn-label">${esc5(label2)}</span>`;
+  return `${icon(name)}<span class="btn-label">${esc7(label2)}</span>`;
 }
-var ROLE_ICON = {
+var ROLE_ICON2 = {
   inbox: "inbox",
   sent: "sent",
   drafts: "drafts",
@@ -2392,18 +3029,18 @@ function createView(root3, actions) {
     root3.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
-          <h1 class="title">${esc5(title)}</h1>
-          <label class="field"><span>${esc5(t("GLOBAL.EMAIL", "E-Mail"))}</span>
+          <h1 class="title">${esc7(title)}</h1>
+          <label class="field"><span>${esc7(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
           <p class="error" data-for="email" hidden></p>
-          <label class="field"><span>${esc5(t("GLOBAL.PASSWORD", "Passwort"))}</span>
+          <label class="field"><span>${esc7(t("GLOBAL.PASSWORD", "Passwort"))}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
-          <label class="stay"><input name="stay" type="checkbox"> ${esc5(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
+          <label class="stay"><input name="stay" type="checkbox"> ${esc7(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
-          <button type="submit" class="ink-btn">${esc5(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
+          <button type="submit" class="ink-btn">${esc7(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
         </form>
       </main>`;
     const form2 = root3.querySelector("form");
@@ -2432,27 +3069,48 @@ function createView(root3, actions) {
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
               <div id="account-list"></div>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc5(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc7(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
-          <p class="group-label mono">${esc5(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
-          <div id="folder-inbox"></div>
-          <p class="group-label mono">Ordner</p>
-          <div id="folder-rest"></div>
+          <p class="group-label mono">${esc7(t("FOLDERS_UI.FOLDERS", "Ordner"))}</p>
+          <div class="folder-filter" hidden>
+            <label class="sr" for="folder-q">${esc7(t("FOLDERS_UI.FILTER", "Ordner suchen"))}</label>
+            <input class="search" id="folder-q" type="search" placeholder="${esc7(t("FOLDERS_UI.FILTER", "Ordner suchen"))}" autocomplete="off">
+          </div>
+          <div id="folder-tree" class="folder-tree"></div>
+          <div class="sidebar-foot">
+            <button type="button" class="text-btn" data-action="f-create" hidden>${withIcon("folder-plus", t("SETTINGS_FOLDERS.BUTTON_CREATE", "Ordner anlegen"))}</button>
+            <div id="quota" class="quota"></div>
+          </div>
+          <ul class="menu folder-menu" id="folder-menu" role="menu" aria-label="${esc7(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}" hidden></ul>
         </aside>
         <section class="list-pane" aria-label="Mails">
           <div class="pane-head">
             <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
             <span class="spacer"></span>
+            <div class="bar-more view-more">
+              <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc7(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc7(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
+              <div class="menu menu-right" id="view-menu" role="menu" hidden></div>
+            </div>
             <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle ausw\xE4hlen" title="Alle ausw\xE4hlen (Strg+A)">${icon("select-all")}</button>
             <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
             <input class="search" id="search" type="search" placeholder="" autocomplete="off">
+            <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
+          <div class="quick" role="group" aria-label="${esc7(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
+            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc7(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc7(t("SEARCH.FLAGGED", "Markiert"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc7(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
+          </div>
+          <div class="thread-bar" id="thread-bar" hidden>
+            <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zur\xFCck zur Liste"))}</button>
+            <span class="quiet" id="thread-label"></span>
+          </div>
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
             <p class="empty" id="list-empty" hidden></p>
@@ -2464,15 +3122,15 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc5(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc7(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc5(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc5(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc5(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc5(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc7(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc7(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc7(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc7(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc5(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc7(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
@@ -2480,7 +3138,7 @@ function createView(root3, actions) {
             <div class="bar-more">
               <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
               <div class="menu menu-right" id="more-menu" role="menu" hidden>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc5(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc7(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben \u2026</span></button>
@@ -2520,12 +3178,13 @@ function createView(root3, actions) {
           <div class="dialog-body">
             <div class="settings-sticky">
               <div class="sheet-head" style="padding:0;border:0;min-height:0">
-                <h2 id="settings-title" class="title title-md">${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <h2 id="settings-title" class="title title-md">${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
                 <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
               </div>
-              <nav class="settings-nav" aria-label="${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+              <nav class="settings-nav" aria-label="${esc7(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
@@ -2541,11 +3200,15 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
               <li><span>N\xE4chste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
               <li><span>\xD6ffnen</span><kbd>Enter</kbd></li>
+              <li><span>Unterhaltung \xF6ffnen</span><kbd>T</kbd></li>
+              <li><span>Zur\xFCck zur Liste (Unterhaltung)</span><kbd>Esc</kbd></li>
+              <li><span>Ordner auf-, zuklappen</span><kbd>\u2190</kbd> <kbd>\u2192</kbd></li>
+              <li><span>Ordneraktionen</span><kbd>Umschalt</kbd> <kbd>F10</kbd></li>
               <li><span>Schreiben</span><kbd>C</kbd></li>
               <li><span>Antworten</span><kbd>R</kbd></li>
               <li><span>Allen antworten</span><kbd>A</kbd></li>
@@ -2572,7 +3235,7 @@ function createView(root3, actions) {
             <h2 id="confirm-title" class="title title-md">Wirklich l\xF6schen?</h2>
             <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" value="cancel">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" value="cancel">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             </div>
           </div>
@@ -2582,7 +3245,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <label class="sr" for="picker-q">Ordner suchen</label>
             <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
@@ -2594,7 +3257,7 @@ function createView(root3, actions) {
             <h2 id="prompt-title" class="title title-md"></h2>
             <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" data-action="close-dialog">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" data-action="close-dialog">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("check", "\xDCbernehmen")}</button>
             </div>
           </form>
@@ -2605,16 +3268,48 @@ function createView(root3, actions) {
               <h2 id="lightbox-title" class="title title-md"></h2>
               <span class="spacer"></span>
               <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab \xF6ffnen" title="In neuem Tab \xF6ffnen">${icon("external")}</a>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <div class="lightbox-body" id="lightbox-body"></div>
+          </div>
+        </dialog>
+        <dialog id="adv-search" class="dialog-wide" aria-labelledby="adv-title">
+          <form class="dialog-body" data-action="adv-search-form">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="adv-title" class="title title-md">${esc7(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}</h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+            </div>
+            <div id="adv-body"></div>
+          </form>
+        </dialog>
+        <dialog id="folder-dlg" aria-labelledby="folder-dlg-title">
+          <form class="dialog-body" data-action="folder-dlg-form">
+            <h2 id="folder-dlg-title" class="title title-md"></h2>
+            <label class="field"><span>${esc7(t("GLOBAL.NAME", "Name"))}</span><input id="folder-dlg-name" type="text" required autocomplete="off"></label>
+            <label class="field"><span>${esc7(t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "\xDCbergeordneter Ordner"))}</span><select id="folder-dlg-parent"></select></label>
+            <label class="check"><input type="checkbox" id="folder-dlg-sub" checked> ${esc7(t("FOLDERS_UI.SUBSCRIBE", "Abonnieren"))}</label>
+            <div class="dialog-actions">
+              <button type="button" class="text-btn" data-action="close-dialog">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="submit" class="ink-btn">${withIcon("folder-plus", t("POPUPS_CREATE_FOLDER.BUTTON_CREATE", "Anlegen"))}</button>
+            </div>
+          </form>
+        </dialog>
+        <dialog id="acl-dlg" class="dialog-wide" aria-labelledby="acl-title">
+          <div class="dialog-body">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="acl-title" class="title title-md"></h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+            </div>
+            <div id="acl-body"></div>
           </div>
         </dialog>
         <ul class="menu addr-menu" id="addr-menu" role="menu" hidden>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
-          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc5(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc7(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button></li>
         </ul>
       </div>`;
     const next = root3.querySelector(".shell");
@@ -2700,17 +3395,59 @@ function createView(root3, actions) {
     if (shell) shell.dataset.sidebar = open ? "open" : "closed";
   }
   function closeMenu() {
-    shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu").forEach((menu) => {
+    shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu").forEach((menu) => {
       menu.hidden = true;
     });
-    shell?.querySelectorAll("[data-action='account'], [data-action='m-more']").forEach((button3) => {
+    shell?.querySelectorAll("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu']").forEach((button3) => {
       button3.setAttribute("aria-expanded", "false");
     });
   }
   function anyMenuOpen() {
-    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden])"));
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden])"));
   }
   let addrTarget = { email: "", name: "" };
+  let menuReturn = null;
+  let folderActions = /* @__PURE__ */ new Map();
+  let folderDesk = null;
+  let listMode = { sortable: false, sort: "", threadsAvailable: false, useThreads: false, grouped: false, threadOpen: "" };
+  function openFolderMenu(target, anchor, point) {
+    const menu = shell?.querySelector("#folder-menu");
+    const sidebar = shell?.querySelector(".sidebar");
+    const list = folderActions.get(target);
+    if (!menu || !sidebar || !list?.length) return;
+    closeMenu();
+    menu.innerHTML = renderFolderMenu(target, list);
+    const box = sidebar.getBoundingClientRect();
+    const rect = anchor.getBoundingClientRect();
+    const x = point ? point.x : rect.right - 8;
+    const y = point ? point.y : rect.bottom;
+    menu.style.left = `${Math.max(4, Math.min(x - box.left, box.width - 228))}px`;
+    menu.style.top = `${y - box.top + sidebar.scrollTop + 4}px`;
+    menu.hidden = false;
+    const limit = Math.min(window.innerHeight, shell?.querySelector(".tabbar")?.getBoundingClientRect().top || window.innerHeight);
+    const height = menu.getBoundingClientRect().height;
+    if (y + 4 + height > limit) {
+      const above = (point ? point.y : rect.top) - height - 4;
+      menu.style.top = `${Math.max(4, above - box.top + sidebar.scrollTop)}px`;
+    }
+    const more = sidebar.querySelector(`.fmore[data-target="${CSS.escape(target)}"]`);
+    more?.setAttribute("aria-expanded", "true");
+    menuReturn = more || anchor;
+    menu.querySelector("button")?.focus({ preventScroll: true });
+  }
+  function paintViewMenu() {
+    const menu = shell?.querySelector("#view-menu");
+    const button3 = shell?.querySelector("[data-action='view-menu']");
+    if (!menu || !button3) return;
+    const sorts = listMode.sortable && !listMode.threadOpen ? `<p class="menu-label mono">${esc7(t("MESSAGE_LIST.SORT", "Sortieren"))}</p>` + SORTS.map(([value, key, fallback]) => `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${listMode.sort === value ? "true" : "false"}" data-action="sort" data-sort="${esc7(value)}">${icon(listMode.sort === value ? "check" : "sort")}<span>${esc7(t(key, fallback))}</span></button>`).join("") : "";
+    const threads = listMode.threadsAvailable ? `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.useThreads ? "true" : "false"}" data-action="threads-toggle">${icon(listMode.useThreads ? "checkbox-checked" : "checkbox")}<span>${esc7(t("SETTINGS_GENERAL.USE_THREADS", "Als Unterhaltungen anzeigen"))}</span></button>` : "";
+    const group = `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.grouped ? "true" : "false"}" data-action="group-toggle">${icon(listMode.grouped ? "checkbox-checked" : "checkbox")}<span>${esc7(t("FOLDERS_UI.GROUP_BY_DATE", "Nach Datum gruppieren"))}</span></button>`;
+    menu.innerHTML = sorts + (sorts ? `<hr class="menu-sep">` : "") + `<p class="menu-label mono">${esc7(t("FOLDERS_UI.VIEW", "Ansicht"))}</p>` + threads + group;
+    button3.hidden = false;
+  }
+  function folderButtons() {
+    return [...shell?.querySelectorAll("#folder-tree .folder:not([disabled])") ?? []];
+  }
   function openAddrMenu(target) {
     const menu = shell?.querySelector("#addr-menu");
     if (!menu || !shell) return;
@@ -2766,7 +3503,7 @@ function createView(root3, actions) {
       if (!target) return;
       const action = target.dataset.action;
       if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
-      if (target.dataset.folder) {
+      if (target.dataset.folder && !action) {
         actions.selectFolder(target.dataset.folder);
         if (!wide()) pane("list");
         if (!docked()) setSidebar(false);
@@ -2796,6 +3533,53 @@ function createView(root3, actions) {
         more.hidden = !open;
         target.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) more.querySelector(".menu-item:not([hidden])")?.focus({ preventScroll: true });
+      } else if (action === "f-toggle") {
+        actions.act("f-toggle", { target: target.dataset.target || "" });
+      } else if (action === "f-menu") {
+        const open = target.getAttribute("aria-expanded") === "true";
+        if (open) closeMenu();
+        else openFolderMenu(target.dataset.target || "", target);
+      } else if (action === "f-settings") {
+        closeMenu();
+        openFolderSettings(target.dataset.target || "");
+      } else if (action?.startsWith("f-")) {
+        if (target.closest(".menu")) closeMenu();
+        const data = {};
+        Object.entries(target.dataset).forEach(([key, value]) => {
+          if (value != null) data[key] = value;
+        });
+        actions.act(action, data);
+      } else if (action === "view-menu") {
+        const menuEl = shell?.querySelector("#view-menu");
+        const open = menuEl.hidden;
+        closeMenu();
+        if (open) {
+          paintViewMenu();
+          menuEl.hidden = false;
+          target.setAttribute("aria-expanded", "true");
+          menuReturn = target;
+          menuEl.querySelector(".menu-item")?.focus({ preventScroll: true });
+        }
+      } else if (action === "sort" || action === "threads-toggle" || action === "group-toggle") {
+        closeMenu();
+        shell?.querySelector("[data-action='view-menu']")?.focus({ preventScroll: true });
+        actions.act(action, { sort: target.dataset.sort || "" });
+      } else if (action === "quick") {
+        actions.act("quick", { flag: target.dataset.flag || "", query: (shell?.querySelector("#search")).value.trim() });
+      } else if (action === "adv-search") {
+        actions.act("adv-search", { query: (shell?.querySelector("#search")).value.trim() });
+      } else if (action === "adv-reset") {
+        const form2 = target.closest("form");
+        form2?.reset();
+        form2?.querySelectorAll("input").forEach((field2) => {
+          if (field2.type === "checkbox") field2.checked = false;
+          else field2.value = "";
+        });
+        form2?.querySelectorAll("select").forEach((field2) => {
+          field2.selectedIndex = 0;
+        });
+      } else if (action === "thread-back") {
+        actions.act("thread-back", {});
       } else if (action === "m-address") {
         openAddrMenu(target);
       } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search" || action === "m-addr-contact") {
@@ -2854,6 +3638,7 @@ function createView(root3, actions) {
         section = target.dataset.section || "look";
         edit = null;
         paintSettings();
+        if (section === "folders") actions.act("f-desk", {});
       } else if (action === "settings-edit") {
         edit = { kind: target.dataset.kind || "", id: target.dataset.id || "", fresh: target.dataset.fresh === "1" };
         paintSettings();
@@ -2888,8 +3673,10 @@ function createView(root3, actions) {
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") target.closest("dialog")?.close();
       else if (action === "search") {
-      } else if (action === "clear-search") actions.clearSearch();
-      else if (action === "more") actions.more();
+      } else if (action === "clear-search") {
+        (shell?.querySelector("#search")).value = "";
+        actions.clearSearch();
+      } else if (action === "more") actions.more();
       else if (action === "back") pane("list");
       else if (action === "pane-folders") pane("folders");
       else if (action === "pane-search") {
@@ -2927,6 +3714,15 @@ function createView(root3, actions) {
     shell.addEventListener("submit", (event) => {
       const form2 = event.target;
       if (form2.classList.contains("composer-form")) return;
+      if (form2.dataset.action === "adv-search-form") {
+        event.preventDefault();
+        const query = serializeSearch(readSearchForm(form2), form2.dataset.multisearch === "1");
+        (shell?.querySelector("#search")).value = query;
+        form2.closest("dialog").close();
+        actions.search(query);
+        return;
+      }
+      if (form2.dataset.action === "folder-dlg-form") return;
       if (form2.dataset.action === "search") {
         event.preventDefault();
         actions.search(form2.querySelector("#search").value.trim());
@@ -2947,29 +3743,90 @@ function createView(root3, actions) {
         void actions.settings?.(form2.dataset.kind || "", data);
       }
     });
+    shell.addEventListener("contextmenu", (event) => {
+      const row2 = event.target.closest("#folder-tree .frow");
+      if (!row2) return;
+      const name = row2.dataset.row || "";
+      if (!folderActions.get(name)?.length) return;
+      event.preventDefault();
+      const mouse = event;
+      const fromKeyboard = mouse.clientX === 0 && mouse.clientY === 0;
+      openFolderMenu(name, row2, fromKeyboard ? void 0 : { x: mouse.clientX, y: mouse.clientY });
+    });
+    const folderFilter = shell.querySelector("#folder-q");
+    folderFilter.addEventListener("input", () => actions.act("f-filter", { q: folderFilter.value }));
+    shell.querySelector(".sidebar")?.addEventListener("keydown", (raw) => {
+      const event = raw;
+      const current = event.target.closest("#folder-tree .folder");
+      if (!current) {
+        const menuEl = event.target.closest("#folder-menu");
+        if (menuEl && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          event.preventDefault();
+          const items = [...menuEl.querySelectorAll(".menu-item")];
+          const index2 = items.indexOf(event.target);
+          items[(index2 + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      const buttons = folderButtons();
+      const index = buttons.indexOf(current);
+      const row2 = current.closest(".frow");
+      const name = row2?.dataset.row || "";
+      const toggle = row2?.querySelector(".ftoggle[aria-expanded]");
+      const go = (next) => {
+        if (next) {
+          event.preventDefault();
+          next.focus({ preventScroll: true });
+          next.scrollIntoView({ block: "nearest" });
+        }
+      };
+      if (event.key === "ArrowDown") go(buttons[index + 1]);
+      else if (event.key === "ArrowUp") go(buttons[index - 1]);
+      else if (event.key === "Home") go(buttons[0]);
+      else if (event.key === "End") go(buttons[buttons.length - 1]);
+      else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "false") actions.act("f-toggle", { target: name });
+        else if (toggle) go(buttons[index + 1]);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "true") actions.act("f-toggle", { target: name });
+        else {
+          const depth = Number(current.dataset.depth || 0);
+          if (depth > 0) go(buttons.slice(0, index).reverse().find((item) => Number(item.dataset.depth || 0) < depth));
+        }
+      }
+    });
     shell.addEventListener("change", (event) => {
-      const input = event.target;
-      if (input.name === "appearance") applyAppearance(input.value);
+      const input2 = event.target;
+      if (input2.name === "appearance") applyAppearance(input2.value);
     });
     if (keyHandler) document.removeEventListener("keydown", keyHandler);
     keyHandler = (event) => {
-      if (!shell?.isConnected) return;
+      if (!shell?.isConnected || event.defaultPrevented) return;
       const typing = event.target instanceof HTMLInputElement && !["checkbox", "radio", "button"].includes(event.target.type) || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLElement && event.target.isContentEditable;
       if (event.key === "Escape") {
         if (shell?.querySelector("dialog[open]")) return;
         if (anyMenuOpen()) {
+          const back = menuReturn;
           closeMenu();
+          menuReturn = null;
+          back?.focus({ preventScroll: true });
           return;
         }
         if (shell?.dataset.full === "true") {
           toggleFullscreen(false);
           return;
         }
-        if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
+        if (!docked() && shell?.dataset.sidebar === "open") {
+          setSidebar(false);
+          return;
+        }
+        if (!typing && listMode.threadOpen) actions.act("thread-back", {});
         return;
       }
       if (typing || shell.querySelector("dialog[open]")) return;
-      const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid && !event.target.dataset.folder;
+      const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid;
       if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
@@ -3010,6 +3867,9 @@ function createView(root3, actions) {
       else if (key === "m") {
         event.preventDefault();
         actions.act("move", {});
+      } else if (key === "t") {
+        event.preventDefault();
+        actions.act("thread", {});
       } else if (key === "j" || key === "k" || event.key === "Enter") {
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
@@ -3106,8 +3966,8 @@ function createView(root3, actions) {
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
       filters.innerHTML = cats.map(
-        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc5(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc5(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc7(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc7(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
@@ -3124,9 +3984,9 @@ function createView(root3, actions) {
       hint.className = "translate";
       hint.innerHTML = `<p class="quiet" id="translate-why"></p><input class="search" id="translate-q" aria-label="\xDCbersetzte Suche"><button type="button" class="text-btn" data-action="run-search">Suchen</button>`;
       searchForm.after(hint);
-      const input = shell.querySelector("#search");
-      input.addEventListener("input", () => {
-        button3.hidden = !input.value.trim();
+      const input2 = shell.querySelector("#search");
+      input2.addEventListener("input", () => {
+        button3.hidden = !input2.value.trim();
       });
     }
     if (flags.summarize || flags.replies) {
@@ -3148,13 +4008,13 @@ function createView(root3, actions) {
       sheet.hidden = true;
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc5(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc5(flags.provider)}</span>
+          <span class="title title-md">${esc7(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc7(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc7(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc5(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc7(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
             <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
             <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
@@ -3163,8 +4023,8 @@ function createView(root3, actions) {
         </div>
         <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <textarea id="ask" rows="2" placeholder="${esc5(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
-          <button type="submit" class="ink-btn">${esc5(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <textarea id="ask" rows="2" placeholder="${esc7(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc7(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
         <p class="error" id="chat-error" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -3180,16 +4040,16 @@ function createView(root3, actions) {
           <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
           <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc5(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc7(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
         <div class="tones" role="toolbar" aria-label="Ton">
-          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc5(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
+          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc7(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
           <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
         </div>
-        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc5(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc7(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
         <p class="quiet" id="draft-status"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
@@ -3200,7 +4060,7 @@ function createView(root3, actions) {
         <h2 class="title title-md">Assistent</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
-          <button type="button" class="text-btn" value="cancel">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="text-btn" value="cancel">${esc7(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
           <button type="button" class="ink-btn" value="ok">Fortfahren</button>
         </div>
       </div>`;
@@ -3219,36 +4079,135 @@ function createView(root3, actions) {
       if (id === "contacts") button3.hidden = !snap?.caps.contacts;
       if (id === "filters") button3.hidden = !snap?.caps.sieve;
     });
-    panel.innerHTML = renderDesk(section, snap, edit);
+    panel.innerHTML = section === "folders" ? renderFolderDesk(folderDesk, edit) : renderDesk(section, snap, edit);
     if (edit) {
-      const field2 = panel.querySelector("input:not([type='hidden']), textarea");
+      const scope = section === "folders" ? panel.querySelector("form[data-kind='folder-save'], form[data-kind='folder-create']") || panel : panel;
+      const field2 = scope.querySelector("input:not([type='hidden']), select, textarea");
       field2?.focus({ preventScroll: true });
+      if (section === "folders") field2?.closest("form")?.scrollIntoView({ block: "nearest" });
     }
   }
-  function folderButton(row2) {
-    const count = row2.unread > 0 ? `<span class="count">${row2.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc5(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px">${icon(ROLE_ICON[row2.role] || (row2.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc5(row2.name)}</span>${count}</button>`;
+  function openFolderSettings(fullName) {
+    const dialog = shell?.querySelector("#settings");
+    if (!dialog) return;
+    section = "folders";
+    edit = fullName ? { kind: "folder", id: fullName, fresh: false } : null;
+    const opening = !dialog.open;
+    if (opening && fullName) {
+      dialog.addEventListener("close", () => {
+        const back = shell?.querySelector(`.frow[data-row="${CSS.escape(fullName)}"] .fmore, .frow[data-row="${CSS.escape(fullName)}"] .folder`);
+        back?.focus({ preventScroll: true });
+      }, { once: true });
+    }
+    if (opening) {
+      if (!edit) dialog.showModal();
+      else {
+        paintSettings();
+        dialog.showModal();
+      }
+      void actions.settings?.("open", {});
+    }
+    paintSettings();
+    actions.act("f-desk", {});
   }
   return {
     showLogin,
     setLoginBusy,
     setLoginError,
     showMail,
-    setFolders(rows) {
-      const inbox = rows.filter((row2) => row2.inbox);
-      const rest = rows.filter((row2) => !inbox.includes(row2));
-      const inboxEl = shell?.querySelector("#folder-inbox");
-      const restEl = shell?.querySelector("#folder-rest");
-      if (inboxEl) inboxEl.innerHTML = inbox.map(folderButton).join("") || `<button type="button" class="folder" data-folder="INBOX">${icon("inbox")}<span class="folder-name">Posteingang</span></button>`;
-      if (restEl) restEl.innerHTML = rest.map(folderButton).join("");
-      const current = rows.find((row2) => row2.current);
-      if (current && shell) {
-        shell.querySelector("#folder-title").textContent = current.name;
-        shell.querySelector("#reader-place").textContent = current.name;
+    setFolders(data) {
+      const tree = shell?.querySelector("#folder-tree");
+      if (!tree || !shell) return;
+      const active = document.activeElement;
+      const keep = active && tree.contains(active) ? { key: active.dataset.folder || active.dataset.target || "", cls: active.classList.contains("fmore") ? ".fmore" : active.classList.contains("ftoggle") ? ".ftoggle" : ".folder" } : null;
+      folderActions = new Map(data.rows.map((row2) => [row2.info.fullName, row2.actions]));
+      tree.innerHTML = renderSidebarRows(data.rows, Boolean(data.filter.trim()));
+      if (keep?.key) {
+        const sel = keep.cls === ".folder" ? `.frow[data-row="${CSS.escape(keep.key)}"] .folder` : `.frow[data-row="${CSS.escape(keep.key)}"] ${keep.cls}`;
+        tree.querySelector(sel)?.focus({ preventScroll: true });
+      }
+      const filter = shell.querySelector(".folder-filter");
+      filter.hidden = data.count <= 15 && !data.filter;
+      shell.querySelector("[data-action='f-create']").hidden = !data.canCreate;
+      shell.querySelector("#quota").innerHTML = renderQuota(data.quota);
+      if (data.currentName) {
+        shell.querySelector("#folder-title").textContent = data.currentName;
+        shell.querySelector("#reader-place").textContent = data.currentName;
         const search = shell.querySelector("#search");
-        if (document.activeElement !== search) search.placeholder = `In ${current.name} suchen`;
+        if (document.activeElement !== search) search.placeholder = `In ${data.currentName} suchen`;
       }
     },
+    setFolderDesk(desk) {
+      folderDesk = desk;
+      const dialog = shell?.querySelector("#settings");
+      if (dialog?.open && section === "folders" && !edit) {
+        const panel = shell?.querySelector("#settings-panel");
+        const top = panel?.closest(".dialog-body")?.scrollTop || 0;
+        paintSettings();
+        const body = panel?.closest(".dialog-body");
+        if (body) body.scrollTop = top;
+      }
+    },
+    showAcl(folder, html) {
+      const dialog = shell?.querySelector("#acl-dlg");
+      if (!dialog) return;
+      dialog.querySelector("#acl-title").textContent = `${t("FOLDERS_UI.SHARING", "Freigaben")}: ${folder}`;
+      dialog.querySelector("#acl-body").innerHTML = html;
+      if (!dialog.open) dialog.showModal();
+    },
+    setListMode(mode) {
+      listMode = mode;
+      if (!shell) return;
+      shell.dataset.thread = mode.threadOpen ? "open" : "";
+      const bar2 = shell.querySelector("#thread-bar");
+      bar2.hidden = !mode.threadOpen;
+      shell.querySelector("#thread-label").textContent = mode.threadOpen ? `${t("FOLDERS_UI.THREAD", "Unterhaltung")}: ${mode.threadOpen}` : "";
+      paintViewMenu();
+    },
+    setSearch(query, quick) {
+      const input2 = shell?.querySelector("#search");
+      if (input2 && input2.value.trim() !== query) input2.value = query;
+      shell?.querySelectorAll("[data-action='quick']").forEach((button3) => {
+        button3.setAttribute("aria-pressed", quick.has(button3.dataset.flag) ? "true" : "false");
+      });
+    },
+    openSearch(criteria, options) {
+      const dialog = shell?.querySelector("#adv-search");
+      if (!dialog) return;
+      const form2 = dialog.querySelector("form");
+      form2.dataset.multisearch = options.multisearch ? "1" : "";
+      dialog.querySelector("#adv-body").innerHTML = renderSearchForm(criteria, options);
+      dialog.showModal();
+      form2.querySelector("input[name='from']")?.focus({ preventScroll: true });
+    },
+    folderDialog(options) {
+      const dialog = shell?.querySelector("#folder-dlg");
+      if (!dialog) return Promise.resolve(null);
+      const form2 = dialog.querySelector("form");
+      const name = dialog.querySelector("#folder-dlg-name");
+      const parent = dialog.querySelector("#folder-dlg-parent");
+      const sub = dialog.querySelector("#folder-dlg-sub");
+      dialog.querySelector("#folder-dlg-title").textContent = options.title;
+      parent.innerHTML = options.parents.map((item) => `<option value="${esc7(item.value)}"${item.value === options.parent ? " selected" : ""}>${esc7(item.label)}</option>`).join("");
+      name.value = "";
+      sub.checked = true;
+      dialog.returnValue = "";
+      dialog.showModal();
+      name.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onSubmit = (event) => {
+          event.preventDefault();
+          if (!name.value.trim()) return;
+          dialog.close("ok");
+        };
+        form2.addEventListener("submit", onSubmit);
+        dialog.addEventListener("close", () => {
+          form2.removeEventListener("submit", onSubmit);
+          resolve(dialog.returnValue === "ok" ? { name: name.value.trim(), parent: parent.value, subscribe: sub.checked } : null);
+        }, { once: true });
+      });
+    },
+    openFolderSettings,
     setList(rows, empty, error, more, searching) {
       const box = shell?.querySelector("#rows");
       const emptyEl = shell?.querySelector("#list-empty");
@@ -3258,16 +4217,20 @@ function createView(root3, actions) {
       if (box) {
         box.innerHTML = rows.map((row2) => {
           const subject = row2.subject || "(ohne Betreff)";
-          return `
-          <div class="msg-row${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
-            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc5(subject)}">
+          const group = row2.group ? `<h2 class="list-group mono">${esc7(row2.group)}</h2>` : "";
+          const threadText = row2.threadCount ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung \xF6ffnen")}: ${row2.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row2.threadUnseen ? `, ${row2.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : "";
+          const thread = row2.threadCount ? `<button type="button" class="msg-thread${row2.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row2.uid}" aria-label="${esc7(`${threadText} \u2013 ${subject}`)}" title="${esc7(threadText)} (T)">${icon("thread")}<span>${row2.threadCount}</span></button>` : "";
+          return `${group}
+          <div class="msg-row${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc7(subject)}">
             <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
-              <span class="who">${esc5(row2.who)}</span>
-              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc5(row2.when)}</span>
-              <span class="subj">${esc5(subject)}${categoryMark(row2.category)}</span>
-              <span class="peek">${esc5(row2.preview)}</span>
+              <span class="who">${esc7(row2.who)}</span>
+              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc7(row2.when)}</span>
+              <span class="subj">${esc7(subject)}${categoryMark(row2.category)}</span>
+              <span class="peek">${esc7(row2.preview)}</span>
             </button>
-            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc5(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            ${thread}
+            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc7(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
           </div>`;
         }).join("");
       }
@@ -3321,7 +4284,7 @@ function createView(root3, actions) {
       if (!box) return;
       const others = items.filter((item) => !item.current);
       box.innerHTML = others.length ? `<p class="menu-label mono">Konten</p>` + others.map(
-        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc5(item.email)}">${icon("user")}<span class="grow">${esc5(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
+        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc7(item.email)}">${icon("user")}<span class="grow">${esc7(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
       ).join("") + `<hr class="menu-sep">` : "";
     },
     pickFolder(title, folders, exclude) {
@@ -3334,7 +4297,7 @@ function createView(root3, actions) {
         const q = query.value.trim().toLowerCase();
         const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
         list.innerHTML = rows.map(
-          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc5(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc5(q ? folder.fullName : folder.name)}</span></button>`
+          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc7(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON2[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc7(q ? folder.fullName : folder.name)}</span></button>`
         ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
       };
       query.value = "";
@@ -3373,14 +4336,14 @@ function createView(root3, actions) {
     ask(title, label2, value = "") {
       const dialog = shell?.querySelector("#prompt-dlg");
       if (!dialog) return Promise.resolve(null);
-      const input = dialog.querySelector("#prompt-input");
+      const input2 = dialog.querySelector("#prompt-input");
       const form2 = dialog.querySelector("form");
       dialog.querySelector("#prompt-title").textContent = title;
       dialog.querySelector("#prompt-label").textContent = label2;
-      input.value = value;
+      input2.value = value;
       dialog.returnValue = "";
       dialog.showModal();
-      input.focus({ preventScroll: true });
+      input2.focus({ preventScroll: true });
       return new Promise((resolve) => {
         const onSubmit = (event) => {
           event.preventDefault();
@@ -3390,7 +4353,7 @@ function createView(root3, actions) {
         form2.addEventListener("submit", onSubmit);
         dialog.addEventListener("close", () => {
           form2.removeEventListener("submit", onSubmit);
-          resolve(dialog.returnValue === "ok" ? input.value.trim() : null);
+          resolve(dialog.returnValue === "ok" ? input2.value.trim() : null);
         }, { once: true });
       });
     },
@@ -3681,6 +4644,7 @@ function createView(root3, actions) {
     },
     showSettings(next) {
       snap = next;
+      if (section === "folders" && edit) return;
       edit = null;
       paintSettings();
     },
@@ -3712,7 +4676,7 @@ function people2(value) {
     return { name: String(row2.name || ""), email: String(row2.email || "") };
   }).filter((item) => item.email || item.name);
 }
-function collection(value) {
+function collection2(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") {
     const list = value["@Collection"];
@@ -3752,11 +4716,11 @@ function plainFromHtml(html) {
 function quote(body) {
   return body.replace(/\r\n/g, "\n").split("\n").map((line2) => `> ${line2}`).join("\n");
 }
-function sizeLabel2(bytes) {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function sizeLabel2(bytes2) {
+  if (!bytes2) return "";
+  if (bytes2 < 1024) return `${bytes2} B`;
+  if (bytes2 < 1024 * 1024) return `${Math.round(bytes2 / 1024)} KB`;
+  return `${(bytes2 / (1024 * 1024)).toFixed(1)} MB`;
 }
 function fileKind(file) {
   const type = file.mimeType.toLowerCase();
@@ -3843,8 +4807,23 @@ var Session = class {
     newWindow: false,
     zip: false,
     thumbs: false,
-    webPath: ""
+    webPath: "",
+    hideUnsubscribed: false,
+    unhideKolab: false,
+    kolab: false,
+    defaultSort: "",
+    useThreads: false,
+    threadAlgorithm: "",
+    listGrouped: false
   };
+  folderModel = { folders: [], quotaUsage: null, quotaLimit: null, capabilities: [] };
+  collapsed = /* @__PURE__ */ new Set();
+  folderFilter = "";
+  systemSettings = { sent: "", drafts: "", junk: "", trash: "", archive: "" };
+  sort = "";
+  threadUid = 0;
+  threadSubject = "";
+  deskNotice = "";
   trashFolder = "";
   junkFolder = "";
   draftsFolder = "";
@@ -3962,7 +4941,21 @@ var Session = class {
       newWindow: bool(data.messageNewWindow, false),
       zip: Boolean(capa.AttachmentsActions),
       thumbs: Boolean(capa.AttachmentThumbnails),
-      webPath: String(system.webVersionPath || "snappymail/v/0.0.0/")
+      webPath: String(system.webVersionPath || "snappymail/v/0.0.0/"),
+      hideUnsubscribed: bool(data.HideUnsubscribed, false),
+      unhideKolab: bool(data.UnhideKolabFolders, false),
+      kolab: Boolean(capa.Kolab),
+      defaultSort: String(data.defaultSort || ""),
+      useThreads: bool(data.useThreads ?? data.UseThreads, false),
+      threadAlgorithm: String(data.threadAlgorithm || ""),
+      listGrouped: bool(data.listGrouped, false)
+    };
+    this.systemSettings = {
+      sent: String(data.SentFolder || ""),
+      drafts: String(data.DraftsFolder || ""),
+      junk: String(data.JunkFolder || ""),
+      trash: String(data.TrashFolder || ""),
+      archive: String(data.ArchiveFolder || "")
     };
   }
   /** System-Ordner: Einstellung des Kontos, sonst Rolle vom Server, sonst üblicher Name. */
@@ -4005,6 +4998,10 @@ var Session = class {
     this.checked.clear();
     this.inboxUid = 0;
     this.inboxUnread = -1;
+    this.sort = this.prefs.defaultSort;
+    this.threadUid = 0;
+    this.folderFilter = "";
+    this.collapsed = this.readCollapsed();
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(50, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
@@ -4030,6 +5027,10 @@ var Session = class {
     }, this.prefs.checkInterval * 6e4);
   }
   async settings(name, data) {
+    if (name.startsWith("folder-")) {
+      await this.folderForm(name, data);
+      return;
+    }
     try {
       if (name === "open") this.contactSearch = "";
       if (name === "search-contacts") this.contactSearch = data.search || "";
@@ -4052,16 +5053,8 @@ var Session = class {
   }
   async loadFolders() {
     try {
-      const result = await call("Folders");
-      this.folders = (result["@Collection"] || []).map((item) => ({
-        fullName: String(item.fullName || ""),
-        name: String(item.name || item.fullName || ""),
-        delimiter: String(item.delimiter || "/"),
-        role: String(item.role || ""),
-        unread: Number(item.unreadEmails || 0),
-        total: Number(item.totalEmails || 0),
-        uidNext: Number(item.uidNext || 0)
-      })).filter((folder) => folder.fullName);
+      this.folderModel = parseFolders(await call("Folders"));
+      this.folders = this.folderModel.folders;
       this.resolveSystemFolders(null);
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
       if (inbox) {
@@ -4069,9 +5062,364 @@ var Session = class {
         this.inboxUnread = inbox.unread;
       }
       this.paintTitle();
-      await this.selectFolder(inbox?.fullName || this.folders[0]?.fullName || "INBOX");
+      await this.selectFolder(inbox?.fullName || this.folders.find((folder) => folder.selectable)?.fullName || "INBOX");
     } catch (error) {
       this.view.setList([], "", explain(error), false, false);
+    }
+  }
+  /** Ordner nach einer Änderung neu laden; der offene Ordner bleibt, wenn es ihn noch gibt. */
+  async reloadFolders(open = "") {
+    try {
+      this.folderModel = parseFolders(await call("Folders"));
+      this.folders = this.folderModel.folders;
+      this.resolveSystemFolders(null);
+      const keep = open || this.folder;
+      const target = this.folders.find((folder) => folder.fullName === keep && folder.selectable) || this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
+      if (target && target.fullName !== this.folder) await this.selectFolder(target.fullName);
+      else this.paintFolders();
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+  capability(name) {
+    return this.folderModel.capabilities.includes(name);
+  }
+  threadsAvailable() {
+    return this.folderModel.capabilities.some((capa) => capa.startsWith("THREAD="));
+  }
+  threadsOn() {
+    return this.threadsAvailable() && this.prefs.useThreads;
+  }
+  collapseKey() {
+    return `sm-folders-collapsed:${this.accountHash || this.email}`;
+  }
+  readCollapsed() {
+    try {
+      const raw = localStorage.getItem(this.collapseKey());
+      const list = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(list) ? list.map(String) : []);
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  }
+  writeCollapsed() {
+    try {
+      localStorage.setItem(this.collapseKey(), JSON.stringify([...this.collapsed]));
+    } catch {
+    }
+  }
+  isSystem(folder) {
+    const role = this.roleOf(folder);
+    return Boolean(role) || [this.sentFolder, this.draftsFolder, this.trashFolder, this.junkFolder, this.archiveFolder].includes(folder.fullName);
+  }
+  aboCache = null;
+  /** Bei „Nicht abonnierte ausblenden“ bleiben abonnierte Ordner und ihre Eltern stehen (wie `hasSubscriptions` alt). */
+  subscribedTree() {
+    if (this.aboCache?.source === this.folders) return this.aboCache.keep;
+    const keep = /* @__PURE__ */ new Set();
+    const byName = new Map(this.folders.map((folder) => [folder.fullName, folder]));
+    this.folders.forEach((folder) => {
+      if (!folder.subscribed && this.roleOf(folder) !== "inbox") return;
+      let current = folder;
+      while (current && !keep.has(current.fullName)) {
+        keep.add(current.fullName);
+        current = current.parent ? byName.get(current.parent) : void 0;
+      }
+    });
+    this.aboCache = { source: this.folders, keep };
+    return keep;
+  }
+  hiddenFolder(folder) {
+    if (this.prefs.hideUnsubscribed && !this.subscribedTree().has(folder.fullName)) return true;
+    return this.prefs.kolab && this.capability("METADATA") && Boolean(folder.kolabType) && !this.prefs.unhideKolab;
+  }
+  /** Aktionen im Ordnermenü; was nicht geht, fehlt. */
+  folderActions(folder, hasChildren) {
+    const role = this.roleOf(folder);
+    const list = [];
+    if (folder.exists && !folder.noInferiors) list.push("create-sub");
+    if (folder.exists && folder.selectable && !this.isSystem(folder)) list.push("rename");
+    if (folder.selectable && folder.unread > 0) list.push("read-all");
+    if (folder.selectable && (role === "trash" || role === "junk" || role === "spam") && folder.total > 0) list.push("clear");
+    if (folder.exists) list.push("settings");
+    void hasChildren;
+    return list;
+  }
+  folderDesk() {
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: /* @__PURE__ */ new Set(),
+      filter: "",
+      hidden: () => false,
+      current: this.folder,
+      roleOf: (folder) => this.roleOf(folder),
+      actions: () => []
+    });
+    return {
+      rows: rows.map((row2) => ({
+        info: row2.info,
+        depth: row2.depth,
+        role: row2.role,
+        hasChildren: row2.hasChildren,
+        canDelete: row2.info.exists && row2.info.selectable && !this.isSystem(row2.info) && row2.info.total === 0 && !row2.hasChildren,
+        canClear: row2.info.selectable && ["trash", "junk", "spam"].includes(row2.role) && row2.info.total > 0,
+        canRename: row2.info.exists && row2.info.selectable && !this.isSystem(row2.info)
+      })),
+      hideUnsubscribed: this.prefs.hideUnsubscribed,
+      kolab: this.prefs.kolab && this.capability("METADATA"),
+      unhideKolab: this.prefs.unhideKolab,
+      acl: this.capability("ACL"),
+      system: { ...this.systemSettings },
+      quota: this.quota(),
+      notice: this.deskNotice
+    };
+  }
+  quota() {
+    const { quotaUsage, quotaLimit } = this.folderModel;
+    return quotaLimit ? { used: quotaUsage || 0, limit: quotaLimit } : null;
+  }
+  folderName(folder) {
+    if (!folder) return "";
+    return displayName(folder, this.roleOf(folder));
+  }
+  /** Eltern für „Neuer Ordner“: vorhandene Ordner mit Unterordnern erlaubt. */
+  parentChoices() {
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: /* @__PURE__ */ new Set(),
+      filter: "",
+      hidden: (folder) => this.hiddenFolder(folder),
+      current: "",
+      roleOf: (folder) => this.roleOf(folder),
+      actions: () => []
+    });
+    return [{ value: "", label: "Oberste Ebene" }].concat(rows.filter((row2) => row2.info.exists && !row2.info.noInferiors).map((row2) => ({ value: row2.info.fullName, label: `${"\xA0\xA0".repeat(row2.depth)}${this.folderName(row2.info)}` })));
+  }
+  async createFolder(name, parent, subscribe) {
+    if (!name.trim()) return;
+    const delimiter = this.folders.find((folder) => folder.fullName === parent)?.delimiter || this.folders[0]?.delimiter || "/";
+    if (delimiter && name.includes(delimiter)) {
+      this.view.notice(`Der Name darf das Trennzeichen \u201E${delimiter}\u201C nicht enthalten.`);
+      this.deskNotice = `Der Name darf das Trennzeichen \u201E${delimiter}\u201C nicht enthalten.`;
+      return;
+    }
+    await call("FolderCreate", { folder: name.trim(), parent, subscribe: subscribe ? 1 : 0 });
+    if (parent) {
+      this.collapsed.delete(parent);
+      this.writeCollapsed();
+    }
+    this.deskNotice = `Ordner \u201E${name.trim()}\u201C angelegt.`;
+    this.view.notice(this.deskNotice);
+    await this.reloadFolders();
+  }
+  /** Formulare aus dem Einstellungsabschnitt „Ordner“ und dem Freigabe-Dialog. */
+  async folderForm(name, data) {
+    try {
+      this.deskNotice = "";
+      if (name === "folder-create") {
+        await this.createFolder(data.folder || "", data.parent || "", Boolean(data.subscribe));
+        this.view.openFolderSettings("");
+        return;
+      }
+      if (name === "folder-save") {
+        const old = this.folders.find((folder) => folder.fullName === data.oldName);
+        if (!old) return;
+        const leaf = (data.name || old.name).trim();
+        const delimiter = old.delimiter || "/";
+        if (!leaf) throw new ApiError(0, "Name eintragen.");
+        if (delimiter && leaf.includes(delimiter)) throw new ApiError(0, `Der Name darf das Trennzeichen \u201E${delimiter}\u201C nicht enthalten.`);
+        const parent = data.parent ?? old.parent;
+        const target = parent ? `${parent}${delimiter}${leaf}` : leaf;
+        const kolab = this.prefs.kolab && this.capability("METADATA") ? { type: KOLAB_KEYS[0], value: data.kolab || "" } : null;
+        if (target !== old.fullName) {
+          await call("FolderRename", {
+            oldName: old.fullName,
+            newName: target,
+            subscribe: data.subscribe ? 1 : 0,
+            checkable: data.checkable ? 1 : 0,
+            ...kolab ? { kolab } : {}
+          });
+          this.deskNotice = `\u201E${folderPath(old)}\u201C hei\xDFt jetzt \u201E${target}\u201C.`;
+        } else {
+          if (Boolean(data.subscribe) !== old.subscribed && this.roleOf(old) !== "inbox") await call("FolderSubscribe", { folder: old.fullName, subscribe: data.subscribe ? 1 : 0 });
+          if (old.selectable && Boolean(data.checkable) !== old.checkable) await call("FolderCheckable", { folder: old.fullName, checkable: data.checkable ? 1 : 0 });
+          if (kolab && (data.kolab || "") !== old.kolabType) await call("FolderSetMetadata", { folder: old.fullName, key: KOLAB_KEYS[0], value: data.kolab || "" });
+          this.deskNotice = "Gespeichert.";
+        }
+        this.view.notice(this.deskNotice);
+        await this.reloadFolders(this.folder === old.fullName ? target : "");
+        this.view.openFolderSettings("");
+        return;
+      }
+      if (name === "folder-system") {
+        await call("SystemFoldersUpdate", { sent: data.sent || "", drafts: data.drafts || "", junk: data.junk || "", trash: data.trash || "", archive: data.archive || "" });
+        const app = await loadApp();
+        this.readPrefs(app);
+        this.resolveSystemFolders(app);
+        this.composeData = app;
+        this.configureComposer();
+        this.deskNotice = "Systemordner gespeichert.";
+        this.view.notice(this.deskNotice);
+        this.paintFolders();
+        return;
+      }
+      if (name === "folder-options") {
+        const params = { HideUnsubscribed: data.hideUnsubscribed ? 1 : 0 };
+        if (this.prefs.kolab) params.UnhideKolabFolders = data.unhideKolab ? 1 : 0;
+        await call("SettingsUpdate", params);
+        this.prefs.hideUnsubscribed = Boolean(data.hideUnsubscribed);
+        this.prefs.unhideKolab = Boolean(data.unhideKolab);
+        this.deskNotice = "Gespeichert.";
+        this.view.notice(this.deskNotice);
+        await this.reloadFolders();
+        return;
+      }
+      if (name === "folder-acl-set") {
+        const rights = ["l", "r", "s", "w", "i", "p", "k", "x", "t", "e", "a"].filter((letter) => data[`r_${letter}`]).join("");
+        if (!data.identifier?.trim()) throw new ApiError(0, "Benutzer oder Gruppe eintragen.");
+        await call("FolderSetACL", { folder: data.folder, identifier: data.identifier.trim(), rights });
+        await this.showAcl(data.folder || "", "");
+        return;
+      }
+    } catch (error) {
+      this.deskNotice = explain(error);
+      if (name === "folder-acl-set") await this.showAcl(data.folder || "", explain(error));
+      else {
+        this.view.settingsNotice(explain(error));
+        this.view.setFolderDesk(this.folderDesk());
+        this.view.settingsNotice(explain(error));
+      }
+    }
+  }
+  async showAcl(folder, error) {
+    try {
+      const entries = parseAcl(await call("FolderACL", { folder }));
+      this.view.showAcl(folder, renderAcl(folder, entries, error));
+    } catch (failure) {
+      this.view.showAcl(folder, renderAcl(folder, [], error || explain(failure)));
+    }
+  }
+  /** Ordneraktionen aus Seitenleiste, Menü und Einstellungen. */
+  async folderAction(name, data) {
+    const folder = this.folders.find((item) => item.fullName === data.target);
+    try {
+      switch (name) {
+        case "f-toggle":
+          if (!data.target) return;
+          if (this.collapsed.has(data.target)) this.collapsed.delete(data.target);
+          else this.collapsed.add(data.target);
+          this.writeCollapsed();
+          this.paintFolders();
+          return;
+        case "f-filter":
+          this.folderFilter = data.q || "";
+          this.paintFolders();
+          return;
+        case "f-desk":
+          this.view.setFolderDesk(this.folderDesk());
+          return;
+        case "f-create":
+        case "f-create-sub": {
+          const result = await this.view.folderDialog({
+            title: name === "f-create" ? "Ordner anlegen" : `Neuer Unterordner in \u201E${this.folderName(folder)}\u201C`,
+            parents: this.parentChoices(),
+            parent: name === "f-create-sub" ? data.target || "" : ""
+          });
+          if (result) await this.createFolder(result.name, result.parent, result.subscribe);
+          return;
+        }
+        case "f-rename": {
+          if (!folder) return;
+          const next = await this.view.ask("Ordner umbenennen", "Neuer Name", folder.name);
+          if (!next || next === folder.name) return;
+          if (folder.delimiter && next.includes(folder.delimiter)) {
+            this.view.notice(`Der Name darf das Trennzeichen \u201E${folder.delimiter}\u201C nicht enthalten.`);
+            return;
+          }
+          const target = folder.parent ? `${folder.parent}${folder.delimiter}${next}` : next;
+          await call("FolderRename", { oldName: folder.fullName, newName: target, subscribe: folder.subscribed ? 1 : 0, checkable: folder.checkable ? 1 : 0 });
+          if (this.collapsed.delete(folder.fullName)) {
+            this.collapsed.add(target);
+            this.writeCollapsed();
+          }
+          this.view.notice(`Umbenannt in \u201E${next}\u201C.`);
+          await this.reloadFolders(this.folder === folder.fullName ? target : "");
+          return;
+        }
+        case "f-read-all": {
+          if (!folder) return;
+          await call("MessageSetSeenToAll", { folder: folder.fullName, setAction: 1 });
+          folder.unread = 0;
+          if (folder.fullName === this.folder) this.messages.forEach((message) => {
+            if (!seen(message.flags)) message.flags.push("\\Seen");
+          });
+          this.view.notice(`Alle Mails in \u201E${this.folderName(folder)}\u201C sind gelesen.`);
+          this.paintFolders();
+          if (folder.fullName === this.folder) this.paintList();
+          return;
+        }
+        case "f-clear": {
+          if (!folder) return;
+          const ok = await this.view.confirm(
+            `\u201E${this.folderName(folder)}\u201C leeren?`,
+            `Alle ${folder.total} Mails in diesem Ordner werden endg\xFCltig gel\xF6scht. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.`,
+            "Endg\xFCltig leeren"
+          );
+          if (!ok) return;
+          await call("FolderClear", { folder: folder.fullName });
+          this.view.notice(`\u201E${this.folderName(folder)}\u201C ist leer.`);
+          if (folder.fullName === this.folder) {
+            this.current = null;
+            this.selected = 0;
+            this.checked.clear();
+            this.view.setReader(null, "", "");
+          }
+          await this.reloadFolders();
+          if (folder.fullName === this.folder) await this.loadList(false);
+          return;
+        }
+        case "f-delete": {
+          if (!folder || folder.total > 0 || this.isSystem(folder)) return;
+          const ok = await this.view.confirm(`Ordner \u201E${folder.name}\u201C l\xF6schen?`, "Der leere Ordner wird auf dem Server gel\xF6scht.", "Ordner l\xF6schen");
+          if (!ok) return;
+          await call("FolderDelete", { folder: folder.fullName });
+          this.collapsed.delete(folder.fullName);
+          this.writeCollapsed();
+          this.deskNotice = `Ordner \u201E${folder.name}\u201C gel\xF6scht.`;
+          this.view.notice(this.deskNotice);
+          await this.reloadFolders(this.folder === folder.fullName ? "INBOX" : "");
+          return;
+        }
+        case "f-subscribe":
+          if (!folder) return;
+          await call("FolderSubscribe", { folder: folder.fullName, subscribe: folder.subscribed ? 0 : 1 });
+          this.deskNotice = folder.subscribed ? `\u201E${folder.name}\u201C nicht mehr abonniert.` : `\u201E${folder.name}\u201C abonniert.`;
+          await this.reloadFolders();
+          return;
+        case "f-checkable":
+          if (!folder) return;
+          await call("FolderCheckable", { folder: folder.fullName, checkable: folder.checkable ? 0 : 1 });
+          this.deskNotice = folder.checkable ? `\u201E${folder.name}\u201C wird nicht mehr gepr\xFCft.` : `\u201E${folder.name}\u201C wird auf neue Mail gepr\xFCft.`;
+          await this.reloadFolders();
+          return;
+        case "f-acl":
+          if (folder) await this.showAcl(folder.fullName, "");
+          return;
+        case "f-acl-delete": {
+          if (!data.target || !data.id) return;
+          const ok = await this.view.confirm(`Freigabe f\xFCr \u201E${data.id}\u201C entfernen?`, "Diese Person oder Gruppe verliert den Zugriff auf den Ordner.", "Entfernen");
+          if (!ok) return;
+          await call("FolderDeleteACL", { folder: data.target, identifier: data.id });
+          await this.showAcl(data.target, "");
+          return;
+        }
+        default:
+          return;
+      }
+    } catch (error) {
+      this.deskNotice = explain(error);
+      this.view.notice(explain(error));
+      this.view.setFolderDesk(this.folderDesk());
     }
   }
   async selectFolder(fullName) {
@@ -4079,6 +5427,8 @@ var Session = class {
     this.folder = fullName;
     this.offset = 0;
     this.search = "";
+    this.threadUid = 0;
+    this.view.setSearch("", /* @__PURE__ */ new Set());
     this.selected = 0;
     this.current = null;
     this.checked.clear();
@@ -4087,24 +5437,43 @@ var Session = class {
     await this.loadList(false);
   }
   paintFolders() {
-    const rows = this.folders.slice().sort((a, b) => Number(b.role === "inbox") - Number(a.role === "inbox") || a.fullName.localeCompare(b.fullName)).map((folder) => {
-      const parts = folder.delimiter ? folder.fullName.split(folder.delimiter).filter(Boolean) : [folder.fullName];
-      return {
-        fullName: folder.fullName,
-        name: folder.name,
-        depth: Math.min(2, Math.max(0, parts.length - 1)),
-        unread: folder.unread,
-        current: folder.fullName === this.folder,
-        inbox: folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX",
-        role: this.roleOf(folder)
-      };
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: this.collapsed,
+      filter: this.folderFilter,
+      hidden: (folder) => this.hiddenFolder(folder),
+      current: this.folder,
+      roleOf: (folder) => this.roleOf(folder),
+      actions: (folder, children) => this.folderActions(folder, children)
     });
-    this.view.setFolders(rows);
+    const current = this.folders.find((folder) => folder.fullName === this.folder);
+    this.view.setFolders({
+      rows,
+      count: this.folders.filter((folder) => !this.hiddenFolder(folder)).length,
+      filter: this.folderFilter,
+      currentName: this.folderName(current),
+      quota: this.quota(),
+      canCreate: true
+    });
+    this.view.setFolderDesk(this.folderDesk());
+    this.paintMode();
     this.paintTitle();
+  }
+  paintMode() {
+    const mode = {
+      sortable: this.capability("SORT"),
+      sort: this.sort,
+      threadsAvailable: this.threadsAvailable(),
+      useThreads: this.prefs.useThreads,
+      grouped: this.prefs.listGrouped,
+      threadOpen: this.threadUid ? this.threadSubject || "(ohne Betreff)" : ""
+    };
+    this.view.setListMode(mode);
   }
   /** Rolle für das Symbol: Server-Rolle oder die erkannten System-Ordner. */
   roleOf(folder) {
-    if (folder.role) return folder.role;
+    if (folder.role) return folder.role === "spam" ? "junk" : folder.role;
+    if (folder.fullName.toUpperCase() === "INBOX") return "inbox";
     if (folder.fullName === this.archiveFolder) return "archive";
     if (folder.fullName === this.sentFolder) return "sent";
     if (folder.fullName === this.draftsFolder) return "drafts";
@@ -4120,14 +5489,14 @@ var Session = class {
   }
   /** Suchstring, den der Server bekommt: KI-Kategorie oder die Suche (Format `name=wert&…` wie `AdvancedSearch.js`). */
   listQuery() {
-    const keyword = (name) => `keyword=${encodeURIComponent("$ai_" + name)}`;
+    const keyword = (name) => `keyword=${encodeValue("$ai_" + name)}`;
     if (this.category === "needs_reply") return `${keyword("needs_reply")}&unanswered`;
     if (["personal", "newsletter", "notification", "invoice"].includes(this.category)) return keyword(this.category);
     return this.search;
   }
   /** Kennung des Listenkontexts; Antworten zu einem anderen Kontext werden verworfen. */
   listContext() {
-    return JSON.stringify([this.accountHash, this.folder, this.listQuery()]);
+    return JSON.stringify([this.accountHash, this.folder, this.listQuery(), this.sort, this.threadsOn(), this.threadUid]);
   }
   async loadList(append, quiet = false) {
     const start = append ? this.offset : 0;
@@ -4142,14 +5511,15 @@ var Session = class {
         offset: start,
         limit: quiet && !append ? Math.max(this.pageSize, this.messages.length) : this.pageSize,
         search: query,
-        sort: "",
-        uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
+        sort: this.capability("SORT") ? this.sort : "",
+        uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0,
+        ...this.threadsOn() ? { useThreads: 1, threadAlgorithm: this.prefs.threadAlgorithm, threadUid: this.threadUid } : {}
       });
       if (stale()) return;
       const batch = (result["@Collection"] || []).map((item) => this.parseMessage(item));
       this.messages = append ? this.messages.concat(batch) : batch;
       this.offset = start + batch.length;
-      this.total = Number(result.folder?.totalEmails ?? result.totalEmails ?? this.messages.length);
+      this.total = this.threadsOn() && !this.threadUid && Number(result.totalThreads) ? Number(result.totalThreads) : Number(result.totalEmails ?? result.folder?.totalEmails ?? this.messages.length);
       const known = this.folders.find((folder) => folder.fullName === this.folder);
       if (known && result.folder) {
         if (result.folder.unreadEmails != null) known.unread = Number(result.folder.unreadEmails);
@@ -4173,7 +5543,7 @@ var Session = class {
     const flags = Array.isArray(item.flags) ? item.flags.map((flag) => String(flag)) : [];
     const folder = String(item.folder || this.folder);
     const uid = Number(item.uid || 0);
-    const rawFiles = collection(item.attachments);
+    const rawFiles = collection2(item.attachments);
     const attachments = full ? rawFiles.map((file) => {
       const key = {
         folder,
@@ -4197,7 +5567,7 @@ var Session = class {
       };
     }) : [];
     const headers = {};
-    collection(item.headers).forEach((header) => {
+    collection2(item.headers).forEach((header) => {
       const name = String(header.name || "").toLowerCase();
       if (name && !(name in headers)) headers[name] = String(header.value || "");
     });
@@ -4229,6 +5599,8 @@ var Session = class {
       isSpam: Boolean(item.isSpam),
       hasVirus: Boolean(item.hasVirus),
       readReceipt: String(item.readReceipt || ""),
+      threads: Array.isArray(item.threads) ? item.threads.map(Number).filter(Boolean) : [],
+      threadUnseen: Array.isArray(item.threadUnseen) ? item.threadUnseen.map(Number).filter(Boolean) : [],
       headers,
       auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
     };
@@ -4236,23 +5608,50 @@ var Session = class {
   visible() {
     return this.prefs.hideDeleted ? this.messages.filter((message) => !hasFlag(message.flags, "\\deleted")) : this.messages;
   }
+  /** Datumsgruppen nur bei Datumssortierung und nicht in einer geöffneten Unterhaltung. */
+  grouping() {
+    return this.prefs.listGrouped && !this.threadUid && (this.sort === "" || this.sort === "DATE");
+  }
+  groupOf(stamp) {
+    if (!stamp) return "Ohne Datum";
+    const date = new Date(stamp * 1e3);
+    const start = /* @__PURE__ */ new Date();
+    start.setHours(0, 0, 0, 0);
+    const day = 864e5;
+    if (date >= start) return "Heute";
+    if (date.getTime() >= start.getTime() - day) return "Gestern";
+    const weekStart = new Date(start.getTime() - (start.getDay() + 6) % 7 * day);
+    if (date >= weekStart) return "Diese Woche";
+    return date.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  }
   rows() {
-    return this.visible().map((message) => ({
-      uid: message.uid,
-      who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
-      subject: message.subject,
-      preview: message.preview,
-      when: when(message.date),
-      unseen: !seen(message.flags),
-      current: message.uid === this.selected && !this.checked.size,
-      category: message.category,
-      flagged: hasFlag(message.flags, "\\flagged"),
-      answered: hasFlag(message.flags, "\\answered"),
-      forwarded: hasFlag(message.flags, "$forwarded"),
-      attachment: message.hasAttachment,
-      checked: this.checked.has(message.uid),
-      deleted: hasFlag(message.flags, "\\deleted")
-    }));
+    const grouped = this.grouping();
+    let last = "";
+    return this.visible().map((message) => {
+      const group = grouped ? this.groupOf(message.date) : "";
+      const start = group && group !== last ? group : "";
+      if (group) last = group;
+      const threaded = this.threadsOn() && !this.threadUid && message.threads.length > 1;
+      return {
+        group: start,
+        threadCount: threaded ? message.threads.length : 0,
+        threadUnseen: threaded ? message.threadUnseen.length : 0,
+        uid: message.uid,
+        who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
+        subject: message.subject,
+        preview: message.preview,
+        when: when(message.date),
+        unseen: !seen(message.flags),
+        current: message.uid === this.selected && !this.checked.size,
+        category: message.category,
+        flagged: hasFlag(message.flags, "\\flagged"),
+        answered: hasFlag(message.flags, "\\answered"),
+        forwarded: hasFlag(message.flags, "$forwarded"),
+        attachment: message.hasAttachment,
+        checked: this.checked.has(message.uid),
+        deleted: hasFlag(message.flags, "\\deleted")
+      };
+    });
   }
   paintList() {
     const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Mails f\xFCr diese Suche." : "Dieser Ordner ist leer.";
@@ -4260,6 +5659,9 @@ var Session = class {
   }
   async setSearch(query) {
     this.search = query;
+    this.threadUid = 0;
+    this.paintMode();
+    this.view.setSearch(query, activeQuick(query));
     this.category = "all";
     this.view.pressCategory("all");
     this.offset = 0;
@@ -4307,10 +5709,10 @@ var Session = class {
     return this.prefs.whitelist.split(/[\s,;]+/).some((raw) => {
       const [rule, ...checks] = raw.trim().toLowerCase().split("+");
       if (!rule || !sender.includes(rule)) return false;
-      return checks.every((check2) => {
-        if (check2 === "spf") return message.auth.spf === "pass";
-        if (check2 === "dkim") return message.auth.dkim === "pass";
-        if (check2 === "dmarc") return message.auth.dmarc === "pass";
+      return checks.every((check3) => {
+        if (check3 === "spf") return message.auth.spf === "pass";
+        if (check3 === "dkim") return message.auth.dkim === "pass";
+        if (check3 === "dmarc") return message.auth.dmarc === "pass";
         return true;
       });
     });
@@ -4735,10 +6137,15 @@ ${body}`
     }
   }
   pickerFolders() {
-    return this.folders.slice().sort((a, b) => Number(b.role === "inbox") - Number(a.role === "inbox") || a.fullName.localeCompare(b.fullName)).map((folder) => {
-      const parts = folder.delimiter ? folder.fullName.split(folder.delimiter).filter(Boolean) : [folder.fullName];
-      return { fullName: folder.fullName, name: folder.name, depth: Math.min(4, parts.length - 1), role: this.roleOf(folder) };
+    const rows = flattenTree(buildTree(this.folders, (folder) => this.roleOf(folder)), {
+      collapsed: /* @__PURE__ */ new Set(),
+      filter: "",
+      hidden: (folder) => this.hiddenFolder(folder),
+      current: "",
+      roleOf: (folder) => this.roleOf(folder),
+      actions: () => []
     });
+    return rows.filter((row2) => row2.info.selectable).map((row2) => ({ fullName: row2.info.fullName, name: this.folderName(row2.info), depth: row2.depth, role: row2.role }));
   }
   paintBulk() {
     if (!this.checked.size) {
@@ -4798,7 +6205,13 @@ ${body}`
         if (folder.fullName === this.folder && uidNext && uidNext !== folder.uidNext) changed = true;
         folder.unread = Number(item.unreadEmails || 0);
         folder.total = Number(item.totalEmails || 0);
+        if (uidNext) folder.uidNext = uidNext;
       });
+      if (result && typeof result === "object" && "quotaLimit" in result) {
+        const raw = result;
+        this.folderModel.quotaUsage = raw.quotaUsage == null ? null : Number(raw.quotaUsage);
+        this.folderModel.quotaLimit = raw.quotaLimit == null ? null : Number(raw.quotaLimit);
+      }
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
       if (inbox) {
         const item = fresh.get(inbox.fullName);
@@ -5155,9 +6568,9 @@ ${body}`
         return;
       case "addr-search":
         if (data.email) {
-          const input = document.querySelector("#search");
-          const query = `from=${encodeURIComponent(data.email)}`;
-          if (input) input.value = query;
+          const input2 = document.querySelector("#search");
+          const query = `from=${encodeValue(data.email)}`;
+          if (input2) input2.value = query;
           await this.setSearch(query);
         }
         return;
@@ -5176,6 +6589,60 @@ ${body}`
       case "accounts":
         await this.loadAccounts();
         return;
+      case "sort":
+        if (!this.capability("SORT")) return;
+        this.sort = data.sort || "";
+        await this.reloadList();
+        return;
+      case "threads-toggle":
+        if (!this.threadsAvailable()) return;
+        this.prefs.useThreads = !this.prefs.useThreads;
+        this.threadUid = 0;
+        try {
+          await call("SettingsUpdate", { UseThreads: this.prefs.useThreads ? 1 : 0 });
+        } catch (error) {
+          this.view.notice(explain(error));
+        }
+        await this.reloadList();
+        return;
+      case "group-toggle":
+        this.prefs.listGrouped = !this.prefs.listGrouped;
+        try {
+          await call("SettingsUpdate", { listGrouped: this.prefs.listGrouped ? 1 : 0 });
+        } catch (error) {
+          this.view.notice(explain(error));
+        }
+        this.paintMode();
+        this.paintList();
+        return;
+      case "thread": {
+        if (!this.threadsOn() || this.threadUid) return;
+        const uid = ref || this.selected;
+        const row2 = this.messages.find((item) => item.uid === uid);
+        if (!row2 || row2.threads.length < 2) return;
+        this.threadUid = row2.uid;
+        this.threadSubject = row2.subject;
+        await this.reloadList();
+        return;
+      }
+      case "thread-back":
+        if (!this.threadUid) return;
+        this.threadUid = 0;
+        await this.reloadList();
+        return;
+      case "quick": {
+        const flag = data.flag;
+        if (!["unseen", "flagged", "attachment"].includes(flag)) return;
+        const base = data.query ?? this.search;
+        await this.setSearch(toggleQuick(base, flag, this.capability("MULTISEARCH")));
+        return;
+      }
+      case "adv-search": {
+        const query = data.query ?? this.search;
+        const keywords = [...new Set(this.messages.flatMap((item) => item.flags).filter((flag) => !SYSTEM_FLAGS.test(flag)))].sort();
+        this.view.openSearch(parseSearch(query), { multisearch: this.capability("MULTISEARCH"), keywords });
+        return;
+      }
       case "switch":
         if (!data.email) return;
         try {
@@ -5186,8 +6653,19 @@ ${body}`
         }
         return;
       default:
+        if (name.startsWith("f-")) await this.folderAction(name, data);
         return;
     }
+  }
+  /** Liste ab Offset 0 neu laden; Suche und Ordner bleiben. */
+  async reloadList() {
+    this.offset = 0;
+    this.selected = 0;
+    this.current = null;
+    this.checked.clear();
+    this.view.setReader(null, "", "");
+    this.paintMode();
+    await this.loadList(false);
   }
   strip() {
     return {
@@ -5286,8 +6764,8 @@ ${body}`
     if (name === "lang-search") {
       if (!await this.consent("query")) return;
       const query = data.text || "";
-      const input = document.querySelector("#search");
-      const text2 = query || input?.value.trim() || "";
+      const input2 = document.querySelector("#search");
+      const text2 = query || input2?.value.trim() || "";
       if (!text2) return;
       try {
         const result = await plugin("AiSearch", {

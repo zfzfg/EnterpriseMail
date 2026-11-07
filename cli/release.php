@@ -10,11 +10,6 @@ if (isset($options['plugins']) || isset($options['plugins-all'])) {
 	require(ROOT_DIR . '/build/plugins.php');
 }
 
-$gulp = trim(shell_exec('which gulp'));
-if (!$gulp) {
-	exit('gulp not installed, run as root: npm install --global gulp-cli');
-}
-
 $package = json_decode(file_get_contents('package.json'));
 
 /**
@@ -54,6 +49,11 @@ $tgz_destination = "{$tar_destination}.gz";
 @unlink($tgz_destination);
 
 if (!isset($options['skip-gulp'])) {
+	$gulp = trim(shell_exec('which gulp'));
+	if (!$gulp) {
+		exit('gulp not installed, run as root: npm install --global gulp-cli');
+	}
+
 	echo "\x1b[33;1m === Gulp === \x1b[0m\n";
 	passthru($gulp, $return_var);
 	if ($return_var) {

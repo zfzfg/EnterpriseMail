@@ -280,7 +280,53 @@ def feature_mails():
     print('Funktionstest-Mails eingespielt')
 
 
+def folder_mails():
+    """Testdaten fuer Phase 3: verschachtelte Ordner, nicht abonnierter Ordner, Thread, Groessen, Kontingent."""
+    # Maildir ohne eigenes Trennzeichen nutzt '.'
+    sep = dc('exec', '-T', 'mail', 'doveconf', '-h', 'namespace/inbox/separator', check=False).strip() or '.'
+    boxes = [('Projekte', True), (f'Projekte{sep}Linde', True), (f'Projekte{sep}Linde{sep}Aufmass', True),
+             (f'Projekte{sep}Hafen', True), (f'Alt{sep}2019', False), ('Leer', True)]
+    for box, subscribe in boxes:
+        args = ['exec', '-T', 'mail', 'doveadm', 'mailbox', 'create', '-u', ME]
+        if subscribe:
+            args.append('-s')
+        dc(*args, box, check=False)
+    for box, _ in boxes:
+        dc('exec', '-T', 'mail', 'doveadm', 'expunge', '-u', ME, 'mailbox', box, 'all', check=False)
+    dc('exec', '-T', 'mail', 'doveadm', 'mailbox', 'unsubscribe', '-u', ME, f'Alt{sep}2019', check=False)
+
+    save(f'Projekte{sep}Linde', eml('Anna Müller <anna.mueller@kunde.example>', ME, 'Linde: Farbe Geländer',
+        'Wir nehmen RAL 7016 anthrazit.', days_ago=12))
+    save(f'Projekte{sep}Linde{sep}Aufmass', eml('Kollege <kollege@example.com>', ME, 'Aufmaß Lindenstraße',
+        'Treppe 9,20 m, 14 Steigungen.', days_ago=11))
+    save(f'Projekte{sep}Hafen', eml('Planungsbüro Weber <info@weber-planung.example>', ME, 'Hafenstraße Statik',
+        'Statik kommt Freitag.', days_ago=6))
+    save(f'Alt{sep}2019', eml('Altkunde <alt@kunde.example>', ME, 'Alte Anfrage 2019', 'Archivierte Anfrage.', days_ago=400))
+
+    # Thread im Posteingang mit drei Mails, eine davon ungelesen
+    t1, t2, t3 = '<hafen-1@kollege.example>', '<hafen-2@example.com>', '<hafen-3@kollege.example>'
+    save('INBOX', eml('Kollege <kollege@example.com>', ME, 'Stützen Hafenstraße', 'Welche Stützen nehmen wir?', days_ago=20, msgid=t1))
+    save('INBOX', eml(f'Test Nutzer <{ME}>', 'kollege@example.com', 'Re: Stützen Hafenstraße', 'HEB 140.', days_ago=19, msgid=t2,
+        in_reply_to=t1, references=t1))
+    save('INBOX', eml('Kollege <kollege@example.com>', ME, 'Re: Stützen Hafenstraße', 'Gut, bestelle ich.', days_ago=18, msgid=t3,
+        in_reply_to=t2, references=f'{t1} {t2}'))
+    dc('exec', '-T', 'mail', 'doveadm', 'flags', 'add', '-u', ME, '\\Seen', 'mailbox', 'INBOX', 'subject', 'Stützen Hafenstraße',
+       'before', '19d', check=False)
+
+    # Grosse Mail fuer die Groessensuche (ca. 300 KB)
+    save('INBOX', eml('Stahlhandel Nord <info@stahlhandel.example>', ME, 'Preisliste 2027 (groß)',
+        'Preisliste\n' + ('Rohr 40x40x3 je Meter 7,80 EUR\n' * 9000), days_ago=7))
+    # Spam zum Leeren
+    for i in range(2):
+        save('Junk', eml('Gewinn <win@spam.example>', ME, f'Spam {i + 1}', 'Ausgedachter Spam.', days_ago=i))
+    dc('exec', '-T', 'mail', 'setup', 'quota', 'set', ME, '200M', check=False)
+    print(f'Ordner-Testdaten eingespielt (Trennzeichen {sep!r})')
+
+
 if __name__ == '__main__':
+    if '--folder-mails' in sys.argv:
+        folder_mails()
+        sys.exit()
     if '--theme-mails' in sys.argv:
         theme_mails()
         sys.exit()

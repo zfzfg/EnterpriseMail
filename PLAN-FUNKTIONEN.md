@@ -1,6 +1,6 @@
 # Plan: Alte Funktionen in die neue Oberfläche holen
 
-Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–2 in `740fa6cf5`, `18db471cb`, `2c5598608`, danach Nachbesserungen, siehe 4a).
+Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–2 in `740fa6cf5`, `18db471cb`, `2c5598608`, danach Nachbesserungen, siehe 4a; Phase 3 siehe Abschnitt 5).
 Bezugspunkt: Seit `90127a2d6` (Neue Mail-Hülle) läuft die Oberfläche als eigener TypeScript-Client unter `ui/`. Das alte Knockout-Frontend wurde in `388c3815d` entfernt. Den letzten vollständigen Stand des alten Frontends enthält **`387e27b19`**.
 
 Dieser Plan ist für eine KI geschrieben, die ihn umsetzt. Arbeite die Phasen der Reihe nach ab. Jede Phase endet mit einem Commit und einer Prüfung im Browser.
@@ -273,7 +273,17 @@ Neues Modul `ui/src/compose.ts`.
 >
 > Geprüft: `npx tsc --noEmit`, `npm run build`, Token-Prüfung (0 Fehler, die fünf bekannten Roh-Hex-Warnungen in `letter.ts`). **Im Browser ungetestet**, weil die Docker-Vorschau bei dieser Nachbesserung nicht lief; das holt die Browserprüfung von Phase 3 nach.
 
-## 5. Phase 3: Ordner und Suche
+## 5. Phase 3: Ordner und Suche – ERLEDIGT
+
+> **Status: abgeschlossen am 2026-11-07.** Alle Punkte 5.1 bis 5.4 sind umgesetzt. Neue Module `ui/src/folders.ts` (Ordnermodell, Baum beliebiger Tiefe, Seitenleiste mit Kontextmenü und Kontingent, Abschnitt „Ordner“ mit Abo/Prüfen/Systemordnern, Freigaben/ACL) und `ui/src/search.ts` (erweiterte Suche im Format `name=wert&…`, Schnellfilter). Geändert: `mail.ts`, `view.ts`, `shell.css`, `de/en user.json` (Abschnitte `FOLDERS_UI`, `SEARCH_UI`, deutsche Texte für `SORT_ARRIVAL_*` und `IMAP.ACL_*`), `plugins/ai-copilot/dev/seed.py` (`--folder-mails`: verschachtelte Ordner, nicht abonnierter Ordner, Thread, große Mail, Spam, Kontingent 200 MB). Zusätzlich gebaut: Schalter „Als Unterhaltungen anzeigen“ und „Nach Datum gruppieren“ im Menü „Sortierung und Ansicht“ (speichern `UseThreads`/`listGrouped` per `SettingsUpdate`).
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`, Token-Prüfung (0 Fehler, 5 bekannte Warnungen in `letter.ts`). Sprachdateien de/en deckungsgleich. Reviews mit `/apple-design` und `/mistral-design` gelaufen: keine Critical- oder High-Befunde; Kontrast der Leistentexte 5,98:1 (hell) und 8,82:1 (dunkel), Trefferflächen 28/44 px, vollständiger Tastaturweg. Bewusste Abweichungen: mehr als zwei Seitenleisten-Ebenen (Plan-Forderung, Disclosure-Dreiecke) und „Ordner anlegen“/Kontingent unten in der Seitenleiste (Plan-Forderung, Alternativweg über das Kontextmenü).
+>
+> Im Browser geprüft (Docker-Vorschau, headless Chrome; hell/dunkel; 375/800/1280 px): Baum beliebiger Tiefe, nicht auswählbare Eltern, Auf-/Zuklappen (auch nach Neuladen), Pfeiltasten, Umschalt+F10, Rechtsklick und Knopf „Weitere“ mit gleichem Menü, Esc mit Fokus-Rückkehr, Ordner anlegen/Unterordner/umbenennen/verschieben/löschen (nur leer, mit Bestätigung), Abo und Prüfen umschalten, „Nicht abonnierte ausblenden“, Systemordner zuordnen und zurücksetzen, Alle gelesen, Spam leeren mit Bestätigung, Kontingent-Anzeige, alle Sortierungen, Threads an/aus, Thread öffnen (Klick und T), Zurück (Knopf und Esc), Datumsgruppen, Schnellfilter-Kombinationen, erweiterte Suche (Von, An, Betreff, Text, Schlagwort, Größe, beantwortet, Zeitraum), schnelle Ordner-/Suchwechsel und Aktualisieren ohne veraltete Antworten, Mobilmenü öffnet nach oben, Trefferflächen 44 px mobil.
+>
+> **Ungetestet:** ACL und Kolab (Dovecot der Vorschau meldet weder `ACL` noch `METADATA`), Unterordner-Suche (kein `MULTISEARCH`), Kontowechsel mit Ungelesen-Zahlen (nur ein Konto). Datumssuche liefert in der Vorschau nichts, weil IMAP `SINCE`/`BEFORE` das Eingangsdatum vergleicht und alle Testmails heute eingespielt wurden; nicht falsch, aber nicht mit Treffern bestätigt.
+>
+> Außerdem bereinigt: Der Docker-Neubau (`.docker/release/Dockerfile`) scheiterte an `COPY package.json yarn.lock` — der Fork nutzt npm und baut das Frontend vorab, `yarn.lock` und gulp gibt es nicht mehr. Das Dockerfile ruft jetzt `php release.php --skip-gulp` auf; die gulp-Abfrage in `cli/release.php` läuft nur noch, wenn gulp auch wirklich gestartet wird.
 
 Alt: `dev/Settings/User/Folders.js`, `Views/User/SettingsFolders.html`, `SettingsFolderItem.html`, `Popups Folder*`, `dev/Common/Folders.js`.
 
@@ -454,7 +464,7 @@ Vorgehen:
 | 0 | Symbolsystem | Erledigt |
 | 1 | Liste und Brief (3.1–3.11) | Erledigt |
 | 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Erledigt |
-| 3 | Ordner, Suche, Sortierung, Threads | Hoch |
+| 3 | Ordner, Suche, Sortierung, Threads | Erledigt |
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Mittel bis hoch |
 | 5 | Kontakte | Mittel |
 | 6 | Sieve-Formular, Abwesenheitsnotiz | Mittel (Abwesenheit hoch) |

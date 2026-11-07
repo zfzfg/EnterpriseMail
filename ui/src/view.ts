@@ -4,19 +4,36 @@ import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
+import { renderFolderDesk, renderFolderMenu, renderQuota, renderSidebarRows, type FolderAction, type FolderDesk, type SidebarData } from "./folders";
+import { readSearchForm, renderSearchForm, serializeSearch, type QuickFlag, type SearchCriteria } from "./search";
 import { applyAppearance, type Appearance } from "./theme";
 
 export type { ComposeFile, ComposeSeed } from "./compose";
 
-export interface FolderRow {
-  fullName: string;
-  name: string;
-  depth: number;
-  unread: number;
-  current: boolean;
-  inbox: boolean;
-  role: string;
+export type { SidebarData } from "./folders";
+
+/** Zustand der Liste: Sortierung, Unterhaltungen, Gruppierung. */
+export interface ListMode {
+  sortable: boolean;
+  sort: string;
+  threadsAvailable: boolean;
+  useThreads: boolean;
+  grouped: boolean;
+  threadOpen: string;
 }
+
+export const SORTS: [string, string, string][] = [
+  ["", "MESSAGE_LIST.SORT_DATE_DESC", "Datum absteigend"],
+  ["DATE", "MESSAGE_LIST.SORT_DATE_ASC", "Datum aufsteigend"],
+  ["FROM", "MESSAGE_LIST.SORT_FROM_ASC", "Von A-Z"],
+  ["REVERSE FROM", "MESSAGE_LIST.SORT_FROM_DESC", "Von Z-A"],
+  ["REVERSE SIZE", "MESSAGE_LIST.SORT_SIZE_DESC", "Größe absteigend"],
+  ["SIZE", "MESSAGE_LIST.SORT_SIZE_ASC", "Größe aufsteigend"],
+  ["SUBJECT", "MESSAGE_LIST.SORT_SUBJECT_ASC", "Betreff A-Z"],
+  ["REVERSE SUBJECT", "MESSAGE_LIST.SORT_SUBJECT_DESC", "Betreff Z-A"],
+  ["REVERSE ARRIVAL", "MESSAGE_LIST.SORT_ARRIVAL_DESC", "Eingang absteigend"],
+  ["ARRIVAL", "MESSAGE_LIST.SORT_ARRIVAL_ASC", "Eingang aufsteigend"]
+];
 
 export interface MessageRow {
   uid: number;
@@ -33,6 +50,11 @@ export interface MessageRow {
   attachment?: boolean;
   checked?: boolean;
   deleted?: boolean;
+  /** Anzahl Mails der Unterhaltung (nur Listenansicht mit Threads). */
+  threadCount?: number;
+  threadUnseen?: number;
+  /** Datumsgruppe, die vor dieser Zeile beginnt. */
+  group?: string;
 }
 
 export type { ReaderData } from "./reader";
@@ -148,7 +170,14 @@ export interface MailView {
   setLoginBusy(busy: boolean): void;
   setLoginError(text: string): void;
   showMail(email: string, folderName: string, assist?: AssistFlags | null): void;
-  setFolders(rows: FolderRow[]): void;
+  setFolders(data: SidebarData): void;
+  setFolderDesk(desk: FolderDesk | null): void;
+  showAcl(folder: string, html: string): void;
+  setListMode(mode: ListMode): void;
+  setSearch(query: string, quick: Set<QuickFlag>): void;
+  openSearch(criteria: SearchCriteria, options: { multisearch: boolean; keywords: string[] }): void;
+  folderDialog(options: { title: string; parents: { value: string; label: string }[]; parent: string }): Promise<{ name: string; parent: string; subscribe: boolean } | null>;
+  openFolderSettings(fullName: string): void;
   setList(rows: MessageRow[], empty: string, error: string, more: boolean, searching: boolean): void;
   setReader(data: ReaderData | null, loading: string, error: string): void;
   setBulk(data: BulkData): void;
@@ -250,23 +279,44 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
-          <p class="group-label mono">${esc(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
-          <div id="folder-inbox"></div>
-          <p class="group-label mono">Ordner</p>
-          <div id="folder-rest"></div>
+          <p class="group-label mono">${esc(t("FOLDERS_UI.FOLDERS", "Ordner"))}</p>
+          <div class="folder-filter" hidden>
+            <label class="sr" for="folder-q">${esc(t("FOLDERS_UI.FILTER", "Ordner suchen"))}</label>
+            <input class="search" id="folder-q" type="search" placeholder="${esc(t("FOLDERS_UI.FILTER", "Ordner suchen"))}" autocomplete="off">
+          </div>
+          <div id="folder-tree" class="folder-tree"></div>
+          <div class="sidebar-foot">
+            <button type="button" class="text-btn" data-action="f-create" hidden>${withIcon("folder-plus", t("SETTINGS_FOLDERS.BUTTON_CREATE", "Ordner anlegen"))}</button>
+            <div id="quota" class="quota"></div>
+          </div>
+          <ul class="menu folder-menu" id="folder-menu" role="menu" aria-label="${esc(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}" hidden></ul>
         </aside>
         <section class="list-pane" aria-label="Mails">
           <div class="pane-head">
             <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
             <span class="spacer"></span>
+            <div class="bar-more view-more">
+              <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
+              <div class="menu menu-right" id="view-menu" role="menu" hidden></div>
+            </div>
             <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle auswählen" title="Alle auswählen (Strg+A)">${icon("select-all")}</button>
             <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
             <input class="search" id="search" type="search" placeholder="" autocomplete="off">
+            <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
+          <div class="quick" role="group" aria-label="${esc(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
+            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc(t("SEARCH.FLAGGED", "Markiert"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
+          </div>
+          <div class="thread-bar" id="thread-bar" hidden>
+            <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zurück zur Liste"))}</button>
+            <span class="quiet" id="thread-label"></span>
+          </div>
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
             <p class="empty" id="list-empty" hidden></p>
@@ -340,6 +390,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               </div>
               <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
@@ -360,6 +411,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <ul class="keys">
               <li><span>Nächste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
               <li><span>Öffnen</span><kbd>Enter</kbd></li>
+              <li><span>Unterhaltung öffnen</span><kbd>T</kbd></li>
+              <li><span>Zurück zur Liste (Unterhaltung)</span><kbd>Esc</kbd></li>
+              <li><span>Ordner auf-, zuklappen</span><kbd>←</kbd> <kbd>→</kbd></li>
+              <li><span>Ordneraktionen</span><kbd>Umschalt</kbd> <kbd>F10</kbd></li>
               <li><span>Schreiben</span><kbd>C</kbd></li>
               <li><span>Antworten</span><kbd>R</kbd></li>
               <li><span>Allen antworten</span><kbd>A</kbd></li>
@@ -422,6 +477,38 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
             <div class="lightbox-body" id="lightbox-body"></div>
+          </div>
+        </dialog>
+        <dialog id="adv-search" class="dialog-wide" aria-labelledby="adv-title">
+          <form class="dialog-body" data-action="adv-search-form">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="adv-title" class="title title-md">${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}</h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
+            </div>
+            <div id="adv-body"></div>
+          </form>
+        </dialog>
+        <dialog id="folder-dlg" aria-labelledby="folder-dlg-title">
+          <form class="dialog-body" data-action="folder-dlg-form">
+            <h2 id="folder-dlg-title" class="title title-md"></h2>
+            <label class="field"><span>${esc(t("GLOBAL.NAME", "Name"))}</span><input id="folder-dlg-name" type="text" required autocomplete="off"></label>
+            <label class="field"><span>${esc(t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "Übergeordneter Ordner"))}</span><select id="folder-dlg-parent"></select></label>
+            <label class="check"><input type="checkbox" id="folder-dlg-sub" checked> ${esc(t("FOLDERS_UI.SUBSCRIBE", "Abonnieren"))}</label>
+            <div class="dialog-actions">
+              <button type="button" class="text-btn" data-action="close-dialog">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="submit" class="ink-btn">${withIcon("folder-plus", t("POPUPS_CREATE_FOLDER.BUTTON_CREATE", "Anlegen"))}</button>
+            </div>
+          </form>
+        </dialog>
+        <dialog id="acl-dlg" class="dialog-wide" aria-labelledby="acl-title">
+          <div class="dialog-body">
+            <div class="sheet-head" style="padding:0;border:0;min-height:0">
+              <h2 id="acl-title" class="title title-md"></h2>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
+            </div>
+            <div id="acl-body"></div>
           </div>
         </dialog>
         <ul class="menu addr-menu" id="addr-menu" role="menu" hidden>
@@ -509,17 +596,71 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   }
 
   function closeMenu(): void {
-    shell?.querySelectorAll<HTMLElement>("#account-menu, #more-menu, #addr-menu").forEach((menu) => { menu.hidden = true; });
-    shell?.querySelectorAll<HTMLElement>("[data-action='account'], [data-action='m-more']").forEach((button) => {
+    shell?.querySelectorAll<HTMLElement>("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu").forEach((menu) => { menu.hidden = true; });
+    shell?.querySelectorAll<HTMLElement>("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu']").forEach((button) => {
       button.setAttribute("aria-expanded", "false");
     });
   }
 
   function anyMenuOpen(): boolean {
-    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden])"));
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden])"));
   }
 
   let addrTarget: { email: string; name: string } = { email: "", name: "" };
+  /** Auslöser des offenen Menüs; bekommt beim Schließen per Esc den Fokus zurück. */
+  let menuReturn: HTMLElement | null = null;
+  let folderActions = new Map<string, FolderAction[]>();
+  let folderDesk: FolderDesk | null = null;
+  let listMode: ListMode = { sortable: false, sort: "", threadsAvailable: false, useThreads: false, grouped: false, threadOpen: "" };
+
+  /** Ordnermenü am Knopf oder an der Zeile öffnen (Knopf, Rechtsklick, Kontextmenü-Taste). */
+  function openFolderMenu(target: string, anchor: HTMLElement, point?: { x: number; y: number }): void {
+    const menu = shell?.querySelector("#folder-menu") as HTMLElement | null;
+    const sidebar = shell?.querySelector(".sidebar") as HTMLElement | null;
+    const list = folderActions.get(target);
+    if (!menu || !sidebar || !list?.length) return;
+    closeMenu();
+    menu.innerHTML = renderFolderMenu(target, list);
+    const box = sidebar.getBoundingClientRect();
+    const rect = anchor.getBoundingClientRect();
+    const x = point ? point.x : rect.right - 8;
+    const y = point ? point.y : rect.bottom;
+    menu.style.left = `${Math.max(4, Math.min(x - box.left, box.width - 228))}px`;
+    menu.style.top = `${y - box.top + sidebar.scrollTop + 4}px`;
+    menu.hidden = false;
+    // Unten zu wenig Platz (Tab-Leiste, Fensterrand): Menü über der Zeile öffnen.
+    const limit = Math.min(window.innerHeight, (shell?.querySelector(".tabbar") as HTMLElement | null)?.getBoundingClientRect().top || window.innerHeight);
+    const height = menu.getBoundingClientRect().height;
+    if (y + 4 + height > limit) {
+      const above = (point ? point.y : rect.top) - height - 4;
+      menu.style.top = `${Math.max(4, above - box.top + sidebar.scrollTop)}px`;
+    }
+    const more = sidebar.querySelector<HTMLElement>(`.fmore[data-target="${CSS.escape(target)}"]`);
+    more?.setAttribute("aria-expanded", "true");
+    menuReturn = more || anchor;
+    (menu.querySelector("button") as HTMLButtonElement | null)?.focus({ preventScroll: true });
+  }
+
+  function paintViewMenu(): void {
+    const menu = shell?.querySelector("#view-menu") as HTMLElement | null;
+    const button = shell?.querySelector("[data-action='view-menu']") as HTMLElement | null;
+    if (!menu || !button) return;
+    const sorts = listMode.sortable && !listMode.threadOpen
+      ? `<p class="menu-label mono">${esc(t("MESSAGE_LIST.SORT", "Sortieren"))}</p>` + SORTS.map(([value, key, fallback]) =>
+        `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${listMode.sort === value ? "true" : "false"}" data-action="sort" data-sort="${esc(value)}">${icon(listMode.sort === value ? "check" : "sort")}<span>${esc(t(key, fallback))}</span></button>`).join("")
+      : "";
+    const threads = listMode.threadsAvailable
+      ? `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.useThreads ? "true" : "false"}" data-action="threads-toggle">${icon(listMode.useThreads ? "checkbox-checked" : "checkbox")}<span>${esc(t("SETTINGS_GENERAL.USE_THREADS", "Als Unterhaltungen anzeigen"))}</span></button>`
+      : "";
+    const group = `<button type="button" class="menu-item" role="menuitemcheckbox" aria-checked="${listMode.grouped ? "true" : "false"}" data-action="group-toggle">${icon(listMode.grouped ? "checkbox-checked" : "checkbox")}<span>${esc(t("FOLDERS_UI.GROUP_BY_DATE", "Nach Datum gruppieren"))}</span></button>`;
+    menu.innerHTML = sorts + (sorts ? `<hr class="menu-sep">` : "") + `<p class="menu-label mono">${esc(t("FOLDERS_UI.VIEW", "Ansicht"))}</p>` + threads + group;
+    button.hidden = false;
+  }
+
+  /** Sichtbare Ordnerknöpfe in Reihenfolge, für Pfeiltasten. */
+  function folderButtons(): HTMLElement[] {
+    return [...(shell?.querySelectorAll<HTMLElement>("#folder-tree .folder:not([disabled])") ?? [])];
+  }
 
   function openAddrMenu(target: HTMLElement): void {
     const menu = shell?.querySelector("#addr-menu") as HTMLElement | null;
@@ -578,7 +719,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!target) return;
       const action = target.dataset.action;
       if (target.classList.contains("menu-item") && target.closest("#more-menu")) closeMenu();
-      if (target.dataset.folder) {
+      if (target.dataset.folder && !action) {
         actions.selectFolder(target.dataset.folder);
         if (!wide()) pane("list");
         if (!docked()) setSidebar(false);
@@ -608,6 +749,46 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         more.hidden = !open;
         target.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) (more.querySelector(".menu-item:not([hidden])") as HTMLElement | null)?.focus({ preventScroll: true });
+      } else if (action === "f-toggle") {
+        actions.act("f-toggle", { target: target.dataset.target || "" });
+      } else if (action === "f-menu") {
+        const open = target.getAttribute("aria-expanded") === "true";
+        if (open) closeMenu();
+        else openFolderMenu(target.dataset.target || "", target);
+      } else if (action === "f-settings") {
+        closeMenu();
+        openFolderSettings(target.dataset.target || "");
+      } else if (action?.startsWith("f-")) {
+        if (target.closest(".menu")) closeMenu();
+        const data: Record<string, string> = {};
+        Object.entries(target.dataset).forEach(([key, value]) => { if (value != null) data[key] = value; });
+        actions.act(action, data);
+      } else if (action === "view-menu") {
+        const menuEl = shell?.querySelector("#view-menu") as HTMLElement;
+        const open = menuEl.hidden;
+        closeMenu();
+        if (open) {
+          paintViewMenu();
+          menuEl.hidden = false;
+          target.setAttribute("aria-expanded", "true");
+          menuReturn = target;
+          (menuEl.querySelector(".menu-item") as HTMLElement | null)?.focus({ preventScroll: true });
+        }
+      } else if (action === "sort" || action === "threads-toggle" || action === "group-toggle") {
+        closeMenu();
+        (shell?.querySelector("[data-action='view-menu']") as HTMLElement | null)?.focus({ preventScroll: true });
+        actions.act(action, { sort: target.dataset.sort || "" });
+      } else if (action === "quick") {
+        actions.act("quick", { flag: target.dataset.flag || "", query: (shell?.querySelector("#search") as HTMLInputElement).value.trim() });
+      } else if (action === "adv-search") {
+        actions.act("adv-search", { query: (shell?.querySelector("#search") as HTMLInputElement).value.trim() });
+      } else if (action === "adv-reset") {
+        const form = target.closest("form") as HTMLFormElement | null;
+        form?.reset();
+        form?.querySelectorAll<HTMLInputElement>("input").forEach((field) => { if (field.type === "checkbox") field.checked = false; else field.value = ""; });
+        form?.querySelectorAll<HTMLSelectElement>("select").forEach((field) => { field.selectedIndex = 0; });
+      } else if (action === "thread-back") {
+        actions.act("thread-back", {});
       } else if (action === "m-address") {
         openAddrMenu(target);
       } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search" || action === "m-addr-contact") {
@@ -656,6 +837,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         section = target.dataset.section || "look";
         edit = null;
         paintSettings();
+        if (section === "folders") actions.act("f-desk", {});
       } else if (action === "settings-edit") {
         edit = { kind: target.dataset.kind || "", id: target.dataset.id || "", fresh: target.dataset.fresh === "1" };
         paintSettings();
@@ -692,7 +874,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") (target.closest("dialog") as HTMLDialogElement | null)?.close();
       else if (action === "search") { /* form */ }
-      else if (action === "clear-search") actions.clearSearch();
+      else if (action === "clear-search") {
+        (shell?.querySelector("#search") as HTMLInputElement).value = "";
+        actions.clearSearch();
+      }
       else if (action === "more") actions.more();
       else if (action === "back") pane("list");
       else if (action === "pane-folders") pane("folders");
@@ -732,6 +917,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     shell.addEventListener("submit", (event) => {
       const form = event.target as HTMLFormElement;
       if (form.classList.contains("composer-form")) return;
+      if (form.dataset.action === "adv-search-form") {
+        event.preventDefault();
+        const query = serializeSearch(readSearchForm(form), form.dataset.multisearch === "1");
+        (shell?.querySelector("#search") as HTMLInputElement).value = query;
+        (form.closest("dialog") as HTMLDialogElement).close();
+        actions.search(query);
+        return;
+      }
+      if (form.dataset.action === "folder-dlg-form") return;
       if (form.dataset.action === "search") {
         event.preventDefault();
         actions.search((form.querySelector("#search") as HTMLInputElement).value.trim());
@@ -751,6 +945,59 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       }
     });
 
+    // Rechtsklick und Kontextmenü-Taste auf einem Ordner öffnen dasselbe Menü wie der Knopf „Weitere“.
+    shell.addEventListener("contextmenu", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("#folder-tree .frow");
+      if (!row) return;
+      const name = row.dataset.row || "";
+      if (!folderActions.get(name)?.length) return;
+      event.preventDefault();
+      const mouse = event as MouseEvent;
+      const fromKeyboard = mouse.clientX === 0 && mouse.clientY === 0;
+      openFolderMenu(name, row, fromKeyboard ? undefined : { x: mouse.clientX, y: mouse.clientY });
+    });
+
+    const folderFilter = shell.querySelector("#folder-q") as HTMLInputElement;
+    folderFilter.addEventListener("input", () => actions.act("f-filter", { q: folderFilter.value }));
+
+    // Pfeiltasten im Ordnerbaum: hoch/runter wechseln, rechts/links auf- und zuklappen bzw. zum Elternordner.
+    shell.querySelector(".sidebar")?.addEventListener("keydown", (raw) => {
+      const event = raw as KeyboardEvent;
+      const current = (event.target as HTMLElement).closest<HTMLElement>("#folder-tree .folder");
+      if (!current) {
+        const menuEl = (event.target as HTMLElement).closest("#folder-menu");
+        if (menuEl && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          event.preventDefault();
+          const items = [...menuEl.querySelectorAll<HTMLElement>(".menu-item")];
+          const index = items.indexOf(event.target as HTMLElement);
+          items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      const buttons = folderButtons();
+      const index = buttons.indexOf(current);
+      const row = current.closest<HTMLElement>(".frow");
+      const name = row?.dataset.row || "";
+      const toggle = row?.querySelector<HTMLElement>(".ftoggle[aria-expanded]");
+      const go = (next: HTMLElement | undefined) => { if (next) { event.preventDefault(); next.focus({ preventScroll: true }); next.scrollIntoView({ block: "nearest" }); } };
+      if (event.key === "ArrowDown") go(buttons[index + 1]);
+      else if (event.key === "ArrowUp") go(buttons[index - 1]);
+      else if (event.key === "Home") go(buttons[0]);
+      else if (event.key === "End") go(buttons[buttons.length - 1]);
+      else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "false") actions.act("f-toggle", { target: name });
+        else if (toggle) go(buttons[index + 1]);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "true") actions.act("f-toggle", { target: name });
+        else {
+          const depth = Number(current.dataset.depth || 0);
+          if (depth > 0) go(buttons.slice(0, index).reverse().find((item) => Number(item.dataset.depth || 0) < depth));
+        }
+      }
+    });
+
     shell.addEventListener("change", (event) => {
       const input = event.target as HTMLInputElement;
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
@@ -758,22 +1005,27 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
     if (keyHandler) document.removeEventListener("keydown", keyHandler);
     keyHandler = (event: KeyboardEvent) => {
-      if (!shell?.isConnected) return;
+      if (!shell?.isConnected || event.defaultPrevented) return;
       const typing = (event.target instanceof HTMLInputElement && !["checkbox", "radio", "button"].includes(event.target.type))
         || event.target instanceof HTMLTextAreaElement
         || event.target instanceof HTMLSelectElement
         || (event.target instanceof HTMLElement && event.target.isContentEditable);
       if (event.key === "Escape") {
         if (shell?.querySelector("dialog[open]")) return;
-        if (anyMenuOpen()) { closeMenu(); return; }
+        if (anyMenuOpen()) {
+          const back = menuReturn;
+          closeMenu();
+          menuReturn = null;
+          back?.focus({ preventScroll: true });
+          return;
+        }
         if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
-        if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
+        if (!docked() && shell?.dataset.sidebar === "open") { setSidebar(false); return; }
+        if (!typing && listMode.threadOpen) actions.act("thread-back", {});
         return;
       }
       if (typing || shell.querySelector("dialog[open]")) return;
-      const focusedControl = event.target instanceof HTMLButtonElement
-        && !event.target.dataset.uid
-        && !event.target.dataset.folder;
+      const focusedControl = event.target instanceof HTMLButtonElement && !event.target.dataset.uid;
       if (focusedControl && (event.key === "Enter" || event.key === " ")) return;
       const key = event.key.toLowerCase();
       if (event.key === "\\") {
@@ -804,6 +1056,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (key === "i") actions.act("flag", {});
       else if (key === "u") actions.unread();
       else if (key === "m") { event.preventDefault(); actions.act("move", {}); }
+      else if (key === "t") { event.preventDefault(); actions.act("thread", {}); }
       else if (key === "j" || key === "k" || event.key === "Enter") {
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
@@ -1016,16 +1269,37 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (id === "contacts") button.hidden = !snap?.caps.contacts;
       if (id === "filters") button.hidden = !snap?.caps.sieve;
     });
-    panel.innerHTML = renderDesk(section, snap, edit);
+    panel.innerHTML = section === "folders" ? renderFolderDesk(folderDesk, edit) : renderDesk(section, snap, edit);
     if (edit) {
-      const field = panel.querySelector("input:not([type='hidden']), textarea") as HTMLElement | null;
+      const scope = section === "folders" ? panel.querySelector("form[data-kind='folder-save'], form[data-kind='folder-create']") || panel : panel;
+      const field = scope.querySelector("input:not([type='hidden']), select, textarea") as HTMLElement | null;
       field?.focus({ preventScroll: true });
+      // Das geöffnete Formular in den sichtbaren Bereich des Dialogs holen.
+      if (section === "folders") field?.closest("form")?.scrollIntoView({ block: "nearest" });
     }
   }
 
-  function folderButton(row: FolderRow): string {
-    const count = row.unread > 0 ? `<span class="count">${row.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc(row.fullName)}" aria-current="${row.current ? "page" : "false"}" style="padding-left:${8 + row.depth * 12}px">${icon(ROLE_ICON[row.role] || (row.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc(row.name)}</span>${count}</button>`;
+  function openFolderSettings(fullName: string): void {
+    const dialog = shell?.querySelector("#settings") as HTMLDialogElement | null;
+    if (!dialog) return;
+    section = "folders";
+    edit = fullName ? { kind: "folder", id: fullName, fresh: false } : null;
+    const opening = !dialog.open;
+    if (opening && fullName) {
+      // Nach dem Schließen zurück auf den Knopf „Aktionen“ des Ordners (die Zeile kann neu gezeichnet sein).
+      dialog.addEventListener("close", () => {
+        const back = shell?.querySelector<HTMLElement>(`.frow[data-row="${CSS.escape(fullName)}"] .fmore, .frow[data-row="${CSS.escape(fullName)}"] .folder`);
+        back?.focus({ preventScroll: true });
+      }, { once: true });
+    }
+    // Erst öffnen, dann zeichnen: sonst setzt showModal den Fokus auf den ersten Knopf zurück.
+    if (opening) {
+      if (!edit) dialog.showModal();
+      else { paintSettings(); dialog.showModal(); }
+      void actions.settings?.("open", {});
+    }
+    paintSettings();
+    actions.act("f-desk", {});
   }
 
   return {
@@ -1033,21 +1307,103 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     setLoginBusy,
     setLoginError,
     showMail,
-    setFolders(rows) {
-      const inbox = rows.filter((row) => row.inbox);
-      const rest = rows.filter((row) => !inbox.includes(row));
-      const inboxEl = shell?.querySelector("#folder-inbox");
-      const restEl = shell?.querySelector("#folder-rest");
-      if (inboxEl) inboxEl.innerHTML = inbox.map(folderButton).join("") || `<button type="button" class="folder" data-folder="INBOX">${icon("inbox")}<span class="folder-name">Posteingang</span></button>`;
-      if (restEl) restEl.innerHTML = rest.map(folderButton).join("");
-      const current = rows.find((row) => row.current);
-      if (current && shell) {
-        (shell.querySelector("#folder-title") as HTMLElement).textContent = current.name;
-        (shell.querySelector("#reader-place") as HTMLElement).textContent = current.name;
+    setFolders(data) {
+      const tree = shell?.querySelector("#folder-tree") as HTMLElement | null;
+      if (!tree || !shell) return;
+      // Fokus über das Neuzeichnen retten (Auf-/Zuklappen per Tastatur).
+      const active = document.activeElement as HTMLElement | null;
+      const keep = active && tree.contains(active)
+        ? { key: active.dataset.folder || active.dataset.target || "", cls: active.classList.contains("fmore") ? ".fmore" : active.classList.contains("ftoggle") ? ".ftoggle" : ".folder" }
+        : null;
+      folderActions = new Map(data.rows.map((row) => [row.info.fullName, row.actions]));
+      tree.innerHTML = renderSidebarRows(data.rows, Boolean(data.filter.trim()));
+      if (keep?.key) {
+        const sel = keep.cls === ".folder" ? `.frow[data-row="${CSS.escape(keep.key)}"] .folder` : `.frow[data-row="${CSS.escape(keep.key)}"] ${keep.cls}`;
+        (tree.querySelector(sel) as HTMLElement | null)?.focus({ preventScroll: true });
+      }
+      const filter = shell.querySelector(".folder-filter") as HTMLElement;
+      filter.hidden = data.count <= 15 && !data.filter;
+      (shell.querySelector("[data-action='f-create']") as HTMLElement).hidden = !data.canCreate;
+      (shell.querySelector("#quota") as HTMLElement).innerHTML = renderQuota(data.quota);
+      if (data.currentName) {
+        (shell.querySelector("#folder-title") as HTMLElement).textContent = data.currentName;
+        (shell.querySelector("#reader-place") as HTMLElement).textContent = data.currentName;
         const search = shell.querySelector("#search") as HTMLInputElement;
-        if (document.activeElement !== search) search.placeholder = `In ${current.name} suchen`;
+        if (document.activeElement !== search) search.placeholder = `In ${data.currentName} suchen`;
       }
     },
+    setFolderDesk(desk) {
+      folderDesk = desk;
+      const dialog = shell?.querySelector("#settings") as HTMLDialogElement | null;
+      // Ein offenes Formular nicht überschreiben (z. B. beim Abruf im Hintergrund).
+      if (dialog?.open && section === "folders" && !edit) {
+        const panel = shell?.querySelector("#settings-panel") as HTMLElement | null;
+        const top = panel?.closest(".dialog-body")?.scrollTop || 0;
+        paintSettings();
+        const body = panel?.closest(".dialog-body");
+        if (body) body.scrollTop = top;
+      }
+    },
+    showAcl(folder, html) {
+      const dialog = shell?.querySelector("#acl-dlg") as HTMLDialogElement | null;
+      if (!dialog) return;
+      (dialog.querySelector("#acl-title") as HTMLElement).textContent = `${t("FOLDERS_UI.SHARING", "Freigaben")}: ${folder}`;
+      (dialog.querySelector("#acl-body") as HTMLElement).innerHTML = html;
+      if (!dialog.open) dialog.showModal();
+    },
+    setListMode(mode) {
+      listMode = mode;
+      if (!shell) return;
+      shell.dataset.thread = mode.threadOpen ? "open" : "";
+      const bar = shell.querySelector("#thread-bar") as HTMLElement;
+      bar.hidden = !mode.threadOpen;
+      (shell.querySelector("#thread-label") as HTMLElement).textContent = mode.threadOpen ? `${t("FOLDERS_UI.THREAD", "Unterhaltung")}: ${mode.threadOpen}` : "";
+      paintViewMenu();
+    },
+    setSearch(query, quick) {
+      const input = shell?.querySelector("#search") as HTMLInputElement | null;
+      if (input && input.value.trim() !== query) input.value = query;
+      shell?.querySelectorAll<HTMLElement>("[data-action='quick']").forEach((button) => {
+        button.setAttribute("aria-pressed", quick.has(button.dataset.flag as QuickFlag) ? "true" : "false");
+      });
+    },
+    openSearch(criteria, options) {
+      const dialog = shell?.querySelector("#adv-search") as HTMLDialogElement | null;
+      if (!dialog) return;
+      const form = dialog.querySelector("form") as HTMLFormElement;
+      form.dataset.multisearch = options.multisearch ? "1" : "";
+      (dialog.querySelector("#adv-body") as HTMLElement).innerHTML = renderSearchForm(criteria, options);
+      dialog.showModal();
+      (form.querySelector("input[name='from']") as HTMLInputElement | null)?.focus({ preventScroll: true });
+    },
+    folderDialog(options) {
+      const dialog = shell?.querySelector("#folder-dlg") as HTMLDialogElement | null;
+      if (!dialog) return Promise.resolve(null);
+      const form = dialog.querySelector("form") as HTMLFormElement;
+      const name = dialog.querySelector("#folder-dlg-name") as HTMLInputElement;
+      const parent = dialog.querySelector("#folder-dlg-parent") as HTMLSelectElement;
+      const sub = dialog.querySelector("#folder-dlg-sub") as HTMLInputElement;
+      (dialog.querySelector("#folder-dlg-title") as HTMLElement).textContent = options.title;
+      parent.innerHTML = options.parents.map((item) => `<option value="${esc(item.value)}"${item.value === options.parent ? " selected" : ""}>${esc(item.label)}</option>`).join("");
+      name.value = "";
+      sub.checked = true;
+      dialog.returnValue = "";
+      dialog.showModal();
+      name.focus({ preventScroll: true });
+      return new Promise((resolve) => {
+        const onSubmit = (event: Event) => {
+          event.preventDefault();
+          if (!name.value.trim()) return;
+          dialog.close("ok");
+        };
+        form.addEventListener("submit", onSubmit);
+        dialog.addEventListener("close", () => {
+          form.removeEventListener("submit", onSubmit);
+          resolve(dialog.returnValue === "ok" ? { name: name.value.trim(), parent: parent.value, subscribe: sub.checked } : null);
+        }, { once: true });
+      });
+    },
+    openFolderSettings,
     setList(rows, empty, error, more, searching) {
       const box = shell?.querySelector("#rows");
       const emptyEl = shell?.querySelector("#list-empty") as HTMLElement | null;
@@ -1057,8 +1413,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (box) {
         box.innerHTML = rows.map((row) => {
           const subject = row.subject || "(ohne Betreff)";
-          return `
-          <div class="msg-row${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}">
+          const group = row.group ? `<h2 class="list-group mono">${esc(row.group)}</h2>` : "";
+          const threadText = row.threadCount
+            ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung öffnen")}: ${row.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row.threadUnseen ? `, ${row.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}`
+            : "";
+          const thread = row.threadCount
+            ? `<button type="button" class="msg-thread${row.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row.uid}" aria-label="${esc(`${threadText} – ${subject}`)}" title="${esc(threadText)} (T)">${icon("thread")}<span>${row.threadCount}</span></button>`
+            : "";
+          return `${group}
+          <div class="msg-row${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}">
             <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="Auswählen: ${esc(subject)}">
             <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" draggable="true" aria-current="${row.current ? "true" : "false"}">
               <span class="who">${esc(row.who)}</span>
@@ -1066,6 +1429,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <span class="subj">${esc(subject)}${categoryMark(row.category)}</span>
               <span class="peek">${esc(row.preview)}</span>
             </button>
+            ${thread}
             <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? "Markierung entfernen" : "Markieren"}: ${esc(subject)}" title="${row.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
           </div>`;
         }).join("");
@@ -1472,6 +1836,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     },
     showSettings(next) {
       snap = next;
+      // Der Ordnerabschnitt hat eigene Daten; ein offenes Ordnerformular bleibt stehen.
+      if (section === "folders" && edit) return;
       edit = null;
       paintSettings();
     },

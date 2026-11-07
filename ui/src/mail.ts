@@ -8,20 +8,17 @@ import type { ReaderFile, ReaderPlace } from "./reader";
 import { applyDesk, loadDesk, readCaps, writeProp, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
 import type { ComposeValues } from "./compose";
 import {
-  createView, type ChatTurn, type ComposeSeed, type FolderRow, type MailView, type MessageRow,
+  buildTree, displayName, flattenTree, folderPath, parseAcl, parseFolders, renderAcl, KOLAB_KEYS,
+  type FolderAction, type FolderDesk, type FolderInfo, type FolderModel
+} from "./folders";
+import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
+import {
+  createView, type ChatTurn, type ComposeSeed, type ListMode, type MailView, type MessageRow,
   type PickerFolder, type ReaderData, type StripState
 } from "./view";
 
 interface Person { name: string; email: string }
-interface Folder {
-  fullName: string;
-  name: string;
-  delimiter: string;
-  role: string;
-  unread: number;
-  total: number;
-  uidNext: number;
-}
+type Folder = FolderInfo;
 interface MsgFile {
   name: string;
   size: number;
@@ -59,6 +56,8 @@ interface Msg {
   isSpam: boolean;
   hasVirus: boolean;
   readReceipt: string;
+  threads: number[];
+  threadUnseen: number[];
   headers: Record<string, string>;
   auth: { spf: string; dkim: string; dmarc: string };
 }
@@ -67,6 +66,8 @@ interface ListResult {
   "@Collection"?: Record<string, unknown>[];
   totalEmails?: number;
   offset?: number;
+  totalThreads?: number;
+  threadUid?: number;
   folder?: { totalEmails?: number; unreadEmails?: number; uidNext?: number };
 }
 
@@ -97,6 +98,13 @@ interface Prefs {
   zip: boolean;
   thumbs: boolean;
   webPath: string;
+  hideUnsubscribed: boolean;
+  unhideKolab: boolean;
+  kolab: boolean;
+  defaultSort: string;
+  useThreads: boolean;
+  threadAlgorithm: string;
+  listGrouped: boolean;
 }
 
 const PAGE_FALLBACK = 20;
@@ -236,8 +244,17 @@ class Session {
     viewImages: "ask", whitelist: "", proxy: false, removeColors: false, allowStyles: false, minFontSize: 5,
     maxBlockquotes: 0, collapseBlockquotes: true, viewHtml: true, hideDeleted: true, showNext: false, readAuto: true,
     readDelay: 5, checkInterval: 15, showUnreadCount: false, desktop: true, sound: true, soundName: "new-mail",
-    useChecks: true, listInline: false, simpleFiles: false, newWindow: false, zip: false, thumbs: false, webPath: ""
+    useChecks: true, listInline: false, simpleFiles: false, newWindow: false, zip: false, thumbs: false, webPath: "",
+    hideUnsubscribed: false, unhideKolab: false, kolab: false, defaultSort: "", useThreads: false, threadAlgorithm: "", listGrouped: false
   };
+  private folderModel: FolderModel = { folders: [], quotaUsage: null, quotaLimit: null, capabilities: [] };
+  private collapsed = new Set<string>();
+  private folderFilter = "";
+  private systemSettings = { sent: "", drafts: "", junk: "", trash: "", archive: "" };
+  private sort = "";
+  private threadUid = 0;
+  private threadSubject = "";
+  private deskNotice = "";
   private trashFolder = "";
   private junkFolder = "";
   private draftsFolder = "";
@@ -353,7 +370,18 @@ class Session {
       newWindow: bool(data.messageNewWindow, false),
       zip: Boolean(capa.AttachmentsActions),
       thumbs: Boolean(capa.AttachmentThumbnails),
-      webPath: String(system.webVersionPath || "snappymail/v/0.0.0/")
+      webPath: String(system.webVersionPath || "snappymail/v/0.0.0/"),
+      hideUnsubscribed: bool(data.HideUnsubscribed, false),
+      unhideKolab: bool(data.UnhideKolabFolders, false),
+      kolab: Boolean(capa.Kolab),
+      defaultSort: String(data.defaultSort || ""),
+      useThreads: bool(data.useThreads ?? data.UseThreads, false),
+      threadAlgorithm: String(data.threadAlgorithm || ""),
+      listGrouped: bool(data.listGrouped, false)
+    };
+    this.systemSettings = {
+      sent: String(data.SentFolder || ""), drafts: String(data.DraftsFolder || ""), junk: String(data.JunkFolder || ""),
+      trash: String(data.TrashFolder || ""), archive: String(data.ArchiveFolder || "")
     };
   }
 
@@ -399,6 +427,10 @@ class Session {
     this.checked.clear();
     this.inboxUid = 0;
     this.inboxUnread = -1;
+    this.sort = this.prefs.defaultSort;
+    this.threadUid = 0;
+    this.folderFilter = "";
+    this.collapsed = this.readCollapsed();
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(50, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
@@ -423,6 +455,10 @@ class Session {
   }
 
   private async settings(name: string, data: Record<string, string>): Promise<void> {
+    if (name.startsWith("folder-")) {
+      await this.folderForm(name, data);
+      return;
+    }
     try {
       if (name === "open") this.contactSearch = "";
       if (name === "search-contacts") this.contactSearch = data.search || "";
@@ -446,23 +482,373 @@ class Session {
 
   private async loadFolders(): Promise<void> {
     try {
-      const result = await call<{ "@Collection"?: Record<string, unknown>[] }>("Folders");
-      this.folders = (result["@Collection"] || []).map((item) => ({
-        fullName: String(item.fullName || ""),
-        name: String(item.name || item.fullName || ""),
-        delimiter: String(item.delimiter || "/"),
-        role: String(item.role || ""),
-        unread: Number(item.unreadEmails || 0),
-        total: Number(item.totalEmails || 0),
-        uidNext: Number(item.uidNext || 0)
-      })).filter((folder) => folder.fullName);
+      this.folderModel = parseFolders(await call<Record<string, unknown>>("Folders"));
+      this.folders = this.folderModel.folders;
       this.resolveSystemFolders(null);
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
       if (inbox) { this.inboxUid = inbox.uidNext; this.inboxUnread = inbox.unread; }
       this.paintTitle();
-      await this.selectFolder(inbox?.fullName || this.folders[0]?.fullName || "INBOX");
+      await this.selectFolder(inbox?.fullName || this.folders.find((folder) => folder.selectable)?.fullName || "INBOX");
     } catch (error) {
       this.view.setList([], "", explain(error), false, false);
+    }
+  }
+
+  /** Ordner nach einer Änderung neu laden; der offene Ordner bleibt, wenn es ihn noch gibt. */
+  private async reloadFolders(open = ""): Promise<void> {
+    try {
+      this.folderModel = parseFolders(await call<Record<string, unknown>>("Folders"));
+      this.folders = this.folderModel.folders;
+      this.resolveSystemFolders(null);
+      const keep = open || this.folder;
+      const target = this.folders.find((folder) => folder.fullName === keep && folder.selectable)
+        || this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
+      if (target && target.fullName !== this.folder) await this.selectFolder(target.fullName);
+      else this.paintFolders();
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+
+  private capability(name: string): boolean {
+    return this.folderModel.capabilities.includes(name);
+  }
+
+  private threadsAvailable(): boolean {
+    return this.folderModel.capabilities.some((capa) => capa.startsWith("THREAD="));
+  }
+
+  private threadsOn(): boolean {
+    return this.threadsAvailable() && this.prefs.useThreads;
+  }
+
+  private collapseKey(): string {
+    return `sm-folders-collapsed:${this.accountHash || this.email}`;
+  }
+
+  private readCollapsed(): Set<string> {
+    try {
+      const raw = localStorage.getItem(this.collapseKey());
+      const list = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(list) ? list.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  private writeCollapsed(): void {
+    try { localStorage.setItem(this.collapseKey(), JSON.stringify([...this.collapsed])); } catch { /* ohne Speicher bleibt es für diese Sitzung */ }
+  }
+
+  private isSystem(folder: Folder): boolean {
+    const role = this.roleOf(folder);
+    return Boolean(role) || [this.sentFolder, this.draftsFolder, this.trashFolder, this.junkFolder, this.archiveFolder].includes(folder.fullName);
+  }
+
+  private aboCache: { source: Folder[]; keep: Set<string> } | null = null;
+
+  /** Bei „Nicht abonnierte ausblenden“ bleiben abonnierte Ordner und ihre Eltern stehen (wie `hasSubscriptions` alt). */
+  private subscribedTree(): Set<string> {
+    if (this.aboCache?.source === this.folders) return this.aboCache.keep;
+    const keep = new Set<string>();
+    const byName = new Map(this.folders.map((folder) => [folder.fullName, folder]));
+    this.folders.forEach((folder) => {
+      if (!folder.subscribed && this.roleOf(folder) !== "inbox") return;
+      let current: Folder | undefined = folder;
+      while (current && !keep.has(current.fullName)) {
+        keep.add(current.fullName);
+        current = current.parent ? byName.get(current.parent) : undefined;
+      }
+    });
+    this.aboCache = { source: this.folders, keep };
+    return keep;
+  }
+
+  private hiddenFolder(folder: Folder): boolean {
+    if (this.prefs.hideUnsubscribed && !this.subscribedTree().has(folder.fullName)) return true;
+    return this.prefs.kolab && this.capability("METADATA") && Boolean(folder.kolabType) && !this.prefs.unhideKolab;
+  }
+
+  /** Aktionen im Ordnermenü; was nicht geht, fehlt. */
+  private folderActions(folder: Folder, hasChildren: boolean): FolderAction[] {
+    const role = this.roleOf(folder);
+    const list: FolderAction[] = [];
+    if (folder.exists && !folder.noInferiors) list.push("create-sub");
+    if (folder.exists && folder.selectable && !this.isSystem(folder)) list.push("rename");
+    if (folder.selectable && folder.unread > 0) list.push("read-all");
+    if (folder.selectable && (role === "trash" || role === "junk" || role === "spam") && folder.total > 0) list.push("clear");
+    if (folder.exists) list.push("settings");
+    void hasChildren;
+    return list;
+  }
+
+  private folderDesk(): FolderDesk {
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: new Set(), filter: "", hidden: () => false, current: this.folder,
+      roleOf: (folder) => this.roleOf(folder), actions: () => []
+    });
+    return {
+      rows: rows.map((row) => ({
+        info: row.info,
+        depth: row.depth,
+        role: row.role,
+        hasChildren: row.hasChildren,
+        canDelete: row.info.exists && row.info.selectable && !this.isSystem(row.info) && row.info.total === 0 && !row.hasChildren,
+        canClear: row.info.selectable && ["trash", "junk", "spam"].includes(row.role) && row.info.total > 0,
+        canRename: row.info.exists && row.info.selectable && !this.isSystem(row.info)
+      })),
+      hideUnsubscribed: this.prefs.hideUnsubscribed,
+      kolab: this.prefs.kolab && this.capability("METADATA"),
+      unhideKolab: this.prefs.unhideKolab,
+      acl: this.capability("ACL"),
+      system: { ...this.systemSettings },
+      quota: this.quota(),
+      notice: this.deskNotice
+    };
+  }
+
+  private quota(): { used: number; limit: number } | null {
+    const { quotaUsage, quotaLimit } = this.folderModel;
+    return quotaLimit ? { used: quotaUsage || 0, limit: quotaLimit } : null;
+  }
+
+  private folderName(folder: Folder | undefined): string {
+    if (!folder) return "";
+    return displayName(folder, this.roleOf(folder));
+  }
+
+  /** Eltern für „Neuer Ordner“: vorhandene Ordner mit Unterordnern erlaubt. */
+  private parentChoices(): { value: string; label: string }[] {
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: new Set(), filter: "", hidden: (folder) => this.hiddenFolder(folder), current: "",
+      roleOf: (folder) => this.roleOf(folder), actions: () => []
+    });
+    return [{ value: "", label: "Oberste Ebene" }].concat(rows
+      .filter((row) => row.info.exists && !row.info.noInferiors)
+      .map((row) => ({ value: row.info.fullName, label: `${"\u00a0\u00a0".repeat(row.depth)}${this.folderName(row.info)}` })));
+  }
+
+  private async createFolder(name: string, parent: string, subscribe: boolean): Promise<void> {
+    if (!name.trim()) return;
+    const delimiter = this.folders.find((folder) => folder.fullName === parent)?.delimiter || this.folders[0]?.delimiter || "/";
+    if (delimiter && name.includes(delimiter)) {
+      this.view.notice(`Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`);
+      this.deskNotice = `Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`;
+      return;
+    }
+    await call("FolderCreate", { folder: name.trim(), parent, subscribe: subscribe ? 1 : 0 });
+    if (parent) { this.collapsed.delete(parent); this.writeCollapsed(); }
+    this.deskNotice = `Ordner „${name.trim()}“ angelegt.`;
+    this.view.notice(this.deskNotice);
+    await this.reloadFolders();
+  }
+
+  /** Formulare aus dem Einstellungsabschnitt „Ordner“ und dem Freigabe-Dialog. */
+  private async folderForm(name: string, data: Record<string, string>): Promise<void> {
+    try {
+      this.deskNotice = "";
+      if (name === "folder-create") {
+        await this.createFolder(data.folder || "", data.parent || "", Boolean(data.subscribe));
+        this.view.openFolderSettings("");
+        return;
+      }
+      if (name === "folder-save") {
+        const old = this.folders.find((folder) => folder.fullName === data.oldName);
+        if (!old) return;
+        const leaf = (data.name || old.name).trim();
+        const delimiter = old.delimiter || "/";
+        if (!leaf) throw new ApiError(0, "Name eintragen.");
+        if (delimiter && leaf.includes(delimiter)) throw new ApiError(0, `Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`);
+        const parent = data.parent ?? old.parent;
+        const target = parent ? `${parent}${delimiter}${leaf}` : leaf;
+        const kolab = this.prefs.kolab && this.capability("METADATA")
+          ? { type: KOLAB_KEYS[0], value: data.kolab || "" }
+          : null;
+        if (target !== old.fullName) {
+          await call("FolderRename", {
+            oldName: old.fullName, newName: target, subscribe: data.subscribe ? 1 : 0, checkable: data.checkable ? 1 : 0,
+            ...(kolab ? { kolab } : {})
+          });
+          this.deskNotice = `„${folderPath(old)}“ heißt jetzt „${target}“.`;
+        } else {
+          if (Boolean(data.subscribe) !== old.subscribed && this.roleOf(old) !== "inbox") await call("FolderSubscribe", { folder: old.fullName, subscribe: data.subscribe ? 1 : 0 });
+          if (old.selectable && Boolean(data.checkable) !== old.checkable) await call("FolderCheckable", { folder: old.fullName, checkable: data.checkable ? 1 : 0 });
+          if (kolab && (data.kolab || "") !== old.kolabType) await call("FolderSetMetadata", { folder: old.fullName, key: KOLAB_KEYS[0], value: data.kolab || "" });
+          this.deskNotice = "Gespeichert.";
+        }
+        this.view.notice(this.deskNotice);
+        await this.reloadFolders(this.folder === old.fullName ? target : "");
+        this.view.openFolderSettings("");
+        return;
+      }
+      if (name === "folder-system") {
+        await call("SystemFoldersUpdate", { sent: data.sent || "", drafts: data.drafts || "", junk: data.junk || "", trash: data.trash || "", archive: data.archive || "" });
+        const app = await loadApp();
+        this.readPrefs(app);
+        this.resolveSystemFolders(app);
+        this.composeData = app;
+        this.configureComposer();
+        this.deskNotice = "Systemordner gespeichert.";
+        this.view.notice(this.deskNotice);
+        this.paintFolders();
+        return;
+      }
+      if (name === "folder-options") {
+        const params: Record<string, unknown> = { HideUnsubscribed: data.hideUnsubscribed ? 1 : 0 };
+        if (this.prefs.kolab) params.UnhideKolabFolders = data.unhideKolab ? 1 : 0;
+        await call("SettingsUpdate", params);
+        this.prefs.hideUnsubscribed = Boolean(data.hideUnsubscribed);
+        this.prefs.unhideKolab = Boolean(data.unhideKolab);
+        this.deskNotice = "Gespeichert.";
+        this.view.notice(this.deskNotice);
+        await this.reloadFolders();
+        return;
+      }
+      if (name === "folder-acl-set") {
+        const rights = ["l", "r", "s", "w", "i", "p", "k", "x", "t", "e", "a"].filter((letter) => data[`r_${letter}`]).join("");
+        if (!data.identifier?.trim()) throw new ApiError(0, "Benutzer oder Gruppe eintragen.");
+        await call("FolderSetACL", { folder: data.folder, identifier: data.identifier.trim(), rights });
+        await this.showAcl(data.folder || "", "");
+        return;
+      }
+    } catch (error) {
+      this.deskNotice = explain(error);
+      if (name === "folder-acl-set") await this.showAcl(data.folder || "", explain(error));
+      else {
+        this.view.settingsNotice(explain(error));
+        this.view.setFolderDesk(this.folderDesk());
+        this.view.settingsNotice(explain(error));
+      }
+    }
+  }
+
+  private async showAcl(folder: string, error: string): Promise<void> {
+    try {
+      const entries = parseAcl(await call("FolderACL", { folder }));
+      this.view.showAcl(folder, renderAcl(folder, entries, error));
+    } catch (failure) {
+      this.view.showAcl(folder, renderAcl(folder, [], error || explain(failure)));
+    }
+  }
+
+  /** Ordneraktionen aus Seitenleiste, Menü und Einstellungen. */
+  private async folderAction(name: string, data: Record<string, string>): Promise<void> {
+    const folder = this.folders.find((item) => item.fullName === data.target);
+    try {
+      switch (name) {
+        case "f-toggle":
+          if (!data.target) return;
+          if (this.collapsed.has(data.target)) this.collapsed.delete(data.target);
+          else this.collapsed.add(data.target);
+          this.writeCollapsed();
+          this.paintFolders();
+          return;
+        case "f-filter":
+          this.folderFilter = data.q || "";
+          this.paintFolders();
+          return;
+        case "f-desk":
+          this.view.setFolderDesk(this.folderDesk());
+          return;
+        case "f-create":
+        case "f-create-sub": {
+          const result = await this.view.folderDialog({
+            title: name === "f-create" ? "Ordner anlegen" : `Neuer Unterordner in „${this.folderName(folder)}“`,
+            parents: this.parentChoices(),
+            parent: name === "f-create-sub" ? data.target || "" : ""
+          });
+          if (result) await this.createFolder(result.name, result.parent, result.subscribe);
+          return;
+        }
+        case "f-rename": {
+          if (!folder) return;
+          const next = await this.view.ask("Ordner umbenennen", "Neuer Name", folder.name);
+          if (!next || next === folder.name) return;
+          if (folder.delimiter && next.includes(folder.delimiter)) {
+            this.view.notice(`Der Name darf das Trennzeichen „${folder.delimiter}“ nicht enthalten.`);
+            return;
+          }
+          const target = folder.parent ? `${folder.parent}${folder.delimiter}${next}` : next;
+          await call("FolderRename", { oldName: folder.fullName, newName: target, subscribe: folder.subscribed ? 1 : 0, checkable: folder.checkable ? 1 : 0 });
+          if (this.collapsed.delete(folder.fullName)) { this.collapsed.add(target); this.writeCollapsed(); }
+          this.view.notice(`Umbenannt in „${next}“.`);
+          await this.reloadFolders(this.folder === folder.fullName ? target : "");
+          return;
+        }
+        case "f-read-all": {
+          if (!folder) return;
+          await call("MessageSetSeenToAll", { folder: folder.fullName, setAction: 1 });
+          folder.unread = 0;
+          if (folder.fullName === this.folder) this.messages.forEach((message) => { if (!seen(message.flags)) message.flags.push("\\Seen"); });
+          this.view.notice(`Alle Mails in „${this.folderName(folder)}“ sind gelesen.`);
+          this.paintFolders();
+          if (folder.fullName === this.folder) this.paintList();
+          return;
+        }
+        case "f-clear": {
+          if (!folder) return;
+          const ok = await this.view.confirm(
+            `„${this.folderName(folder)}“ leeren?`,
+            `Alle ${folder.total} Mails in diesem Ordner werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.`,
+            "Endgültig leeren"
+          );
+          if (!ok) return;
+          await call("FolderClear", { folder: folder.fullName });
+          this.view.notice(`„${this.folderName(folder)}“ ist leer.`);
+          if (folder.fullName === this.folder) {
+            this.current = null;
+            this.selected = 0;
+            this.checked.clear();
+            this.view.setReader(null, "", "");
+          }
+          await this.reloadFolders();
+          if (folder.fullName === this.folder) await this.loadList(false);
+          return;
+        }
+        case "f-delete": {
+          if (!folder || folder.total > 0 || this.isSystem(folder)) return;
+          const ok = await this.view.confirm(`Ordner „${folder.name}“ löschen?`, "Der leere Ordner wird auf dem Server gelöscht.", "Ordner löschen");
+          if (!ok) return;
+          await call("FolderDelete", { folder: folder.fullName });
+          this.collapsed.delete(folder.fullName);
+          this.writeCollapsed();
+          this.deskNotice = `Ordner „${folder.name}“ gelöscht.`;
+          this.view.notice(this.deskNotice);
+          await this.reloadFolders(this.folder === folder.fullName ? "INBOX" : "");
+          return;
+        }
+        case "f-subscribe":
+          if (!folder) return;
+          await call("FolderSubscribe", { folder: folder.fullName, subscribe: folder.subscribed ? 0 : 1 });
+          this.deskNotice = folder.subscribed ? `„${folder.name}“ nicht mehr abonniert.` : `„${folder.name}“ abonniert.`;
+          await this.reloadFolders();
+          return;
+        case "f-checkable":
+          if (!folder) return;
+          await call("FolderCheckable", { folder: folder.fullName, checkable: folder.checkable ? 0 : 1 });
+          this.deskNotice = folder.checkable ? `„${folder.name}“ wird nicht mehr geprüft.` : `„${folder.name}“ wird auf neue Mail geprüft.`;
+          await this.reloadFolders();
+          return;
+        case "f-acl":
+          if (folder) await this.showAcl(folder.fullName, "");
+          return;
+        case "f-acl-delete": {
+          if (!data.target || !data.id) return;
+          const ok = await this.view.confirm(`Freigabe für „${data.id}“ entfernen?`, "Diese Person oder Gruppe verliert den Zugriff auf den Ordner.", "Entfernen");
+          if (!ok) return;
+          await call("FolderDeleteACL", { folder: data.target, identifier: data.id });
+          await this.showAcl(data.target, "");
+          return;
+        }
+        default:
+          return;
+      }
+    } catch (error) {
+      this.deskNotice = explain(error);
+      this.view.notice(explain(error));
+      this.view.setFolderDesk(this.folderDesk());
     }
   }
 
@@ -471,6 +857,8 @@ class Session {
     this.folder = fullName;
     this.offset = 0;
     this.search = "";
+    this.threadUid = 0;
+    this.view.setSearch("", new Set());
     this.selected = 0;
     this.current = null;
     this.checked.clear();
@@ -480,28 +868,45 @@ class Session {
   }
 
   private paintFolders(): void {
-    const rows: FolderRow[] = this.folders
-      .slice()
-      .sort((a, b) => Number(b.role === "inbox") - Number(a.role === "inbox") || a.fullName.localeCompare(b.fullName))
-      .map((folder) => {
-        const parts = folder.delimiter ? folder.fullName.split(folder.delimiter).filter(Boolean) : [folder.fullName];
-        return {
-          fullName: folder.fullName,
-          name: folder.name,
-          depth: Math.min(2, Math.max(0, parts.length - 1)),
-          unread: folder.unread,
-          current: folder.fullName === this.folder,
-          inbox: folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX",
-          role: this.roleOf(folder)
-        };
-      });
-    this.view.setFolders(rows);
+    const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
+    const rows = flattenTree(roots, {
+      collapsed: this.collapsed,
+      filter: this.folderFilter,
+      hidden: (folder) => this.hiddenFolder(folder),
+      current: this.folder,
+      roleOf: (folder) => this.roleOf(folder),
+      actions: (folder, children) => this.folderActions(folder, children)
+    });
+    const current = this.folders.find((folder) => folder.fullName === this.folder);
+    this.view.setFolders({
+      rows,
+      count: this.folders.filter((folder) => !this.hiddenFolder(folder)).length,
+      filter: this.folderFilter,
+      currentName: this.folderName(current),
+      quota: this.quota(),
+      canCreate: true
+    });
+    this.view.setFolderDesk(this.folderDesk());
+    this.paintMode();
     this.paintTitle();
+  }
+
+  private paintMode(): void {
+    const mode: ListMode = {
+      sortable: this.capability("SORT"),
+      sort: this.sort,
+      threadsAvailable: this.threadsAvailable(),
+      useThreads: this.prefs.useThreads,
+      grouped: this.prefs.listGrouped,
+      threadOpen: this.threadUid ? (this.threadSubject || "(ohne Betreff)") : ""
+    };
+    this.view.setListMode(mode);
   }
 
   /** Rolle für das Symbol: Server-Rolle oder die erkannten System-Ordner. */
   private roleOf(folder: Folder): string {
-    if (folder.role) return folder.role;
+    if (folder.role) return folder.role === "spam" ? "junk" : folder.role;
+    if (folder.fullName.toUpperCase() === "INBOX") return "inbox";
     if (folder.fullName === this.archiveFolder) return "archive";
     if (folder.fullName === this.sentFolder) return "sent";
     if (folder.fullName === this.draftsFolder) return "drafts";
@@ -519,7 +924,7 @@ class Session {
 
   /** Suchstring, den der Server bekommt: KI-Kategorie oder die Suche (Format `name=wert&…` wie `AdvancedSearch.js`). */
   private listQuery(): string {
-    const keyword = (name: string) => `keyword=${encodeURIComponent("$ai_" + name)}`;
+    const keyword = (name: string) => `keyword=${encodeValue("$ai_" + name)}`;
     if (this.category === "needs_reply") return `${keyword("needs_reply")}&unanswered`;
     if (["personal", "newsletter", "notification", "invoice"].includes(this.category)) return keyword(this.category);
     return this.search;
@@ -527,7 +932,7 @@ class Session {
 
   /** Kennung des Listenkontexts; Antworten zu einem anderen Kontext werden verworfen. */
   private listContext(): string {
-    return JSON.stringify([this.accountHash, this.folder, this.listQuery()]);
+    return JSON.stringify([this.accountHash, this.folder, this.listQuery(), this.sort, this.threadsOn(), this.threadUid]);
   }
 
   private async loadList(append: boolean, quiet = false): Promise<void> {
@@ -544,14 +949,17 @@ class Session {
         offset: start,
         limit: quiet && !append ? Math.max(this.pageSize, this.messages.length) : this.pageSize,
         search: query,
-        sort: "",
-        uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
+        sort: this.capability("SORT") ? this.sort : "",
+        uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0,
+        ...(this.threadsOn() ? { useThreads: 1, threadAlgorithm: this.prefs.threadAlgorithm, threadUid: this.threadUid } : {})
       });
       if (stale()) return;
       const batch = (result["@Collection"] || []).map((item) => this.parseMessage(item));
       this.messages = append ? this.messages.concat(batch) : batch;
       this.offset = start + batch.length;
-      this.total = Number(result.folder?.totalEmails ?? result.totalEmails ?? this.messages.length);
+      this.total = this.threadsOn() && !this.threadUid && Number(result.totalThreads)
+        ? Number(result.totalThreads)
+        : Number(result.totalEmails ?? result.folder?.totalEmails ?? this.messages.length);
       const known = this.folders.find((folder) => folder.fullName === this.folder);
       if (known && result.folder) {
         if (result.folder.unreadEmails != null) known.unread = Number(result.folder.unreadEmails);
@@ -630,6 +1038,8 @@ class Session {
       isSpam: Boolean(item.isSpam),
       hasVirus: Boolean(item.hasVirus),
       readReceipt: String(item.readReceipt || ""),
+      threads: Array.isArray(item.threads) ? item.threads.map(Number).filter(Boolean) : [],
+      threadUnseen: Array.isArray(item.threadUnseen) ? item.threadUnseen.map(Number).filter(Boolean) : [],
       headers,
       auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
     };
@@ -639,8 +1049,36 @@ class Session {
     return this.prefs.hideDeleted ? this.messages.filter((message) => !hasFlag(message.flags, "\\deleted")) : this.messages;
   }
 
+  /** Datumsgruppen nur bei Datumssortierung und nicht in einer geöffneten Unterhaltung. */
+  private grouping(): boolean {
+    return this.prefs.listGrouped && !this.threadUid && (this.sort === "" || this.sort === "DATE");
+  }
+
+  private groupOf(stamp: number): string {
+    if (!stamp) return "Ohne Datum";
+    const date = new Date(stamp * 1000);
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const day = 86_400_000;
+    if (date >= start) return "Heute";
+    if (date.getTime() >= start.getTime() - day) return "Gestern";
+    const weekStart = new Date(start.getTime() - ((start.getDay() + 6) % 7) * day);
+    if (date >= weekStart) return "Diese Woche";
+    return date.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  }
+
   private rows(): MessageRow[] {
-    return this.visible().map((message) => ({
+    const grouped = this.grouping();
+    let last = "";
+    return this.visible().map((message) => {
+      const group = grouped ? this.groupOf(message.date) : "";
+      const start = group && group !== last ? group : "";
+      if (group) last = group;
+      const threaded = this.threadsOn() && !this.threadUid && message.threads.length > 1;
+      return {
+      group: start,
+      threadCount: threaded ? message.threads.length : 0,
+      threadUnseen: threaded ? message.threadUnseen.length : 0,
       uid: message.uid,
       who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
       subject: message.subject,
@@ -655,7 +1093,8 @@ class Session {
       attachment: message.hasAttachment,
       checked: this.checked.has(message.uid),
       deleted: hasFlag(message.flags, "\\deleted")
-    }));
+      };
+    });
   }
 
   private paintList(): void {
@@ -668,6 +1107,9 @@ class Session {
 
   private async setSearch(query: string): Promise<void> {
     this.search = query;
+    this.threadUid = 0;
+    this.paintMode();
+    this.view.setSearch(query, activeQuick(query));
     this.category = "all";
     this.view.pressCategory("all");
     this.offset = 0;
@@ -1114,13 +1556,12 @@ class Session {
   }
 
   private pickerFolders(): PickerFolder[] {
-    return this.folders
-      .slice()
-      .sort((a, b) => Number(b.role === "inbox") - Number(a.role === "inbox") || a.fullName.localeCompare(b.fullName))
-      .map((folder) => {
-        const parts = folder.delimiter ? folder.fullName.split(folder.delimiter).filter(Boolean) : [folder.fullName];
-        return { fullName: folder.fullName, name: folder.name, depth: Math.min(4, parts.length - 1), role: this.roleOf(folder) };
-      });
+    const rows = flattenTree(buildTree(this.folders, (folder) => this.roleOf(folder)), {
+      collapsed: new Set(), filter: "", hidden: (folder) => this.hiddenFolder(folder), current: "",
+      roleOf: (folder) => this.roleOf(folder), actions: () => []
+    });
+    return rows.filter((row) => row.info.selectable)
+      .map((row) => ({ fullName: row.info.fullName, name: this.folderName(row.info), depth: row.depth, role: row.role }));
   }
 
   private paintBulk(): void {
@@ -1180,7 +1621,13 @@ class Session {
         if (folder.fullName === this.folder && uidNext && uidNext !== folder.uidNext) changed = true;
         folder.unread = Number(item.unreadEmails || 0);
         folder.total = Number(item.totalEmails || 0);
+        if (uidNext) folder.uidNext = uidNext;
       });
+      if (result && typeof result === "object" && "quotaLimit" in result) {
+        const raw = result as Record<string, unknown>;
+        this.folderModel.quotaUsage = raw.quotaUsage == null ? null : Number(raw.quotaUsage);
+        this.folderModel.quotaLimit = raw.quotaLimit == null ? null : Number(raw.quotaLimit);
+      }
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
       if (inbox) {
         const item = fresh.get(inbox.fullName);
@@ -1525,7 +1972,7 @@ class Session {
       case "addr-search":
         if (data.email) {
           const input = document.querySelector("#search") as HTMLInputElement | null;
-          const query = `from=${encodeURIComponent(data.email)}`;
+          const query = `from=${encodeValue(data.email)}`;
           if (input) input.value = query;
           await this.setSearch(query);
         }
@@ -1545,6 +1992,52 @@ class Session {
       case "accounts":
         await this.loadAccounts();
         return;
+      case "sort":
+        if (!this.capability("SORT")) return;
+        this.sort = data.sort || "";
+        await this.reloadList();
+        return;
+      case "threads-toggle":
+        if (!this.threadsAvailable()) return;
+        this.prefs.useThreads = !this.prefs.useThreads;
+        this.threadUid = 0;
+        try { await call("SettingsUpdate", { UseThreads: this.prefs.useThreads ? 1 : 0 }); } catch (error) { this.view.notice(explain(error)); }
+        await this.reloadList();
+        return;
+      case "group-toggle":
+        this.prefs.listGrouped = !this.prefs.listGrouped;
+        try { await call("SettingsUpdate", { listGrouped: this.prefs.listGrouped ? 1 : 0 }); } catch (error) { this.view.notice(explain(error)); }
+        this.paintMode();
+        this.paintList();
+        return;
+      case "thread": {
+        if (!this.threadsOn() || this.threadUid) return;
+        const uid = ref || this.selected;
+        const row = this.messages.find((item) => item.uid === uid);
+        if (!row || row.threads.length < 2) return;
+        this.threadUid = row.uid;
+        this.threadSubject = row.subject;
+        await this.reloadList();
+        return;
+      }
+      case "thread-back":
+        if (!this.threadUid) return;
+        this.threadUid = 0;
+        await this.reloadList();
+        return;
+      case "quick": {
+        const flag = data.flag as QuickFlag;
+        if (!["unseen", "flagged", "attachment"].includes(flag)) return;
+        const base = data.query ?? this.search;
+        await this.setSearch(toggleQuick(base, flag, this.capability("MULTISEARCH")));
+        return;
+      }
+      case "adv-search": {
+        const query = data.query ?? this.search;
+        const keywords = [...new Set(this.messages.flatMap((item) => item.flags).filter((flag) => !SYSTEM_FLAGS.test(flag)))].sort();
+        this.view.openSearch(parseSearch(query), { multisearch: this.capability("MULTISEARCH"), keywords });
+        return;
+      }
       case "switch":
         if (!data.email) return;
         try {
@@ -1555,8 +2048,20 @@ class Session {
         }
         return;
       default:
+        if (name.startsWith("f-")) await this.folderAction(name, data);
         return;
     }
+  }
+
+  /** Liste ab Offset 0 neu laden; Suche und Ordner bleiben. */
+  private async reloadList(): Promise<void> {
+    this.offset = 0;
+    this.selected = 0;
+    this.current = null;
+    this.checked.clear();
+    this.view.setReader(null, "", "");
+    this.paintMode();
+    await this.loadList(false);
   }
 
   private strip(): StripState {

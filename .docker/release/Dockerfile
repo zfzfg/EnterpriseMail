@@ -2,15 +2,12 @@
 
 FROM alpine:3.24.3 AS builder
 RUN apk add --no-cache php85 php85-json php-phar php-zip
-RUN apk add --no-cache npm
-RUN npm install -g gulp yarn
 WORKDIR /source
-COPY package.json yarn.lock ./
-RUN yarn install
 COPY . .
 # Patch release.php with hotfix from: https://github.com/xgbstar1/snappymail-docker/blob/main/Dockerfile, so that release.php doesn't fail with error
 RUN sed -i 's_^if.*rename.*snappymail.v.0.0.0.*$_if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {_' cli/release.php  || true
-RUN php release.php
+# Der Fork baut das Frontend vorab (npm --prefix ui run build) und committet static/; gulp/npm braucht es nicht.
+RUN php release.php --skip-gulp
 RUN set -eux; \
     VERSION=$( ls build/dist/releases/webmail ); \
     ls -al build/dist/releases/webmail/$VERSION/snappymail-$VERSION.tar.gz; \
