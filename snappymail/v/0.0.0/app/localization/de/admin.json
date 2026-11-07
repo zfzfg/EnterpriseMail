@@ -187,5 +187,22 @@
 		"InvalidPluginPackage": "Erweiterungspaket ist ungültig",
 		"UnsupportedPluginPackage": "Erweiterungspaket wird nicht unterstützt",
 		"UnknownError": "Unbekannter Fehler"
+	},
+	"UI": {
+		"PLUGINS": "Plugins und Pakete",
+		"MB": "Angabe in MB. 0 hebt die Grenze auf.",
+		"GNUPG": "GnuPG erlauben",
+		"OPENPGP": "OpenPGP erlauben",
+		"TOTP_SETUP": "TOTP einrichten",
+		"TOTP_CLEAR": "TOTP entfernen",
+		"PASSWORD_MISMATCH": "Die neuen Passwörter stimmen nicht überein.",
+		"SAVED": "Gespeichert.",
+		"TEST_CONNECTION": "Verbindung testen",
+		"AUTOCONFIG": "Autoconfig",
+		"MATCH": "Domain-Abgleich testen",
+		"CACHE": "Cache leeren",
+		"BACKUP": "Sicherung herunterladen",
+		"UPGRADE": "Core aktualisieren",
+		"UPGRADE_SURE": "SnappyMail wirklich aktualisieren?"
 	}
 }

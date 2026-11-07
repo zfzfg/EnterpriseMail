@@ -427,7 +427,7 @@ Umgesetzt über die Server-Aktionen in `ui/src/crypto.ts` (GnuPG, S/MIME). `SMim
 
 ---
 
-## 10. Phase 8: Admin
+## 10. Phase 8: Admin – ERLEDIGT
 
 Alt: `dev/Settings/Admin/*.js`, `Views/Admin/*.html`, `dev/View/Popup/{Domain,DomainAlias,Plugin}.js`.
 Neues Verzeichnis `ui/src/admin/`. Navigation links wie in den Benutzer-Einstellungen, dichte Formulare, dieselben Symbole.
@@ -445,6 +445,8 @@ Neues Verzeichnis `ui/src/admin/`. Navigation links wie in den Benutzer-Einstell
 | Über | Version, Update-Prüfung, Core-Update nur mit Bestätigung, Cache leeren, Sicherung | `AdminInfo`, `AdminUpgradeCore`, `AdminClearCache`, `AdminBackup` / `ServiceBackup` |
 
 Hinweis „schwaches Admin-Passwort“ gibt es schon (`weak` in `admin.ts`), dort auf den Abschnitt Sicherheit verlinken.
+
+Umgesetzt in `ui/src/admin.ts` und `ui/src/admin/`. Kein Theme-Feld. Core-Update nur nach Bestätigung. In der Vorschau ohne laufendes Admin-Passwort nicht jeder Abschnitt live gespeichert.
 
 ---
 
@@ -493,7 +495,7 @@ Vorgehen:
 | 5 | Kontakte | Erledigt |
 | 6 | Sieve-Formular, Abwesenheitsnotiz | Erledigt |
 | 7 | Verschlüsselung | Erledigt |
-| 8 | Admin | Mittel |
+| 8 | Admin | Erledigt |
 | 9 | Plugins | Nach Rückfrage beim Benutzer |
 
 Große Phasen in mehrere Commits teilen, zum Beispiel Phase 1 in „Mehrfachauswahl und Sammelaktionen“, „Externe Bilder und Darstellung“, „Briefkopf und Briefmenü“.

@@ -1,4 +1,10 @@
 import { adminCall, explain, loadAdminApp } from "./api";
+import { paintAbout } from "./admin/about";
+import { paintConfig } from "./admin/config";
+import { paintDomains } from "./admin/domains";
+import { paintPackages } from "./admin/packages";
+import { paintBranding, paintContacts, paintGeneral, paintLogin, paintSecurity } from "./admin/settings-forms";
+import { esc, type AppSnap, type Cfg, type Ctx, type Section } from "./admin/util";
 import { icon } from "./icons";
 import { t } from "./i18n";
 import { applyAppearance, readAppearance, watchSystemTheme } from "./theme";
@@ -6,25 +12,22 @@ import { applyAppearance, readAppearance, watchSystemTheme } from "./theme";
 applyAppearance(readAppearance());
 watchSystemTheme(() => applyAppearance(readAppearance()));
 
-interface Domain {
-  name: string;
-  disabled: boolean;
-  alias: boolean;
-}
-
-interface AdminData {
-  Auth?: boolean;
-  weakPassword?: boolean;
-  Admin?: { path?: string };
-}
+const NAV: Array<[Section, string, string]> = [
+  ["general", "SETTINGS_LABELS.GENERAL", "Allgemein"],
+  ["login", "SETTINGS_LABELS.LOGIN", "Anmeldung"],
+  ["domains", "SETTINGS_LABELS.DOMAINS", "Domains"],
+  ["contacts", "SETTINGS_LABELS.CONTACTS", "Kontakte"],
+  ["security", "SETTINGS_LABELS.SECURITY", "Sicherheit"],
+  ["branding", "SETTINGS_LABELS.BRANDING", "Branding"],
+  ["packages", "UI.PLUGINS", "Plugins und Pakete"],
+  ["config", "SETTINGS_LABELS.CONFIG", "Konfigurationsdatei"],
+  ["about", "SETTINGS_LABELS.ABOUT", "Über"]
+];
 
 let adminKey = "admin";
-
-function esc(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
-  }[char] ?? char));
-}
+let section: Section = "general";
+let app: AppSnap = {};
+let cfg: Cfg = {};
 
 function boot(root: HTMLElement): void {
   void start(root);
@@ -32,9 +35,10 @@ function boot(root: HTMLElement): void {
 
 async function start(root: HTMLElement): Promise<void> {
   try {
-    const data = await loadAdminApp() as AdminData;
+    const data = await loadAdminApp() as AppSnap & { Auth?: boolean };
     adminKey = data.Admin?.path || "admin";
-    if (data.Auth) await showDomains(root, Boolean(data.weakPassword));
+    app = data;
+    if (data.Auth) await showShell(root);
     else showLogin(root, "");
   } catch (error) {
     root.replaceChildren(Object.assign(document.createElement("p"), {
@@ -69,6 +73,7 @@ function showLogin(root: HTMLElement, error: string): void {
     const data = new FormData(form);
     void submitLogin(root, form, String(data.get("login") || ""), String(data.get("password") || ""), String(data.get("totp") || ""));
   });
+  form.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
 }
 
 async function submitLogin(root: HTMLElement, form: HTMLFormElement, login: string, password: string, totp: string): Promise<void> {
@@ -82,9 +87,11 @@ async function submitLogin(root: HTMLElement, form: HTMLFormElement, login: stri
   button.disabled = true;
   slot.hidden = true;
   try {
-    const data = await adminCall<AdminData>(adminKey, "AdminLogin", { Login: login.trim(), Password: password, TOTP: totp });
+    const data = await adminCall<AppSnap>(adminKey, "AdminLogin", { Login: login.trim(), Password: password, TOTP: totp });
     if (data.Admin?.path) adminKey = data.Admin.path;
-    await showDomains(root, Boolean(data.weakPassword));
+    app = data;
+    section = "general";
+    await showShell(root);
   } catch (error) {
     button.disabled = false;
     slot.hidden = false;
@@ -92,100 +99,102 @@ async function submitLogin(root: HTMLElement, form: HTMLFormElement, login: stri
   }
 }
 
-async function showDomains(root: HTMLElement, weak: boolean): Promise<void> {
-  root.innerHTML = `
-    <main class="admin">
-      <div class="admin-head">
-        <h1 class="title">${esc(t("TOP_PANEL.LABEL_ADMIN_PANEL", "Adminpanel"))}</h1>
-        <span class="spacer"></span>
-        <button type="button" class="text-btn" data-action="logout">${icon("logout")}<span class="btn-label">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
-      </div>
-      ${weak ? `<p class="error">${esc(t("TAB_DOMAINS.WEAK_PASSWORD", "Das Admin-Passwort steht noch in der Standarddatei."))}</p>` : ""}
-      <p class="mono">${esc(t("SETTINGS_LABELS.DOMAINS", "Domains"))}</p>
-      <p class="error" id="admin-error" hidden></p>
-      <ul class="set-list" id="domains"></ul>
-      <dialog id="confirm" aria-labelledby="confirm-title">
-        <div class="dialog-body">
-          <h2 id="confirm-title" class="title title-md">${esc(t("TAB_DOMAINS.DELETE_ARE_YOU_SURE", "Sind Sie sicher?"))}</h2>
-          <div class="dialog-actions">
-            <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-            <button type="button" class="danger" value="ok">${icon("delete")}<span class="btn-label">${esc(t("GLOBAL.DELETE", "Löschen"))}</span></button>
+function ctx(root: HTMLElement): Ctx {
+  return {
+    key: adminKey,
+    app,
+    cfg,
+    goto(next) {
+      section = next;
+      void showShell(root);
+    },
+    note(message, error = false) {
+      const slot = root.querySelector("#admin-note") as HTMLElement | null;
+      if (!slot) return;
+      slot.hidden = !message;
+      slot.className = error ? "error" : "quiet";
+      slot.textContent = message;
+    },
+    async reload() {
+      cfg = await adminCall<Cfg>(adminKey, "AdminSettingsGet");
+      const fresh = await loadAdminApp() as AppSnap;
+      if (fresh.Auth) app = fresh;
+    },
+    call(action, params = {}) {
+      return adminCall(adminKey, action, params);
+    }
+  };
+}
+
+async function showShell(root: HTMLElement): Promise<void> {
+  const keep = root.querySelector("#admin-slot");
+  if (!keep) {
+    root.innerHTML = `
+      <main class="admin">
+        <div class="admin-head">
+          <h1 class="title">${esc(t("TOP_PANEL.LABEL_ADMIN_PANEL", "Adminpanel"))}</h1>
+          <span class="spacer"></span>
+          <button type="button" class="text-btn" data-action="logout">${icon("logout")}<span class="btn-label">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
+        </div>
+        <div class="admin-layout">
+          <nav class="settings-nav" aria-label="${esc(t("TOP_PANEL.LABEL_ADMIN_PANEL", "Adminpanel"))}"></nav>
+          <div class="admin-main">
+            <p class="error" id="weak" hidden></p>
+            <p id="admin-note" hidden></p>
+            <div id="admin-slot"></div>
           </div>
         </div>
-      </dialog>
-    </main>`;
-  const dialog = root.querySelector("#confirm") as HTMLDialogElement;
-  dialog.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest("button");
-    if (button) dialog.close(button.value);
-  });
-  root.querySelector("[data-action='logout']")?.addEventListener("click", () => {
-    void adminCall(adminKey, "AdminLogout").finally(() => showLogin(root, ""));
-  });
-  await paintDomains(root);
-}
-
-async function paintDomains(root: HTMLElement): Promise<void> {
-  const list = root.querySelector("#domains");
-  const slot = root.querySelector("#admin-error") as HTMLElement | null;
-  if (!list || !slot) return;
-  try {
-    const result = await adminCall<unknown>(adminKey, "AdminDomainList", { includeAliases: "1" });
-    const domains = (Array.isArray(result) ? result : Object.values(result || {})) as Domain[];
-    if (!domains.length) {
-      list.innerHTML = `<li class="quiet">${esc(t("TAB_DOMAINS.EMPTY", "Keine Domains."))}</li>`;
-      return;
-    }
-    list.innerHTML = domains.map((item) => {
-      const name = String(item.name || "");
-      const meta = [item.alias ? t("TAB_DOMAINS.LABEL_ALIAS", "Alias") : "", item.disabled ? t("GLOBAL.INACTIVE", "Inaktiv") : ""].filter(Boolean).join(" · ");
-      const toggle = item.disabled
-        ? t("TAB_DOMAINS.BUTTON_ENABLE", "Aktivieren")
-        : t("TAB_DOMAINS.BUTTON_DISABLE", "Deaktivieren");
-      return `<li class="set-row"><span class="grow"><strong title="${esc(name)}">${esc(name)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span><button type="button" class="text-btn" data-action="toggle" data-name="${esc(name)}" data-disabled="${item.disabled ? "1" : "0"}">${icon(item.disabled ? "check" : "minus")}<span class="btn-label">${esc(toggle)}</span></button><button type="button" class="danger" data-action="delete" data-name="${esc(name)}">${icon("delete")}<span class="btn-label">${esc(t("GLOBAL.DELETE", "Löschen"))}</span></button></li>`;
-    }).join("");
-    list.querySelectorAll<HTMLButtonElement>("[data-action='toggle']").forEach((button) => {
+      </main>`;
+    root.querySelector("[data-action='logout']")?.addEventListener("click", () => {
+      void adminCall(adminKey, "AdminLogout").finally(() => showLogin(root, ""));
+    });
+  }
+  const nav = root.querySelector(".settings-nav");
+  if (nav) {
+    nav.innerHTML = NAV.map(([id, path, label]) =>
+      `<button type="button" class="text-btn" data-section="${id}" aria-pressed="${id === section ? "true" : "false"}">${esc(t(path, label))}</button>`).join("");
+    nav.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((button) => {
       button.addEventListener("click", () => {
-        void run(root, () => adminCall(adminKey, "AdminDomainDisable", {
-          name: button.dataset.name || "",
-          disabled: button.dataset.disabled === "1" ? "0" : "1"
-        }));
+        section = (button.dataset.section || "general") as Section;
+        void showShell(root);
       });
     });
-    list.querySelectorAll<HTMLButtonElement>("[data-action='delete']").forEach((button) => {
-      button.addEventListener("click", () => {
-        void removeDomain(root, button.dataset.name || "");
-      });
-    });
-  } catch (error) {
-    slot.hidden = false;
-    slot.textContent = explain(error);
   }
-}
-
-async function removeDomain(root: HTMLElement, name: string): Promise<void> {
-  const dialog = root.querySelector("#confirm") as HTMLDialogElement | null;
-  if (!dialog || !name) return;
-  dialog.showModal();
-  const ok = await new Promise<boolean>((resolve) => {
-    dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
-  });
-  if (!ok) return;
-  await run(root, () => adminCall(adminKey, "AdminDomainDelete", { name }));
-}
-
-async function run(root: HTMLElement, task: () => Promise<unknown>): Promise<void> {
-  const slot = root.querySelector("#admin-error") as HTMLElement | null;
-  try {
-    await task();
-    if (slot) slot.hidden = true;
-    await paintDomains(root);
-  } catch (error) {
-    if (slot) {
-      slot.hidden = false;
-      slot.textContent = explain(error);
+  const weak = root.querySelector("#weak") as HTMLElement | null;
+  if (weak) {
+    weak.hidden = !app.weakPassword;
+    weak.innerHTML = "";
+    if (app.weakPassword) {
+      weak.append(t("TAB_DOMAINS.WEAK_PASSWORD", "Das Admin-Passwort steht noch in der Standarddatei."), " ");
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "text-btn";
+      link.textContent = t("SETTINGS_LABELS.SECURITY", "Sicherheit");
+      link.addEventListener("click", () => {
+        section = "security";
+        void showShell(root);
+      });
+      weak.append(link);
     }
   }
+  try {
+    if (!Object.keys(cfg).length) cfg = await adminCall<Cfg>(adminKey, "AdminSettingsGet");
+  } catch (error) {
+    ctx(root).note(explain(error), true);
+  }
+  const slot = root.querySelector("#admin-slot");
+  if (!slot) return;
+  slot.innerHTML = "";
+  const current = ctx(root);
+  if (section === "general") paintGeneral(current, slot as HTMLElement);
+  else if (section === "login") paintLogin(current, slot as HTMLElement);
+  else if (section === "branding") paintBranding(current, slot as HTMLElement);
+  else if (section === "contacts") paintContacts(current, slot as HTMLElement);
+  else if (section === "security") paintSecurity(current, slot as HTMLElement);
+  else if (section === "domains") await paintDomains(current, slot as HTMLElement);
+  else if (section === "packages") await paintPackages(current, slot as HTMLElement);
+  else if (section === "config") paintConfig(current, slot as HTMLElement);
+  else await paintAbout(current, slot as HTMLElement);
 }
 
 const root = document.getElementById("app");

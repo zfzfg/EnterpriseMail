@@ -187,5 +187,22 @@
 		"InvalidPluginPackage": "Invalid extension package",
 		"UnsupportedPluginPackage": "Unsupported extension package",
 		"UnknownError": "Unknown error"
+	},
+	"UI": {
+		"PLUGINS": "Plugins and packages",
+		"MB": "Value in MB. 0 removes the limit.",
+		"GNUPG": "Allow GnuPG",
+		"OPENPGP": "Allow OpenPGP",
+		"TOTP_SETUP": "Set up TOTP",
+		"TOTP_CLEAR": "Remove TOTP",
+		"PASSWORD_MISMATCH": "The new passwords do not match.",
+		"SAVED": "Saved.",
+		"TEST_CONNECTION": "Test connection",
+		"AUTOCONFIG": "Autoconfig",
+		"MATCH": "Test domain match",
+		"CACHE": "Clear cache",
+		"BACKUP": "Download backup",
+		"UPGRADE": "Update core",
+		"UPGRADE_SURE": "Really update SnappyMail?"
 	}
 }

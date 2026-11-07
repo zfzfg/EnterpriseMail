@@ -647,15 +647,29 @@ dialog::backdrop { background: color-mix(in srgb, var(--foreground) 32%, transpa
 }
 details > summary { min-height: var(--hit); cursor: pointer; font-weight: 500; }
 .admin {
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 40rem;
+  max-width: 64rem;
   margin: 0 auto;
   padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
 }
 .admin-head { display: flex; align-items: center; gap: 12px; }
+.admin-layout { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 24px; align-items: start; }
+.admin .settings-nav { flex-direction: column; align-items: stretch; position: sticky; top: 0; }
+.admin-main { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.admin [data-for="qr"] svg { width: 160px; height: auto; }
+.cfg { width: 100%; border-collapse: collapse; }
+.cfg th, .cfg td { border-bottom: 1px solid var(--border); padding: 6px 8px 6px 0; text-align: left; vertical-align: top; }
+.cfg th { font-weight: 500; width: 38%; }
+.cfg th .quiet { display: block; font-weight: 400; }
+.cfg input, .cfg select { width: 100%; min-height: var(--hit); background: var(--background); color: var(--foreground); border: 1px solid var(--border); }
+@media (max-width: 799px) {
+  .admin-layout { grid-template-columns: 1fr; }
+  .admin .settings-nav { position: static; flex-direction: row; }
+}
 
 .keys { margin: 0; padding: 0; list-style: none; }
 .keys li { display: flex; justify-content: space-between; gap: 16px; min-height: 32px; align-items: center; }
