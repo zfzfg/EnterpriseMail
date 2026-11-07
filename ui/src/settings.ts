@@ -59,6 +59,11 @@ export interface ScriptRow {
 export interface KeyRow {
   kind: string;
   preview: string;
+  id: string;
+  email: string;
+  secret: boolean;
+  source: "gnupg" | "stored" | "armor";
+  armored: string;
 }
 
 export interface CertRow {
@@ -134,15 +139,14 @@ function identityOf(item: Record<string, unknown>): IdentityRow {
   };
 }
 
-function keyRow(armored: string): KeyRow {
-  const head = armored.split("\n")[0] || "";
-  const kind = /PRIVATE/i.test(head)
+function keyRow(armored: string, source: KeyRow["source"] = "armor", id = "", email = "", secret = /PRIVATE/i.test(armored)): KeyRow {
+  const kind = secret
     ? t("SETTINGS_OPENPGP.TITLE_PRIVATE", "Privat")
-    : /PUBLIC/i.test(head)
+    : /PUBLIC/i.test(armored) || source !== "armor"
       ? t("SETTINGS_OPENPGP.TITLE_PUBLIC", "Öffentlich")
       : t("SETTINGS_DESK.KEYS", "Schlüssel");
   const body = armored.replace(/-----.*?-----/g, "").replace(/\s+/g, "");
-  return { kind, preview: body.slice(0, 32) };
+  return { kind, preview: email || id.slice(-16) || body.slice(0, 32), id, email, secret, source, armored };
 }
 
 async function tryCall<T>(action: string, params: Record<string, unknown> = {}): Promise<{ value: T | null; error: string }> {
@@ -209,6 +213,35 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
   const keys = await tryCall<unknown>("GetPGPKeys");
   if (keys.error) snap.notes.keys = keys.error;
   else snap.keys = values(keys.value).map((item) => text(item)).filter(Boolean).map((item) => keyRow(item));
+
+  const gnu = await tryCall<{ public?: unknown; private?: unknown }>("GnupgGetKeys");
+  if (!gnu.error && gnu.value) {
+    const fromBag = (bag: unknown, secret: boolean): KeyRow[] => values(bag).map((item) => {
+      const row = item as { uids?: { email?: string; name?: string }[]; subkeys?: { fingerprint?: string; keyid?: string }[] };
+      const sub = values(row.subkeys)[0] as { fingerprint?: string; keyid?: string } | undefined;
+      const uid = values(row.uids)[0] as { email?: string; name?: string } | undefined;
+      const id = text(sub?.fingerprint || sub?.keyid);
+      const email = text(uid?.email);
+      if (!id) return null;
+      return keyRow(text(uid?.name) || email || id, "gnupg", id, email, secret);
+    }).filter((item): item is KeyRow => Boolean(item));
+    const listed = [...fromBag(gnu.value.private, true), ...fromBag(gnu.value.public, false)];
+    const ids = new Set(listed.map((item) => item.id));
+    snap.keys = listed.concat(snap.keys.filter((item) => !item.id || !ids.has(item.id)));
+  }
+
+  const stored = await tryCall<{ public?: { id?: string; value?: string }[]; private?: { id?: string; value?: string }[] }>("GetStoredPGPKeys");
+  if (!stored.error && stored.value) {
+    const add = (list: { id?: string; value?: string }[] | undefined, secret: boolean) => values(list).forEach((item) => {
+      const row = item as { id?: string; value?: string };
+      const armored = text(row.value);
+      const id = text(row.id);
+      if (!armored || snap.keys.some((key) => key.id && key.id === id)) return;
+      snap.keys.push(keyRow(armored, "stored", id, "", secret));
+    });
+    add(stored.value.public, false);
+    add(stored.value.private, true);
+  }
 
   const certs = await tryCall<unknown>("SMimeGetCertificates");
   if (certs.error) snap.notes.certs = certs.error;
@@ -401,6 +434,61 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     if (!data.pem?.trim()) throw new ApiError(0, "Zertifikat einfügen.");
     await call("SMimeImportCertificate", { pem: data.pem });
     return "reload";
+  }
+  if (name === "delete-gnupg") {
+    await call("GnupgDeleteKey", { keyId: data.id, isPrivate: data.secret === "1" ? 1 : 0 });
+    return "reload";
+  }
+  if (name === "delete-stored") {
+    const row = snap.keys[Number(data.index)];
+    if (!row?.armored || !row.id) throw new ApiError(0, "Der gespeicherte Schlüssel fehlt.");
+    await call("DeletePGPKey", { key: row.armored, keyId: row.id });
+    return "reload";
+  }
+  if (name === "generate-key") {
+    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    await call("GnupgGenerateKey", { name: data.name || "", email: data.email.trim(), passphrase: data.passphrase || "" });
+    return "reload";
+  }
+  if (name === "store-pair") {
+    if (!data.publicKey?.trim() && !data.privateKey?.trim()) throw new ApiError(0, "Mindestens einen Schlüssel einfügen.");
+    const onServer = (data.publicOn ? 1 : 0) + (data.privateOn ? 2 : 0);
+    const inGnuPG = (data.publicGnu ? 1 : 0) + (data.privateGnu ? 2 : 0);
+    await call("PgpStoreKeyPair", {
+      publicKey: data.publicKey || "",
+      privateKey: data.privateKey || "",
+      onServer,
+      inGnuPG
+    });
+    return "reload";
+  }
+  if (name === "create-cert") {
+    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    await call("SMimeCreateCertificate", {
+      name: data.name || "",
+      email: data.email.trim(),
+      passphrase: data.passphrase || "",
+      privateKey: data.privateKey || ""
+    });
+    return "reload";
+  }
+  if (name === "export-smime") {
+    const pem = await call<string>("SMimeExportPrivateKey", {
+      privateKey: data.privateKey || "",
+      oldPassphrase: data.oldPassphrase || "",
+      newPassphrase: data.newPassphrase || ""
+    });
+    if (typeof pem === "string" && pem) {
+      const url = URL.createObjectURL(new Blob([pem], { type: "application/x-pem-file" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "smime-private.pem";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+    return "keep";
   }
   return "reload";
 }
@@ -798,7 +886,18 @@ export function renderDesk(section: string, snap: SettingsSnapshot | null, edit:
     return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
 
-  const keyRows = snap.keys.map((item) => row(item.kind, item.preview, "")).join("");
+  const keyRows = snap.keys.map((item, index) => row(
+    item.email || item.kind,
+    [item.kind, item.preview, item.source === "gnupg" ? "GnuPG" : item.source === "stored" ? t("OPENPGP.BACKUP_ON_SERVER", "Gespeichert") : ""].filter(Boolean).join(" · "),
+    [
+      button("settings-export", t("GLOBAL.EXPORT", "Exportieren"), { kind: "key", index: String(index) }),
+      item.source === "gnupg"
+        ? button("settings-delete", t("GLOBAL.DELETE", "Löschen"), { kind: "gnupg", id: item.id, secret: item.secret ? "1" : "0" }, true)
+        : item.source === "stored" && item.id
+          ? button("settings-delete", t("GLOBAL.DELETE", "Löschen"), { kind: "stored", index: String(index), id: item.id }, true)
+          : ""
+    ].join("")
+  )).join("");
   const certRows = snap.certs.map((item) => row(
     item.name || item.email || item.id,
     [item.email, item.until ? `${t("CRYPTO.VALID_UNTIL", "Gültig bis")} ${item.until}` : ""].filter(Boolean).join(" · "),
@@ -810,19 +909,46 @@ export function renderDesk(section: string, snap: SettingsSnapshot | null, edit:
     ${check("backup", t("OPENPGP.BACKUP_ON_SERVER", "Auf dem Server verschlüsselt speichern"), true)}
     ${snap.caps.gnupg ? check("gnupg", t("OPENPGP.STORE_IN_GNUPG", "Auf dem Server in GnuPG speichern"), false) : ""}
   `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  const generate = snap.caps.gnupg ? form("generate-key", `
+    ${field(t("GLOBAL.NAME", "Name"), "name", "", "text")}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", snap.currentEmail, "email", "autocomplete=\"email\" required")}
+    ${field(t("CRYPTO.PASSPHRASE", "Passphrase"), "passphrase", "", "password", "autocomplete=\"new-password\"")}
+  `, t("OPENPGP.GENERATE", "Schlüsselpaar erzeugen"), false) : "";
+  const storePair = form("store-pair", `
+    ${field(t("OPENPGP.PUBLIC_KEY", "Öffentlicher Schlüssel"), "publicKey", "", "area", "code")}
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schlüssel"), "privateKey", "", "area", "code")}
+    ${check("publicOn", t("OPENPGP.STORE_PUBLIC", "Öffentlichen Schlüssel speichern"), true)}
+    ${check("privateOn", t("OPENPGP.STORE_PRIVATE", "Privaten Schlüssel speichern"), false)}
+    ${snap.caps.gnupg ? `${check("publicGnu", t("OPENPGP.PUBLIC_GNUPG", "Öffentlichen Schlüssel in GnuPG"), false)}${check("privateGnu", t("OPENPGP.PRIVATE_GNUPG", "Privaten Schlüssel in GnuPG"), false)}` : ""}
+  `, t("GLOBAL.SAVE", "Speichern"), false);
   const certImport = form("import-cert", `
     ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "pem", "", "area", "code")}
   `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  const certCreate = form("create-cert", `
+    ${field(t("GLOBAL.NAME", "Name"), "name", "", "text")}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", snap.currentEmail, "email", "autocomplete=\"email\" required")}
+    ${field(t("CRYPTO.PASSPHRASE", "Passphrase"), "passphrase", "", "password", "autocomplete=\"new-password\"")}
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schlüssel"), "privateKey", "", "area", "code")}
+  `, t("SMIME.CREATE", "Zertifikat erzeugen"), false);
+  const certExport = form("export-smime", `
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schlüssel"), "privateKey", "", "area", "code")}
+    ${field(t("SMIME.OLD_PASSPHRASE", "Bisherige Passphrase"), "oldPassphrase", "", "password", "autocomplete=\"current-password\"")}
+    ${field(t("SMIME.NEW_PASSPHRASE", "Neue Passphrase"), "newPassphrase", "", "password", "autocomplete=\"new-password\"")}
+  `, t("SMIME.EXPORT_KEY", "Privaten Schlüssel exportieren"), false);
   return `${error}
     <p class="mono">${esc(t("SETTINGS_DESK.KEYS", "Schlüssel"))}</p>
-    <p class="quiet">${esc(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschlüsseln stehen an der Identität."))}</p>
+    <p class="quiet">${esc(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschlüsseln stehen an der Identität und im Editor."))}</p>
     ${note(snap.notes.keys, true)}
     <ul class="set-list">${keyRows}</ul>
     ${keyRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
     <details><summary>${esc(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schlüssel importieren"))}</summary>${keyImport}</details>
+    ${generate ? `<details><summary>${esc(t("OPENPGP.GENERATE", "Schlüsselpaar erzeugen"))}</summary>${generate}</details>` : ""}
+    <details><summary>${esc(t("OPENPGP.STORE_PAIR", "Schlüsselpaar speichern"))}</summary>${storePair}</details>
     <p class="mono">${esc(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</p>
     ${note(snap.notes.certs, true)}
     <ul class="set-list">${certRows}</ul>
     ${certRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
-    <details><summary>${esc(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
+    <details><summary>${esc(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>
+    <details><summary>${esc(t("SMIME.CREATE", "Zertifikat erzeugen"))}</summary>${certCreate}</details>
+    <details><summary>${esc(t("SMIME.EXPORT_KEY", "Privaten Schlüssel exportieren"))}</summary>${certExport}</details>`;
 }

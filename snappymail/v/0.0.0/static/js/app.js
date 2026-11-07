@@ -1006,9 +1006,9 @@ function icon(name, label2 = "") {
 // src/i18n.ts
 function dig(bag, path) {
   let cur = bag;
-  for (const part of path.split(".")) {
-    if (!cur || typeof cur !== "object" || !(part in cur)) return void 0;
-    cur = cur[part];
+  for (const part2 of path.split(".")) {
+    if (!cur || typeof cur !== "object" || !(part2 in cur)) return void 0;
+    cur = cur[part2];
   }
   return typeof cur === "string" ? cur : void 0;
 }
@@ -1204,14 +1204,14 @@ function folderPath(folder) {
 }
 function flattenTree(roots, options2) {
   const query = options2.filter.trim().toLowerCase();
-  const rows = [];
+  const rows2 = [];
   const matches = (node) => !query || node.info.name.toLowerCase().includes(query) || node.info.fullName.toLowerCase().includes(query) || node.children.some(matches);
   const walk2 = (list, depth) => {
     list.forEach((node) => {
       if (options2.hidden(node.info) || !matches(node)) return;
       const children = node.children.filter((child) => !options2.hidden(child.info));
       const collapsed = !query && options2.collapsed.has(node.info.fullName);
-      rows.push({
+      rows2.push({
         info: node.info,
         depth,
         role: options2.roleOf(node.info),
@@ -1225,11 +1225,11 @@ function flattenTree(roots, options2) {
     });
   };
   walk2(roots, 0);
-  return rows;
+  return rows2;
 }
-function renderSidebarRows(rows, filtering) {
-  if (!rows.length) return `<p class="quiet folder-empty">${esc2(filtering ? t("FOLDERS_UI.NO_MATCH", "Kein Ordner gefunden.") : t("FOLDERS_UI.EMPTY", "Keine Ordner."))}</p>`;
-  return rows.map((row2) => {
+function renderSidebarRows(rows2, filtering) {
+  if (!rows2.length) return `<p class="quiet folder-empty">${esc2(filtering ? t("FOLDERS_UI.NO_MATCH", "Kein Ordner gefunden.") : t("FOLDERS_UI.EMPTY", "Keine Ordner."))}</p>`;
+  return rows2.map((row2) => {
     const name = displayName(row2.info, row2.role);
     const target = esc2(row2.info.fullName);
     const toggle = row2.hasChildren ? `<button type="button" class="icon-btn ftoggle" data-action="f-toggle" data-target="${target}" tabindex="-1" aria-expanded="${row2.collapsed ? "false" : "true"}" aria-label="${esc2(`${t("FOLDERS_UI.SUBFOLDERS_OF", "Unterordner von")} ${name}`)}" title="${esc2(row2.collapsed ? t("FOLDERS_UI.EXPAND", "Aufklappen") : t("FOLDERS_UI.COLLAPSE", "Zuklappen"))}">${icon(row2.collapsed ? "chevron-right" : "chevron-down")}</button>` : `<span class="ftoggle" aria-hidden="true"></span>`;
@@ -1285,9 +1285,9 @@ function deskButton(action, iconName, label2, attrs, danger = false, pressed, co
 function indentLabel(row2) {
   return `${"\xA0\xA0".repeat(row2.depth)}${displayName(row2.info, row2.role)}`;
 }
-function parentOptions(rows, selected, exclude = "") {
+function parentOptions(rows2, selected, exclude = "") {
   const top = option("", t("FOLDERS_UI.TOP_LEVEL", "Oberste Ebene"), !selected);
-  return top + rows.filter((row2) => row2.info.exists && !row2.info.noInferiors && (!exclude || row2.info.fullName !== exclude && !row2.info.fullName.startsWith(exclude + row2.info.delimiter))).map((row2) => option(row2.info.fullName, indentLabel(row2), row2.info.fullName === selected)).join("");
+  return top + rows2.filter((row2) => row2.info.exists && !row2.info.noInferiors && (!exclude || row2.info.fullName !== exclude && !row2.info.fullName.startsWith(exclude + row2.info.delimiter))).map((row2) => option(row2.info.fullName, indentLabel(row2), row2.info.fullName === selected)).join("");
 }
 function kolabLabel(type) {
   return type ? `Kolab ${t(`SETTINGS_FOLDERS.TYPE_${KOLAB_TYPES[type] || ""}`, KOLAB_LABEL[type] || type)}` : "";
@@ -1299,7 +1299,7 @@ function renderFolderDesk(desk, edit) {
   const quota = desk.quota && desk.quota.limit ? `<p class="quiet">${esc2(t("FOLDERS_UI.QUOTA", "Speicher"))}: ${esc2(quotaText(desk.quota))}</p>` : "";
   const editing = edit?.kind === "folder" && !edit.fresh ? desk.rows.find((row2) => row2.info.fullName === edit.id) : void 0;
   const creating = edit?.kind === "folder" && edit.fresh;
-  const rows = desk.rows.map((row2) => {
+  const rows2 = desk.rows.map((row2) => {
     const name = displayName(row2.info, row2.role);
     const meta = [
       row2.info.selectable ? `${row2.info.total} ${row2.info.total === 1 ? t("FOLDERS_UI.MAIL", "Mail") : t("FOLDERS_UI.MAILS", "Mails")}${row2.info.unread ? `, ${row2.info.unread} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar"),
@@ -1363,7 +1363,7 @@ function renderFolderDesk(desk, edit) {
   return `${error}<p class="mono">${esc2(t("SETTINGS_FOLDERS.LEGEND_FOLDERS", "Ordnerliste"))}</p>${note2}${quota}
     ${optionsForm}
     ${add}
-    <ul class="set-list">${rows.replace("<!--EDIT-->", editForm ? `<li class="set-edit">${editForm}</li>` : "")}</ul>
+    <ul class="set-list">${rows2.replace("<!--EDIT-->", editForm ? `<li class="set-edit">${editForm}</li>` : "")}</ul>
     ${systemForm}`;
 }
 function parseAcl(result) {
@@ -1451,8 +1451,8 @@ function blankRule() {
     actions: [{ type: "move", value: "" }]
   };
 }
-function valueOf(form2, part) {
-  const node = form2.querySelector(`[data-part='${part}']`);
+function valueOf(form2, part2) {
+  const node = form2.querySelector(`[data-part='${part2}']`);
   return node?.value.trim() || "";
 }
 function readRule(node) {
@@ -1997,8 +1997,8 @@ var ACTIONS = [
   ["flag", "SETTINGS_FILTERS.ACT_FLAG", "Markieren"],
   ["stop", "SETTINGS_FILTERS.ACT_STOP", "Weitere Regeln stoppen"]
 ];
-function options(rows, current) {
-  return rows.map(([id, key, fallback]) => `<option value="${id}"${id === current ? " selected" : ""}>${esc3(t(key, fallback))}</option>`).join("");
+function options(rows2, current) {
+  return rows2.map(([id, key, fallback]) => `<option value="${id}"${id === current ? " selected" : ""}>${esc3(t(key, fallback))}</option>`).join("");
 }
 function conditionRow(condition) {
   const size = condition.field === "size";
@@ -2150,7 +2150,7 @@ function paramsOf(row2) {
 function flat(value) {
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.map((part) => typeof part === "string" ? part : "").filter(Boolean).join(" ");
+  if (Array.isArray(value)) return value.map((part2) => typeof part2 === "string" ? part2 : "").filter(Boolean).join(" ");
   return "";
 }
 function parts(value, count) {
@@ -2163,22 +2163,22 @@ function pref(value) {
 }
 function asCard(card) {
   if (Array.isArray(card) && String(card[0]).toLowerCase() === "vcard" && Array.isArray(card[1])) {
-    const rows = card[1].filter(Array.isArray).map((row2) => {
+    const rows2 = card[1].filter(Array.isArray).map((row2) => {
       const item = row2;
       return [String(item[0] || ""), paramsOf(item), String(item[2] || "text"), item[3]];
     });
     const groups = Array.isArray(card[2]) ? [card[2]] : [];
-    return groups.length ? ["vcard", rows, ...groups] : ["vcard", rows];
+    return groups.length ? ["vcard", rows2, ...groups] : ["vcard", rows2];
   }
   return ["vcard", [["version", {}, "text", "4.0"]]];
 }
 function writeProp(card, name, value) {
   const next = asCard(card);
-  const rows = next[1];
-  const index = rows.findIndex((row2) => propName(row2) === name.toLowerCase());
+  const rows2 = next[1];
+  const index = rows2.findIndex((row2) => propName(row2) === name.toLowerCase());
   const line2 = [name, {}, "text", value];
-  if (index >= 0) rows[index] = line2;
-  else rows.push(line2);
+  if (index >= 0) rows2[index] = line2;
+  else rows2.push(line2);
   return next;
 }
 function rowsNamed(card, name) {
@@ -2229,7 +2229,7 @@ function parseCard(raw) {
     return { pobox: value[0], ext: value[1], street: value[2], locality: value[3], region: value[4], code: value[5], country: value[6] };
   });
   const tags = rowsNamed(source, "categories")[0];
-  const tagText = Array.isArray(tags?.[3]) ? tags[3].map((part) => flat(part)).filter(Boolean).join(", ") : flat(tags?.[3]);
+  const tagText = Array.isArray(tags?.[3]) ? tags[3].map((part2) => flat(part2)).filter(Boolean).join(", ") : flat(tags?.[3]);
   const one = (field2) => {
     const row2 = rowsNamed(source, field2)[0];
     return row2 ? flat(row2[3]) : null;
@@ -2260,7 +2260,7 @@ function parseCard(raw) {
   };
 }
 function displayName2(card) {
-  const name = [card.prefix, card.given, card.middle, card.surname, card.suffix].map((part) => part.trim()).filter(Boolean).join(" ");
+  const name = [card.prefix, card.given, card.middle, card.surname, card.suffix].map((part2) => part2.trim()).filter(Boolean).join(" ");
   return name || card.emails.find((item) => item.trim()) || card.nickname || "";
 }
 function reuseText(existing, name, values2, type = "text") {
@@ -2304,7 +2304,7 @@ function toJCard(card) {
   if (card.phones) reuseText(card.source[1], "tel", card.phones).forEach((row2) => kept.push(row2));
   if (card.urls) reuseText(card.source[1], "url", card.urls, "uri").forEach((row2) => kept.push(row2));
   (card.addresses || []).forEach((item, index) => {
-    const filled = [item.pobox, item.ext, item.street, item.locality, item.region, item.code, item.country].some((part) => part.trim());
+    const filled = [item.pobox, item.ext, item.street, item.locality, item.region, item.code, item.country].some((part2) => part2.trim());
     if (!filled) return;
     const prev = rowsNamed(card.source, "adr")[index];
     kept.push(["adr", paramsOf(prev), String(prev?.[2] || "text"), [item.pobox, item.ext, item.street, item.locality, item.region, item.code, item.country]]);
@@ -2365,11 +2365,10 @@ function identityOf(item) {
     smimeCertificateChain: text(item.smimeCertificateChain)
   };
 }
-function keyRow(armored) {
-  const head = armored.split("\n")[0] || "";
-  const kind = /PRIVATE/i.test(head) ? t("SETTINGS_OPENPGP.TITLE_PRIVATE", "Privat") : /PUBLIC/i.test(head) ? t("SETTINGS_OPENPGP.TITLE_PUBLIC", "\xD6ffentlich") : t("SETTINGS_DESK.KEYS", "Schl\xFCssel");
+function keyRow(armored, source = "armor", id = "", email = "", secret = /PRIVATE/i.test(armored)) {
+  const kind = secret ? t("SETTINGS_OPENPGP.TITLE_PRIVATE", "Privat") : /PUBLIC/i.test(armored) || source !== "armor" ? t("SETTINGS_OPENPGP.TITLE_PUBLIC", "\xD6ffentlich") : t("SETTINGS_DESK.KEYS", "Schl\xFCssel");
   const body = armored.replace(/-----.*?-----/g, "").replace(/\s+/g, "");
-  return { kind, preview: body.slice(0, 32) };
+  return { kind, preview: email || id.slice(-16) || body.slice(0, 32), id, email, secret, source, armored };
 }
 async function tryCall(action, params = {}) {
   try {
@@ -2431,6 +2430,33 @@ async function loadDesk(caps, currentEmail, mainEmail, app = {}) {
   const keys = await tryCall("GetPGPKeys");
   if (keys.error) snap.notes.keys = keys.error;
   else snap.keys = values(keys.value).map((item) => text(item)).filter(Boolean).map((item) => keyRow(item));
+  const gnu = await tryCall("GnupgGetKeys");
+  if (!gnu.error && gnu.value) {
+    const fromBag = (bag, secret) => values(bag).map((item) => {
+      const row2 = item;
+      const sub = values(row2.subkeys)[0];
+      const uid = values(row2.uids)[0];
+      const id = text(sub?.fingerprint || sub?.keyid);
+      const email = text(uid?.email);
+      if (!id) return null;
+      return keyRow(text(uid?.name) || email || id, "gnupg", id, email, secret);
+    }).filter((item) => Boolean(item));
+    const listed = [...fromBag(gnu.value.private, true), ...fromBag(gnu.value.public, false)];
+    const ids = new Set(listed.map((item) => item.id));
+    snap.keys = listed.concat(snap.keys.filter((item) => !item.id || !ids.has(item.id)));
+  }
+  const stored = await tryCall("GetStoredPGPKeys");
+  if (!stored.error && stored.value) {
+    const add = (list, secret) => values(list).forEach((item) => {
+      const row2 = item;
+      const armored = text(row2.value);
+      const id = text(row2.id);
+      if (!armored || snap.keys.some((key) => key.id && key.id === id)) return;
+      snap.keys.push(keyRow(armored, "stored", id, "", secret));
+    });
+    add(stored.value.public, false);
+    add(stored.value.private, true);
+  }
   const certs = await tryCall("SMimeGetCertificates");
   if (certs.error) snap.notes.certs = certs.error;
   else {
@@ -2616,6 +2642,61 @@ async function applyDesk(name, data, snap) {
     if (!data.pem?.trim()) throw new ApiError(0, "Zertifikat einf\xFCgen.");
     await call("SMimeImportCertificate", { pem: data.pem });
     return "reload";
+  }
+  if (name === "delete-gnupg") {
+    await call("GnupgDeleteKey", { keyId: data.id, isPrivate: data.secret === "1" ? 1 : 0 });
+    return "reload";
+  }
+  if (name === "delete-stored") {
+    const row2 = snap.keys[Number(data.index)];
+    if (!row2?.armored || !row2.id) throw new ApiError(0, "Der gespeicherte Schl\xFCssel fehlt.");
+    await call("DeletePGPKey", { key: row2.armored, keyId: row2.id });
+    return "reload";
+  }
+  if (name === "generate-key") {
+    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    await call("GnupgGenerateKey", { name: data.name || "", email: data.email.trim(), passphrase: data.passphrase || "" });
+    return "reload";
+  }
+  if (name === "store-pair") {
+    if (!data.publicKey?.trim() && !data.privateKey?.trim()) throw new ApiError(0, "Mindestens einen Schl\xFCssel einf\xFCgen.");
+    const onServer = (data.publicOn ? 1 : 0) + (data.privateOn ? 2 : 0);
+    const inGnuPG = (data.publicGnu ? 1 : 0) + (data.privateGnu ? 2 : 0);
+    await call("PgpStoreKeyPair", {
+      publicKey: data.publicKey || "",
+      privateKey: data.privateKey || "",
+      onServer,
+      inGnuPG
+    });
+    return "reload";
+  }
+  if (name === "create-cert") {
+    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    await call("SMimeCreateCertificate", {
+      name: data.name || "",
+      email: data.email.trim(),
+      passphrase: data.passphrase || "",
+      privateKey: data.privateKey || ""
+    });
+    return "reload";
+  }
+  if (name === "export-smime") {
+    const pem = await call("SMimeExportPrivateKey", {
+      privateKey: data.privateKey || "",
+      oldPassphrase: data.oldPassphrase || "",
+      newPassphrase: data.newPassphrase || ""
+    });
+    if (typeof pem === "string" && pem) {
+      const url = URL.createObjectURL(new Blob([pem], { type: "application/x-pem-file" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "smime-private.pem";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+    return "keep";
   }
   return "reload";
 }
@@ -2892,7 +2973,7 @@ function renderDesk(section, snap, edit) {
   if (!snap) return error + loading();
   if (section === "accounts") {
     const extras = snap.accounts.filter((item) => !item.main).map((item) => item.email);
-    const rows = snap.accounts.map((item) => {
+    const rows2 = snap.accounts.map((item) => {
       const unread = item.unread == null ? "" : `${item.unread} ${t("MAILBOX.UNREAD", "ungelesen")}`;
       const meta = [item.main ? t("SETTINGS_DESK.MAIN", "Hauptkonto") : item.name, item.current ? t("SETTINGS_DESK.ACTIVE", "Aktiv") : "", unread].filter(Boolean).join(" \xB7 ");
       const index = extras.indexOf(item.email);
@@ -2919,10 +3000,10 @@ function renderDesk(section, snap, edit) {
           ${field(t("GLOBAL.PASSWORD", "Passwort"), "password", "", "password", 'autocomplete="current-password" required')}
           ${field(t("GLOBAL.NAME", "Name"), "name", "")}
         `, t("POPUPS_ADD_ACCOUNT.BUTTON_ADD_ACCOUNT", "Hinzuf\xFCgen"), false) : "";
-    return `${error}<p class="mono">${esc4(t("SETTINGS_ACCOUNTS.LEGEND_ACCOUNTS", "Konten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows}</ul>${add}${editor}`;
+    return `${error}<p class="mono">${esc4(t("SETTINGS_ACCOUNTS.LEGEND_ACCOUNTS", "Konten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows2}</ul>${add}${editor}`;
   }
   if (section === "identities") {
-    const rows = snap.identities.map((item) => row(
+    const rows2 = snap.identities.map((item) => row(
       item.name || item.email || item.label,
       [item.email, item.label].filter(Boolean).join(" \xB7 "),
       [
@@ -2936,7 +3017,7 @@ function renderDesk(section, snap, edit) {
     const current = edit?.kind === "identity" ? edit.fresh ? blankIdentity() : snap.identities.find((item) => item.id === edit.id) || blankIdentity() : null;
     const editor = current ? identityForm(current, snap.caps) : "";
     const add = snap.caps.identities && !adding ? button("settings-edit", t("SETTINGS_ACCOUNTS.BUTTON_ADD_IDENTITY", "Identit\xE4t hinzuf\xFCgen"), { kind: "identity", fresh: "1" }) : "";
-    return `${error}<p class="mono">${esc4(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows || ""}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+    return `${error}<p class="mono">${esc4(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</p>${note(snap.notes.accounts, true)}<ul class="set-list">${rows2 || ""}</ul>${rows2 ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
   if (section === "contacts") {
     const sync = snap.app.ContactsSync;
@@ -2965,7 +3046,7 @@ function renderDesk(section, snap, edit) {
   }
   if (section === "filters") {
     if (!snap.scripts) return error + note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verf\xFCgbar."));
-    const rows = snap.scripts.map((item) => row(
+    const rows2 = snap.scripts.map((item) => row(
       item.name,
       item.active ? t("SETTINGS_DESK.ACTIVE", "Aktiv") : "",
       [
@@ -2983,9 +3064,16 @@ function renderDesk(section, snap, edit) {
       ${renderFilterEditor(current?.name || "", source, parsed.ok ? parsed.script : null, parsed.ok ? "" : parsed.reason, snap.folderNames, snap.sieveCapa.includes("vacation"), snap.sieveCapa)}
     `, t("GLOBAL.SAVE", "Speichern"), true) : "";
     const add = adding ? "" : button("settings-edit", t("SETTINGS_FILTERS.BUTTON_ADD_SCRIPT", "Skript hinzuf\xFCgen"), { kind: "script", fresh: "1" });
-    return `${error}<p class="mono">${esc4(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
+    return `${error}<p class="mono">${esc4(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows2}</ul>${rows2 ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;
   }
-  const keyRows = snap.keys.map((item) => row(item.kind, item.preview, "")).join("");
+  const keyRows = snap.keys.map((item, index) => row(
+    item.email || item.kind,
+    [item.kind, item.preview, item.source === "gnupg" ? "GnuPG" : item.source === "stored" ? t("OPENPGP.BACKUP_ON_SERVER", "Gespeichert") : ""].filter(Boolean).join(" \xB7 "),
+    [
+      button("settings-export", t("GLOBAL.EXPORT", "Exportieren"), { kind: "key", index: String(index) }),
+      item.source === "gnupg" ? button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "gnupg", id: item.id, secret: item.secret ? "1" : "0" }, true) : item.source === "stored" && item.id ? button("settings-delete", t("GLOBAL.DELETE", "L\xF6schen"), { kind: "stored", index: String(index), id: item.id }, true) : ""
+    ].join("")
+  )).join("");
   const certRows = snap.certs.map((item) => row(
     item.name || item.email || item.id,
     [item.email, item.until ? `${t("CRYPTO.VALID_UNTIL", "G\xFCltig bis")} ${item.until}` : ""].filter(Boolean).join(" \xB7 "),
@@ -2997,21 +3085,199 @@ function renderDesk(section, snap, edit) {
     ${check2("backup", t("OPENPGP.BACKUP_ON_SERVER", "Auf dem Server verschl\xFCsselt speichern"), true)}
     ${snap.caps.gnupg ? check2("gnupg", t("OPENPGP.STORE_IN_GNUPG", "Auf dem Server in GnuPG speichern"), false) : ""}
   `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  const generate = snap.caps.gnupg ? form("generate-key", `
+    ${field(t("GLOBAL.NAME", "Name"), "name", "", "text")}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", snap.currentEmail, "email", 'autocomplete="email" required')}
+    ${field(t("CRYPTO.PASSPHRASE", "Passphrase"), "passphrase", "", "password", 'autocomplete="new-password"')}
+  `, t("OPENPGP.GENERATE", "Schl\xFCsselpaar erzeugen"), false) : "";
+  const storePair = form("store-pair", `
+    ${field(t("OPENPGP.PUBLIC_KEY", "\xD6ffentlicher Schl\xFCssel"), "publicKey", "", "area", "code")}
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schl\xFCssel"), "privateKey", "", "area", "code")}
+    ${check2("publicOn", t("OPENPGP.STORE_PUBLIC", "\xD6ffentlichen Schl\xFCssel speichern"), true)}
+    ${check2("privateOn", t("OPENPGP.STORE_PRIVATE", "Privaten Schl\xFCssel speichern"), false)}
+    ${snap.caps.gnupg ? `${check2("publicGnu", t("OPENPGP.PUBLIC_GNUPG", "\xD6ffentlichen Schl\xFCssel in GnuPG"), false)}${check2("privateGnu", t("OPENPGP.PRIVATE_GNUPG", "Privaten Schl\xFCssel in GnuPG"), false)}` : ""}
+  `, t("GLOBAL.SAVE", "Speichern"), false);
   const certImport = form("import-cert", `
     ${field(t("SMIME.CERTIFICATE", "Zertifikat"), "pem", "", "area", "code")}
   `, t("OPENPGP.POPUP_IMPORT_BUTTON", "Importieren"), false);
+  const certCreate = form("create-cert", `
+    ${field(t("GLOBAL.NAME", "Name"), "name", "", "text")}
+    ${field(t("GLOBAL.EMAIL", "E-Mail"), "email", snap.currentEmail, "email", 'autocomplete="email" required')}
+    ${field(t("CRYPTO.PASSPHRASE", "Passphrase"), "passphrase", "", "password", 'autocomplete="new-password"')}
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schl\xFCssel"), "privateKey", "", "area", "code")}
+  `, t("SMIME.CREATE", "Zertifikat erzeugen"), false);
+  const certExport = form("export-smime", `
+    ${field(t("CRYPTO.PRIVATE_KEY", "Privater Schl\xFCssel"), "privateKey", "", "area", "code")}
+    ${field(t("SMIME.OLD_PASSPHRASE", "Bisherige Passphrase"), "oldPassphrase", "", "password", 'autocomplete="current-password"')}
+    ${field(t("SMIME.NEW_PASSPHRASE", "Neue Passphrase"), "newPassphrase", "", "password", 'autocomplete="new-password"')}
+  `, t("SMIME.EXPORT_KEY", "Privaten Schl\xFCssel exportieren"), false);
   return `${error}
     <p class="mono">${esc4(t("SETTINGS_DESK.KEYS", "Schl\xFCssel"))}</p>
-    <p class="quiet">${esc4(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschl\xFCsseln stehen an der Identit\xE4t."))}</p>
+    <p class="quiet">${esc4(t("SETTINGS_DESK.KEY_HINT", "Signieren und Verschl\xFCsseln stehen an der Identit\xE4t und im Editor."))}</p>
     ${note(snap.notes.keys, true)}
     <ul class="set-list">${keyRows}</ul>
     ${keyRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
     <details><summary>${esc4(t("SETTINGS_OPENPGP.BUTTON_IMPORT_KEY", "Schl\xFCssel importieren"))}</summary>${keyImport}</details>
+    ${generate ? `<details><summary>${esc4(t("OPENPGP.GENERATE", "Schl\xFCsselpaar erzeugen"))}</summary>${generate}</details>` : ""}
+    <details><summary>${esc4(t("OPENPGP.STORE_PAIR", "Schl\xFCsselpaar speichern"))}</summary>${storePair}</details>
     <p class="mono">${esc4(t("SMIME.CERTIFICATES", "S/MIME-Zertifikate"))}</p>
     ${note(snap.notes.certs, true)}
     <ul class="set-list">${certRows}</ul>
     ${certRows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}
-    <details><summary>${esc4(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
+    <details><summary>${esc4(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>
+    <details><summary>${esc4(t("SMIME.CREATE", "Zertifikat erzeugen"))}</summary>${certCreate}</details>
+    <details><summary>${esc4(t("SMIME.EXPORT_KEY", "Privaten Schl\xFCssel exportieren"))}</summary>${certExport}</details>`;
+}
+
+// src/crypto.ts
+var sessionPass = /* @__PURE__ */ new Map();
+function rememberedPass(id) {
+  return sessionPass.get(id) || "";
+}
+function rememberPass(id, value, keep) {
+  if (keep && value) sessionPass.set(id, value);
+}
+function emptyParts() {
+  return { pgpEncrypted: null, pgpSigned: null, smimeEncrypted: null, smimeSigned: null };
+}
+function part(value) {
+  if (!value || typeof value !== "object") return null;
+  const row2 = value;
+  const partId = String(row2.partId || "");
+  if (!partId) return null;
+  const keyIds = Array.isArray(row2.keyIds) ? row2.keyIds.map((item) => String(item)).filter(Boolean) : [];
+  return { partId, sigPartId: String(row2.sigPartId || ""), detached: Boolean(row2.detached), keyIds };
+}
+function readParts(item) {
+  return {
+    pgpEncrypted: part(item.pgpEncrypted),
+    pgpSigned: part(item.pgpSigned),
+    smimeEncrypted: part(item.smimeEncrypted),
+    smimeSigned: part(item.smimeSigned)
+  };
+}
+function autocryptHeader(headers) {
+  return headers.autocrypt || "";
+}
+function autocryptKey(header) {
+  const email = /addr=([^;]+)/i.exec(header)?.[1]?.trim() || "";
+  const data = /keydata=([A-Za-z0-9+/=\s]+)/i.exec(header)?.[1]?.replace(/\s+/g, "") || "";
+  if (!data) return null;
+  let key = "";
+  try {
+    key = atob(data);
+  } catch {
+    return null;
+  }
+  if (!key.includes("BEGIN PGP")) key = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+${key}
+-----END PGP PUBLIC KEY BLOCK-----`;
+  return { email, key };
+}
+function bodyFromDecrypt(raw) {
+  const text2 = raw.replace(/\r\n/g, "\n");
+  const html = text2.match(/<html[\s\S]*<\/html>/i)?.[0] || (/<(p|div|br|table)\b/i.test(text2) ? text2 : "");
+  if (html) return { html, plain: "" };
+  const chunks = text2.split(/\n\n/);
+  const looksLikeHeader = chunks.length > 1 && /^[\w-]+:\s/m.test(chunks[0] || "");
+  return { html: "", plain: looksLikeHeader ? chunks.slice(1).join("\n\n") : text2 };
+}
+function rows(value) {
+  if (Array.isArray(value)) return value.filter((item) => item && typeof item === "object");
+  if (value && typeof value === "object") return Object.values(value).filter((item) => item && typeof item === "object");
+  return [];
+}
+function keyOf(row2, secret) {
+  const subs = rows(row2.subkeys);
+  const id = String(subs[0]?.fingerprint || subs[0]?.keyid || row2.fingerprint || "");
+  if (!id) return null;
+  const uids = rows(row2.uids);
+  const email = String(uids[0]?.email || "");
+  const name = String(uids[0]?.name || uids[0]?.uid || email || id.slice(-16));
+  return {
+    id,
+    email,
+    name,
+    secret,
+    canEncrypt: Boolean(row2.can_encrypt ?? row2.can_decrypt ?? true),
+    canSign: Boolean(row2.can_sign ?? row2.can_verify ?? secret)
+  };
+}
+async function loadGnuKeys() {
+  const bag = await call("GnupgGetKeys");
+  const pub = rows(bag?.public).map((row2) => keyOf(row2, false)).filter((row2) => Boolean(row2));
+  const sec = rows(bag?.private).map((row2) => keyOf(row2, true)).filter((row2) => Boolean(row2));
+  return [...sec, ...pub];
+}
+function emailOf(value) {
+  const hit = /<([^>]+)>/.exec(value);
+  return (hit?.[1] || value).trim().toLowerCase();
+}
+async function keysFor(address2, known) {
+  const email = emailOf(address2);
+  const local = known.filter((key) => key.email.toLowerCase() === email && !key.secret && key.canEncrypt);
+  if (local.length || !email) return local;
+  const found = await call("PgpSearchKey", { query: email });
+  if (typeof found === "string" && found.includes("BEGIN PGP")) {
+    await call("PgpImportKey", { key: found, keyId: "", email, backup: 0, gnuPG: 1 });
+    const again = await loadGnuKeys();
+    known.splice(0, known.length, ...again);
+    return again.filter((key) => key.email.toLowerCase() === email && !key.secret && key.canEncrypt);
+  }
+  return [];
+}
+async function gnupgDecrypt(folder, uid, partId, keyId, passphrase) {
+  const result = await call("GnupgDecrypt", { folder, uid, partId, keyId, passphrase, data: "" });
+  if (typeof result === "string") return result;
+  return String(result?.data || "");
+}
+async function smimeDecrypt(folder, uid, partId, certificate, privateKey, passphrase) {
+  const result = await call("SMimeDecryptMessage", { folder, uid, partId, certificate, privateKey, passphrase });
+  return String(result?.data || "");
+}
+async function pgpVerify(folder, uid, part2) {
+  const result = await call("PgpVerifyMessage", {
+    folder,
+    uid,
+    partId: part2.partId,
+    sigPartId: part2.sigPartId,
+    tryGnuPG: 1
+  });
+  if (!result || typeof result !== "object") {
+    return { ok: false, text: t("CRYPTO.VERIFY_FAIL", "Die Signatur lie\xDF sich nicht pr\xFCfen.") };
+  }
+  const status = Number(result.status ?? 0);
+  const fingerprint = String(result.fingerprint || "");
+  const message = String(result.message || "");
+  const ok = status === 0;
+  const who = fingerprint ? fingerprint.slice(-16) : "";
+  const line2 = ok ? t("CRYPTO.VERIFY_OK", "Signatur g\xFCltig.") + (who ? ` ${who}` : "") : message || t("CRYPTO.VERIFY_BAD", "Die Signatur ist ung\xFCltig.");
+  return { ok, text: line2 };
+}
+async function smimeVerify(folder, uid, part2) {
+  const result = await call("SMimeVerifyMessage", {
+    folder,
+    uid,
+    partId: part2.partId,
+    sigPartId: part2.sigPartId,
+    detached: part2.detached ? 1 : 0
+  });
+  const ok = Boolean(result && typeof result === "object" && result.success);
+  return {
+    ok,
+    text: ok ? t("CRYPTO.SMIME_OK", "S/MIME-Signatur g\xFCltig.") : t("CRYPTO.SMIME_BAD", "Die S/MIME-Signatur ist ung\xFCltig oder der Aussteller fehlt.")
+  };
+}
+function downloadText(name, text2) {
+  const url = URL.createObjectURL(new Blob([text2], { type: "text/plain" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 // src/search.ts
@@ -3073,10 +3339,10 @@ function shiftDay(iso, days) {
   return isoDate(date);
 }
 function isStructured(query) {
-  const parts2 = query.split("&").map((part) => part.trim()).filter(Boolean);
-  return parts2.length > 0 && parts2.every((part) => {
-    const name = part.split("=")[0].toLowerCase();
-    return part.includes("=") ? VALUE_KEYS.includes(name) || /^[a-z_[\]]+$/.test(name) : FLAG_KEYS.has(name);
+  const parts2 = query.split("&").map((part2) => part2.trim()).filter(Boolean);
+  return parts2.length > 0 && parts2.every((part2) => {
+    const name = part2.split("=")[0].toLowerCase();
+    return part2.includes("=") ? VALUE_KEYS.includes(name) || /^[a-z_[\]]+$/.test(name) : FLAG_KEYS.has(name);
   });
 }
 function parseSearch(query) {
@@ -3087,11 +3353,11 @@ function parseSearch(query) {
     result.text = trimmed;
     return result;
   }
-  trimmed.split("&").forEach((part) => {
-    if (!part) return;
-    const at = part.indexOf("=");
-    const name = (at < 0 ? part : part.slice(0, at)).toLowerCase();
-    const value = at < 0 ? "" : decodeValue(part.slice(at + 1));
+  trimmed.split("&").forEach((part2) => {
+    if (!part2) return;
+    const at = part2.indexOf("=");
+    const name = (at < 0 ? part2 : part2.slice(0, at)).toLowerCase();
+    const value = at < 0 ? "" : decodeValue(part2.slice(at + 1));
     switch (name) {
       case "from":
       case "to":
@@ -3293,11 +3559,11 @@ function addresses(value) {
   if (current.trim()) result.push(current.trim());
   return result;
 }
-function emailOf(value) {
+function emailOf2(value) {
   return (value.match(/<([^>]+)>/)?.[1] || value).trim();
 }
 function validAddress(value) {
-  return ADDRESS.test(emailOf(value));
+  return ADDRESS.test(emailOf2(value));
 }
 function htmlToPlain(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -3404,7 +3670,10 @@ var Composer = class {
               <label class="check"><input type="checkbox" name="receipt"> ${esc6(t("COMPOSE.BUTTON_REQUEST_READ_RECEIPT", "Lesebest\xE4tigung anfordern"))}</label>
               <label class="check"><input type="checkbox" name="dsn"> ${esc6(t("COMPOSE.BUTTON_REQUEST_DSN", "Zustellbest\xE4tigung anfordern"))}</label>
               <label class="check"><input type="checkbox" name="tls"> ${esc6(t("COMPOSE.BUTTON_REQUIRE_TLS", "TLS erzwingen"))}</label>
+              <label class="check" data-crypto hidden><input type="checkbox" name="sign"> ${esc6(t("CRYPTO.SIGN", "Signieren"))}</label>
+              <label class="check" data-crypto hidden><input type="checkbox" name="encrypt"> ${esc6(t("CRYPTO.ENCRYPT", "Verschl\xFCsseln"))}</label>
             </div></details>
+            <p class="quiet" id="compose-crypto" hidden></p>
             <span class="spacer"></span><span class="quiet live" id="compose-status"></span>
           </div>
           <p class="error" id="send-error" role="alert" hidden></p>
@@ -3434,6 +3703,9 @@ var Composer = class {
   identities = [];
   prefs;
   files = [];
+  gnuKeys = null;
+  cryptoTimer = 0;
+  missingKeys = [];
   fields = /* @__PURE__ */ new Map();
   seed = null;
   mode = "plain";
@@ -3459,6 +3731,10 @@ var Composer = class {
     }));
     select2.value = identities.some((item) => item.id === current) ? current : identities[0]?.id || "";
     select2.disabled = identities.length < 2;
+    const crypto = prefs.gnupg || identities.some((item) => item.smimeCertificate || item.smimeKey);
+    this.root.querySelectorAll("[data-crypto]").forEach((row2) => {
+      row2.hidden = !crypto;
+    });
     this.editor.spellcheck = prefs.spellcheck;
     this.plain.spellcheck = prefs.spellcheck;
     hostSave(this.root).hidden = !prefs.draftsFolder;
@@ -3519,7 +3795,11 @@ var Composer = class {
     this.form.addEventListener("input", (event) => {
       if (!event.target.closest(".recipient-box")) this.changed();
     });
-    this.form.addEventListener("change", () => this.changed());
+    this.form.addEventListener("change", (event) => {
+      this.changed();
+      const name = event.target.name;
+      if (name === "sign" || name === "encrypt" || name === "identity") void this.lookUpKeys();
+    });
     this.form.elements.namedItem("identity").addEventListener("change", () => this.changeIdentity());
     this.editor.addEventListener("paste", (event) => {
       event.preventDefault();
@@ -3614,8 +3894,11 @@ var Composer = class {
     set("receipt", this.prefs.readReceipt);
     set("dsn", this.prefs.dsn);
     set("tls", this.prefs.requireTLS);
+    set("sign", Boolean(identity?.pgpSign || this.prefs.pgpSign));
+    set("encrypt", Boolean(identity?.pgpEncrypt || this.prefs.pgpEncrypt));
     this.root.dataset.pgpSign = String(identity?.pgpSign || this.prefs.pgpSign);
     this.root.dataset.pgpEncrypt = String(identity?.pgpEncrypt || this.prefs.pgpEncrypt);
+    void this.lookUpKeys();
   }
   identity() {
     return this.identities.find((item) => item.id === this.form.elements.namedItem("identity").value) || this.identities[0];
@@ -3708,6 +3991,7 @@ ${signature}`;
     field2.list.hidden = true;
     this.paintRecipients(field2);
     this.changed();
+    void this.lookUpKeys();
     return true;
   }
   suggestions(field2) {
@@ -3854,24 +4138,117 @@ ${signature}`;
       readReceiptRequest: this.form.elements.namedItem("receipt").checked ? 1 : 0,
       dsn: this.form.elements.namedItem("dsn").checked ? 1 : 0,
       requireTLS: this.form.elements.namedItem("tls").checked ? 1 : 0,
-      pgpSign: this.root.dataset.pgpSign === "true" ? 1 : 0,
-      pgpEncrypt: this.root.dataset.pgpEncrypt === "true" ? 1 : 0,
+      pgpSign: this.form.elements.namedItem("sign").checked ? 1 : 0,
+      pgpEncrypt: this.form.elements.namedItem("encrypt").checked ? 1 : 0,
+      signFingerprint: "",
+      signPassphrase: "",
+      sign: "",
+      encryptFingerprints: "",
+      encryptCertificates: [],
       messageFolder: this.draftRef?.folder || "",
       messageUid: this.draftRef?.uid || 0
     };
   }
   send() {
     if (this.sending || this.saving) return;
+    void this.sendReady();
+  }
+  async sendReady() {
     try {
       const values2 = this.values(this.saveFolder());
       if (!values2.to && !values2.cc && !values2.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empf\xE4nger an."));
       if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anh\xE4nge werden noch hochgeladen."));
       if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anh\xE4nge vor dem Senden."));
+      if (values2.pgpEncrypt && this.missingKeys.length) {
+        throw new ApiError(0, t("CRYPTO.MISSING_KEYS", "F\xFCr diese Empf\xE4nger fehlt ein Schl\xFCssel: %LIST%.").replace("%LIST%", this.missingKeys.join(", ")));
+      }
+      await this.attachCrypto(values2);
       this.sending = true;
       this.setBusy(true, t("COMPOSE.SENDING", "Wird gesendet \u2026"));
       this.callbacks.send(values2);
     } catch (error) {
       this.setError(explain(error));
+    }
+  }
+  async lookUpKeys() {
+    window.clearTimeout(this.cryptoTimer);
+    const sign = this.form.elements.namedItem("sign").checked;
+    const encrypt = this.form.elements.namedItem("encrypt").checked;
+    const hint = this.root.querySelector("#compose-crypto");
+    if (!this.prefs.gnupg || !sign && !encrypt) {
+      this.missingKeys = [];
+      hint.hidden = true;
+      return;
+    }
+    this.cryptoTimer = window.setTimeout(async () => {
+      try {
+        if (!this.gnuKeys) this.gnuKeys = await loadGnuKeys();
+        const recipients = [...this.fields.get("to")?.values || [], ...this.fields.get("cc")?.values || []];
+        const missing = [];
+        if (encrypt) {
+          for (const value of recipients) {
+            const found = await keysFor(value, this.gnuKeys);
+            if (!found.length) missing.push(emailOf2(value));
+          }
+        }
+        this.missingKeys = missing;
+        hint.hidden = !missing.length;
+        hint.textContent = missing.length ? t("CRYPTO.MISSING_KEYS", "F\xFCr diese Empf\xE4nger fehlt ein Schl\xFCssel: %LIST%.").replace("%LIST%", missing.join(", ")) : "";
+      } catch (error) {
+        hint.hidden = false;
+        hint.textContent = explain(error);
+      }
+    }, 300);
+  }
+  async attachCrypto(values2) {
+    const identity = this.identity();
+    const sign = values2.pgpSign === 1;
+    const encrypt = values2.pgpEncrypt === 1;
+    if (!sign && !encrypt) return;
+    if (this.prefs.gnupg && !this.gnuKeys) this.gnuKeys = await loadGnuKeys();
+    const from = emailOf2(identity?.email || "");
+    const secret = (this.gnuKeys || []).find((key) => key.secret && key.email.toLowerCase() === from) || (this.gnuKeys || []).find((key) => key.secret);
+    if (sign && secret) {
+      let pass = rememberedPass(secret.id);
+      if (!pass) {
+        const answer = await this.callbacks.passphrase(
+          t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"),
+          t("CRYPTO.PASSPHRASE", "Passphrase")
+        );
+        if (!answer) throw new ApiError(0, t("CRYPTO.PASSPHRASE_REQUIRED", "Ohne Passphrase wird nicht signiert."));
+        pass = answer.value;
+        rememberPass(secret.id, pass, answer.remember);
+      }
+      values2.signFingerprint = secret.id;
+      values2.signPassphrase = pass;
+    } else if (sign && identity?.smimeCertificate && identity.smimeKey) {
+      values2.sign = "S/MIME";
+      let pass = rememberedPass(`smime:${identity.id}`);
+      if (!pass) {
+        const answer = await this.callbacks.passphrase(
+          t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"),
+          t("CRYPTO.PASSPHRASE", "Passphrase")
+        );
+        if (answer) {
+          pass = answer.value;
+          rememberPass(`smime:${identity.id}`, pass, answer.remember);
+        }
+      }
+      values2.signPassphrase = pass;
+    }
+    if (encrypt && this.prefs.gnupg) {
+      const recipients = [values2.to, values2.cc].join(", ").split(",").map((item) => item.trim()).filter(Boolean);
+      const ids = [];
+      for (const value of recipients) {
+        const found = await keysFor(value, this.gnuKeys || []);
+        found.forEach((key) => {
+          if (!ids.includes(key.id)) ids.push(key.id);
+        });
+      }
+      if (secret && !ids.includes(secret.id)) ids.push(secret.id);
+      values2.encryptFingerprints = JSON.stringify(ids);
+    } else if (encrypt && identity?.smimeCertificate) {
+      values2.encryptCertificates = [identity.smimeCertificate];
     }
   }
   saveFolder() {
@@ -4098,6 +4475,17 @@ function renderReader(body, data, expanded) {
       `Der Absender bittet um eine Lesebest\xE4tigung an ${data.receipt}.`,
       textButton("m-receipt", "Best\xE4tigung senden") + textButton("m-receipt-skip", "Nicht senden")
     ));
+  }
+  if (data.crypto && (data.crypto.encrypted || data.crypto.signed || data.crypto.autocrypt)) {
+    const actions = [
+      data.crypto.encrypted ? textButton("m-decrypt", t("CRYPTO.DECRYPT", "Entschl\xFCsseln")) : "",
+      data.crypto.signed ? textButton("m-verify", t("CRYPTO.VERIFY", "Signatur pr\xFCfen")) : "",
+      data.crypto.smime ? textButton("m-smime-certs", t("SMIME.IMPORT_FROM_MAIL", "Zertifikate \xFCbernehmen")) : "",
+      data.crypto.autocrypt ? textButton("m-autocrypt", t("CRYPTO.IMPORT_AUTOCRYPT", "Schl\xFCssel \xFCbernehmen")) : ""
+    ].join("");
+    const mark = data.crypto.state === "bad" ? "shield-alert" : "shield-check";
+    const fallback = data.crypto.encrypted && data.crypto.signed ? t("CRYPTO.BOTH", "Diese Mail ist verschl\xFCsselt und signiert.") : data.crypto.encrypted ? t("CRYPTO.ENCRYPTED", "Diese Mail ist verschl\xFCsselt.") : data.crypto.signed ? t("CRYPTO.SIGNED", "Diese Mail ist signiert.") : t("CRYPTO.AUTOCRYPT", "Der Absender legt einen Schl\xFCssel bei.");
+    bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
   }
   const cal = data.calendar ? `
     <section class="cal-card" aria-label="Termin">
@@ -4494,17 +4882,17 @@ var Book = class {
     return this.draft ? [this.draft] : [];
   }
   async remove() {
-    const rows = this.targets().filter((row2) => row2.id && !row2.readOnly);
-    if (!rows.length || this.busy) return;
-    const what = rows.length === 1 ? t("CONTACTS.DELETE_ONE", "%NAME% wird aus dem Adressbuch entfernt.").replace("%NAME%", displayName2(rows[0]) || t("CONTACTS.THIS_CONTACT", "Dieser Kontakt")) : t("CONTACTS.DELETE_MANY", "%N% Kontakte werden aus dem Adressbuch entfernt.").replace("%N%", String(rows.length));
+    const rows2 = this.targets().filter((row2) => row2.id && !row2.readOnly);
+    if (!rows2.length || this.busy) return;
+    const what = rows2.length === 1 ? t("CONTACTS.DELETE_ONE", "%NAME% wird aus dem Adressbuch entfernt.").replace("%NAME%", displayName2(rows2[0]) || t("CONTACTS.THIS_CONTACT", "Dieser Kontakt")) : t("CONTACTS.DELETE_MANY", "%N% Kontakte werden aus dem Adressbuch entfernt.").replace("%N%", String(rows2.length));
     const ok = await this.hooks.confirm(t("CONTACTS.DELETE_TITLE", "Kontakte l\xF6schen?"), what, t("GLOBAL.DELETE", "L\xF6schen"));
     if (!ok) return;
     this.busy = true;
     try {
-      await call("ContactsDelete", { uids: rows.map((row2) => row2.id).join(",") });
-      rows.forEach((row2) => this.checked.delete(row2.id));
-      if (this.draft && rows.some((row2) => row2.id === this.draft?.id)) this.draft = null;
-      this.live(rows.length === 1 ? t("CONTACTS.DELETED_ONE", "Kontakt gel\xF6scht.") : t("CONTACTS.DELETED_MANY", "%N% Kontakte gel\xF6scht.").replace("%N%", String(rows.length)));
+      await call("ContactsDelete", { uids: rows2.map((row2) => row2.id).join(",") });
+      rows2.forEach((row2) => this.checked.delete(row2.id));
+      if (this.draft && rows2.some((row2) => row2.id === this.draft?.id)) this.draft = null;
+      this.live(rows2.length === 1 ? t("CONTACTS.DELETED_ONE", "Kontakt gel\xF6scht.") : t("CONTACTS.DELETED_MANY", "%N% Kontakte gel\xF6scht.").replace("%N%", String(rows2.length)));
       await this.load();
       this.renderCard();
     } catch (error) {
@@ -4969,7 +5357,8 @@ function createView(root3, actions) {
     dsn: false,
     requireTLS: false,
     pgpSign: false,
-    pgpEncrypt: false
+    pgpEncrypt: false,
+    gnupg: false
   };
   let composeIdentities = [];
   const wide = () => matchMedia("(min-width: 800px)").matches;
@@ -5272,6 +5661,7 @@ function createView(root3, actions) {
           <form class="dialog-body" data-action="prompt-form">
             <h2 id="prompt-title" class="title title-md"></h2>
             <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
+            <label class="check" id="prompt-remember-row" hidden><input id="prompt-remember" type="checkbox"> ${esc9(t("CRYPTO.REMEMBER_SESSION", "F\xFCr diese Sitzung merken"))}</label>
             <div class="dialog-actions">
               <button type="button" class="text-btn" data-action="close-dialog">${esc9(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("check", "\xDCbernehmen")}</button>
@@ -5343,7 +5733,8 @@ function createView(root3, actions) {
       notice: (text2) => {
         const slot = shell?.querySelector("#notice");
         if (slot) slot.textContent = text2;
-      }
+      },
+      passphrase: (title, label2) => promptDialog(title, label2, "", true)
     });
     composer.configure(composePrefs, composeIdentities);
     book = mountBook(next.querySelector("#book"), {
@@ -5670,9 +6061,9 @@ function createView(root3, actions) {
           return;
         }
         const dir = target.dataset.dir === "down" ? 1 : -1;
-        const rows = [...shell?.querySelectorAll(list2 === "accounts" ? "[data-sort='account']" : "[data-sort='identity']") || []];
+        const rows2 = [...shell?.querySelectorAll(list2 === "accounts" ? "[data-sort='account']" : "[data-sort='identity']") || []];
         const key = list2 === "accounts" ? "email" : "id";
-        const order = rows.map((row2) => row2.dataset[key] || "").filter(Boolean);
+        const order = rows2.map((row2) => row2.dataset[key] || "").filter(Boolean);
         const index = order.indexOf(target.dataset[key] || "");
         const next = index + dir;
         if (index < 0 || next < 0 || next >= order.length) return;
@@ -5680,6 +6071,8 @@ function createView(root3, actions) {
         order[index] = order[next];
         order[next] = swap;
         void actions.settings?.(list2 === "accounts" ? "sort-accounts" : "sort-identities", { order: order.join(",") });
+      } else if (action === "settings-export") {
+        void actions.settings?.("export-key", { index: target.dataset.index || "" });
       } else if (action === "settings-import") {
         void actions.settings?.("import-account", { email: target.dataset.email || "" });
       } else if (action === "mailto-register") {
@@ -5716,7 +6109,9 @@ function createView(root3, actions) {
         const payload = {
           id: target.dataset.id || "",
           email: target.dataset.email || "",
-          name: target.dataset.name || ""
+          name: target.dataset.name || "",
+          secret: target.dataset.secret || "",
+          index: target.dataset.index || ""
         };
         void (async () => {
           if (action === "settings-delete") {
@@ -5969,8 +6364,8 @@ function createView(root3, actions) {
       }
       const [kind, id] = raw.split(":");
       if (row2.dataset.sort !== kind || !id) return;
-      const rows = [...shell?.querySelectorAll(`[data-sort='${kind}']`) || []];
-      const order = rows.map((item) => (kind === "account" ? item.dataset.email : item.dataset.id) || "").filter(Boolean);
+      const rows2 = [...shell?.querySelectorAll(`[data-sort='${kind}']`) || []];
+      const order = rows2.map((item) => (kind === "account" ? item.dataset.email : item.dataset.id) || "").filter(Boolean);
       const from = order.indexOf(id);
       const to = order.indexOf((kind === "account" ? row2.dataset.email : row2.dataset.id) || "");
       if (from < 0 || to < 0 || from === to) return;
@@ -6041,8 +6436,8 @@ function createView(root3, actions) {
       const list2 = form2.querySelector("[data-rule-list]");
       if (list2) list2.innerHTML = parsed.script.rules.map((rule) => ruleCard(rule, [])).join("");
       const vacation = parsed.script.vacation;
-      const set = (part, value) => {
-        const node = form2.querySelector(`[data-part='${part}']`);
+      const set = (part2, value) => {
+        const node = form2.querySelector(`[data-part='${part2}']`);
         if (node) node.value = value;
       };
       const on2 = form2.querySelector("[data-part='vacation-on']");
@@ -6230,11 +6625,11 @@ function createView(root3, actions) {
     });
   }
   function moveSelection(delta) {
-    const rows = [...shell?.querySelectorAll("[data-uid]") ?? []];
-    if (!rows.length) return;
-    const index = rows.findIndex((row3) => row3.getAttribute("aria-current") === "true");
-    const next = delta === 0 ? Math.max(index, 0) : Math.min(rows.length - 1, Math.max(0, index + delta));
-    const row2 = rows[next];
+    const rows2 = [...shell?.querySelectorAll("[data-uid]") ?? []];
+    if (!rows2.length) return;
+    const index = rows2.findIndex((row3) => row3.getAttribute("aria-current") === "true");
+    const next = delta === 0 ? Math.max(index, 0) : Math.min(rows2.length - 1, Math.max(0, index + delta));
+    const row2 = rows2[next];
     if (!row2) return;
     actions.selectMessage(Number(row2.dataset.uid));
     row2.scrollIntoView({ block: "nearest" });
@@ -6412,6 +6807,38 @@ function createView(root3, actions) {
     paintSettings();
     actions.act("f-desk", {});
   }
+  function promptDialog(title, label2, value, secret) {
+    const dialog = shell?.querySelector("#prompt-dlg");
+    if (!dialog) return Promise.resolve(null);
+    const input2 = dialog.querySelector("#prompt-input");
+    const form2 = dialog.querySelector("form");
+    const rememberRow = dialog.querySelector("#prompt-remember-row");
+    const remember = dialog.querySelector("#prompt-remember");
+    dialog.querySelector("#prompt-title").textContent = title;
+    dialog.querySelector("#prompt-label").textContent = label2;
+    input2.type = secret ? "password" : "text";
+    input2.autocomplete = secret ? "current-password" : "off";
+    input2.value = value;
+    remember.checked = false;
+    rememberRow.hidden = !secret;
+    dialog.returnValue = "";
+    dialog.showModal();
+    input2.focus({ preventScroll: true });
+    return new Promise((resolve) => {
+      const onSubmit = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        dialog.close("ok");
+      };
+      form2.addEventListener("submit", onSubmit);
+      dialog.addEventListener("close", () => {
+        form2.removeEventListener("submit", onSubmit);
+        input2.type = "text";
+        rememberRow.hidden = true;
+        resolve(dialog.returnValue === "ok" ? { value: input2.value, remember: remember.checked } : null);
+      }, { once: true });
+    });
+  }
   return {
     showLogin,
     setLoginBusy,
@@ -6510,14 +6937,14 @@ function createView(root3, actions) {
       });
     },
     openFolderSettings,
-    setList(rows, empty, error, more, searching) {
+    setList(rows2, empty, error, more, searching) {
       const box = shell?.querySelector("#rows");
       const emptyEl = shell?.querySelector("#list-empty");
       const errorEl = shell?.querySelector("#list-error");
       const moreBtn = shell?.querySelector("[data-action='more']");
       const clearBtn = shell?.querySelector("[data-action='clear-search']");
       if (box) {
-        box.innerHTML = rows.map((row2) => {
+        box.innerHTML = rows2.map((row2) => {
           const subject = row2.subject || "(ohne Betreff)";
           const group2 = row2.group ? `<h2 class="list-group mono">${esc9(row2.group)}</h2>` : "";
           const threadText = row2.threadCount ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung \xF6ffnen")}: ${row2.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row2.threadUnseen ? `, ${row2.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : "";
@@ -6598,8 +7025,8 @@ function createView(root3, actions) {
       dialog.querySelector("#picker-title").textContent = title;
       const paint = () => {
         const q = query.value.trim().toLowerCase();
-        const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
-        list.innerHTML = rows.map(
+        const rows2 = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
+        list.innerHTML = rows2.map(
           (folder) => `<button type="button" class="folder" role="option" data-pick="${esc9(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON2[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc9(q ? folder.fullName : folder.name)}</span></button>`
         ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
       };
@@ -6637,28 +7064,10 @@ function createView(root3, actions) {
       });
     },
     ask(title, label2, value = "") {
-      const dialog = shell?.querySelector("#prompt-dlg");
-      if (!dialog) return Promise.resolve(null);
-      const input2 = dialog.querySelector("#prompt-input");
-      const form2 = dialog.querySelector("form");
-      dialog.querySelector("#prompt-title").textContent = title;
-      dialog.querySelector("#prompt-label").textContent = label2;
-      input2.value = value;
-      dialog.returnValue = "";
-      dialog.showModal();
-      input2.focus({ preventScroll: true });
-      return new Promise((resolve) => {
-        const onSubmit = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          dialog.close("ok");
-        };
-        form2.addEventListener("submit", onSubmit);
-        dialog.addEventListener("close", () => {
-          form2.removeEventListener("submit", onSubmit);
-          resolve(dialog.returnValue === "ok" ? input2.value.trim() : null);
-        }, { once: true });
-      });
+      return promptDialog(title, label2, value, false).then((row2) => row2?.value ?? null);
+    },
+    askSecret(title, label2) {
+      return promptDialog(title, label2, "", true);
     },
     confirm(title, text2, ok, danger = true) {
       return chooseDialog(title, text2, ok, "", danger).then((value) => value === "ok");
@@ -7422,6 +7831,27 @@ var Session = class {
       return;
     }
     try {
+      if (name === "export-key") {
+        const row2 = this.desk?.keys[Number(data.index)];
+        if (!row2) return;
+        if (row2.source === "gnupg" && row2.id) {
+          let pass = "";
+          if (row2.secret) {
+            pass = rememberedPass(row2.id);
+            if (!pass) {
+              const answer = await this.view.askSecret(t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"), t("CRYPTO.PASSPHRASE", "Passphrase"));
+              if (!answer) return;
+              pass = answer.value;
+              rememberPass(row2.id, pass, answer.remember);
+            }
+          }
+          const pem = await call("GnupgExportKey", { keyId: row2.id, isPrivate: row2.secret ? 1 : 0, passphrase: pass });
+          if (typeof pem === "string" && pem) downloadText(`${row2.email || row2.id}.asc`, pem);
+          return;
+        }
+        if (row2.armored) downloadText(`${row2.email || "key"}.asc`, row2.armored);
+        return;
+      }
       if (name === "open") {
         this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
         this.view.showSettings(this.desk);
@@ -7574,7 +8004,7 @@ var Session = class {
   }
   folderDesk() {
     const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
-    const rows = flattenTree(roots, {
+    const rows2 = flattenTree(roots, {
       collapsed: /* @__PURE__ */ new Set(),
       filter: "",
       hidden: () => false,
@@ -7583,7 +8013,7 @@ var Session = class {
       actions: () => []
     });
     return {
-      rows: rows.map((row2) => ({
+      rows: rows2.map((row2) => ({
         info: row2.info,
         depth: row2.depth,
         role: row2.role,
@@ -7612,7 +8042,7 @@ var Session = class {
   /** Eltern für „Neuer Ordner“: vorhandene Ordner mit Unterordnern erlaubt. */
   parentChoices() {
     const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
-    const rows = flattenTree(roots, {
+    const rows2 = flattenTree(roots, {
       collapsed: /* @__PURE__ */ new Set(),
       filter: "",
       hidden: (folder) => this.hiddenFolder(folder),
@@ -7620,7 +8050,7 @@ var Session = class {
       roleOf: (folder) => this.roleOf(folder),
       actions: () => []
     });
-    return [{ value: "", label: "Oberste Ebene" }].concat(rows.filter((row2) => row2.info.exists && !row2.info.noInferiors).map((row2) => ({ value: row2.info.fullName, label: `${"\xA0\xA0".repeat(row2.depth)}${this.folderName(row2.info)}` })));
+    return [{ value: "", label: "Oberste Ebene" }].concat(rows2.filter((row2) => row2.info.exists && !row2.info.noInferiors).map((row2) => ({ value: row2.info.fullName, label: `${"\xA0\xA0".repeat(row2.depth)}${this.folderName(row2.info)}` })));
   }
   async createFolder(name, parent, subscribe) {
     if (!name.trim()) return;
@@ -7865,7 +8295,7 @@ var Session = class {
   }
   paintFolders() {
     const roots = buildTree(this.folders, (folder) => this.roleOf(folder));
-    const rows = flattenTree(roots, {
+    const rows2 = flattenTree(roots, {
       collapsed: this.collapsed,
       filter: this.folderFilter,
       hidden: (folder) => this.hiddenFolder(folder),
@@ -7875,7 +8305,7 @@ var Session = class {
     });
     const current = this.folders.find((folder) => folder.fullName === this.folder);
     this.view.setFolders({
-      rows,
+      rows: rows2,
       count: this.folders.filter((folder) => !this.hiddenFolder(folder)).length,
       filter: this.folderFilter,
       currentName: this.folderName(current),
@@ -8029,7 +8459,11 @@ var Session = class {
       threads: Array.isArray(item.threads) ? item.threads.map(Number).filter(Boolean) : [],
       threadUnseen: Array.isArray(item.threadUnseen) ? item.threadUnseen.map(Number).filter(Boolean) : [],
       headers,
-      auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
+      auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) },
+      crypto: full ? readParts(item) : emptyParts(),
+      autocrypt: full ? autocryptHeader(headers) : "",
+      cryptoState: "",
+      cryptoText: ""
     };
   }
   visible() {
@@ -8281,15 +8715,23 @@ var Session = class {
       contacts: this.caps.contacts,
       zip: this.prefs.zip,
       calendar,
-      place: this.place()
+      place: this.place(),
+      crypto: message.crypto.pgpEncrypted || message.crypto.pgpSigned || message.crypto.smimeEncrypted || message.crypto.smimeSigned || message.autocrypt ? {
+        encrypted: Boolean(message.crypto.pgpEncrypted || message.crypto.smimeEncrypted),
+        signed: Boolean(message.crypto.pgpSigned || message.crypto.smimeSigned),
+        autocrypt: Boolean(message.autocrypt),
+        smime: Boolean(message.crypto.smimeSigned || message.crypto.smimeEncrypted),
+        state: message.cryptoState,
+        text: message.cryptoText
+      } : null
     };
     this.view.setReader(data, "", "");
   }
   async loadComposeIdentities() {
     try {
       const result = await call("AccountsAndIdentities");
-      const rows = Array.isArray(result.Identities) ? result.Identities : Object.values(result.Identities || {});
-      this.identities = rows.map((value) => {
+      const rows2 = Array.isArray(result.Identities) ? result.Identities : Object.values(result.Identities || {});
+      this.identities = rows2.map((value) => {
         const item = value;
         return {
           id: String(item.id || ""),
@@ -8328,7 +8770,8 @@ var Session = class {
       dsn: Boolean(data.requestDsn),
       requireTLS: Boolean(data.requireTLS),
       pgpSign: Boolean(data.pgpSign),
-      pgpEncrypt: Boolean(data.pgpEncrypt)
+      pgpEncrypt: Boolean(data.pgpEncrypt),
+      gnupg: this.caps.gnupg
     }, this.identities);
   }
   replyIdentity(message) {
@@ -8639,7 +9082,7 @@ ${body}`
     }
   }
   pickerFolders() {
-    const rows = flattenTree(buildTree(this.folders, (folder) => this.roleOf(folder)), {
+    const rows2 = flattenTree(buildTree(this.folders, (folder) => this.roleOf(folder)), {
       collapsed: /* @__PURE__ */ new Set(),
       filter: "",
       hidden: (folder) => this.hiddenFolder(folder),
@@ -8647,7 +9090,7 @@ ${body}`
       roleOf: (folder) => this.roleOf(folder),
       actions: () => []
     });
-    return rows.filter((row2) => row2.info.selectable).map((row2) => ({ fullName: row2.info.fullName, name: this.folderName(row2.info), depth: row2.depth, role: row2.role }));
+    return rows2.filter((row2) => row2.info.selectable).map((row2) => ({ fullName: row2.info.fullName, name: this.folderName(row2.info), depth: row2.depth, role: row2.role }));
   }
   paintBulk() {
     if (!this.checked.size) {
@@ -8772,6 +9215,92 @@ ${body}`
     }
   }
   /** Mail-Aktionen aus der Oberfläche (Phase 1). */
+  async passFor(id) {
+    const known = rememberedPass(id);
+    if (known) return known;
+    const answer = await this.view.askSecret(t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"), t("CRYPTO.PASSPHRASE", "Passphrase"));
+    if (!answer) return null;
+    rememberPass(id, answer.value, answer.remember);
+    return answer.value;
+  }
+  async decryptOpen() {
+    const message = this.current;
+    if (!message) return;
+    try {
+      let raw = "";
+      if (message.crypto.pgpEncrypted && this.caps.gnupg) {
+        const keys = await loadGnuKeys();
+        const secret = keys.find((key) => key.secret) || null;
+        const pass = await this.passFor(secret?.id || "gnupg");
+        if (pass == null) return;
+        raw = await gnupgDecrypt(message.folder, message.uid, message.crypto.pgpEncrypted.partId, secret?.id || "", pass);
+      } else if (message.crypto.smimeEncrypted) {
+        const identity = this.identities.find((item) => item.smimeKey && item.smimeCertificate) || null;
+        const pass = await this.passFor(`smime:${identity?.id || ""}`);
+        if (pass == null) return;
+        raw = await smimeDecrypt(message.folder, message.uid, message.crypto.smimeEncrypted.partId, identity?.smimeCertificate || "", identity?.smimeKey || "", pass);
+      } else return;
+      if (!raw) throw new ApiError(0, t("CRYPTO.DECRYPT_FAIL", "Die Mail lie\xDF sich nicht entschl\xFCsseln."));
+      const body = bodyFromDecrypt(raw);
+      if (body.html) {
+        message.html = body.html;
+        this.letter.mode = "html";
+      }
+      if (body.plain) message.plain = body.plain;
+      message.cryptoState = "ok";
+      message.cryptoText = t("CRYPTO.DECRYPTED", "Entschl\xFCsselt.");
+      await this.paintLetter();
+    } catch (error) {
+      message.cryptoState = "bad";
+      message.cryptoText = explain(error);
+      await this.paintLetter();
+    }
+  }
+  async verifyOpen() {
+    const message = this.current;
+    if (!message) return;
+    try {
+      const result = message.crypto.pgpSigned ? await pgpVerify(message.folder, message.uid, message.crypto.pgpSigned) : message.crypto.smimeSigned ? await smimeVerify(message.folder, message.uid, message.crypto.smimeSigned) : null;
+      if (!result) return;
+      message.cryptoState = result.ok ? "ok" : "bad";
+      message.cryptoText = result.text;
+    } catch (error) {
+      message.cryptoState = "bad";
+      message.cryptoText = explain(error);
+    }
+    await this.paintLetter();
+  }
+  async importAutocrypt() {
+    const message = this.current;
+    const parsed = message ? autocryptKey(message.autocrypt) : null;
+    if (!message || !parsed) return;
+    try {
+      await call("PgpImportKey", { key: parsed.key, keyId: "", email: parsed.email, backup: 1, gnuPG: this.caps.gnupg ? 1 : 0 });
+      this.view.notice(t("CRYPTO.KEY_IMPORTED", "Schl\xFCssel \xFCbernommen."));
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+  async importSmimeCerts() {
+    const message = this.current;
+    const part2 = message?.crypto.smimeSigned || message?.crypto.smimeEncrypted;
+    if (!message || !part2) return;
+    try {
+      try {
+        await call("SMimeImportCertificatesFromMessage", {
+          folder: message.folder,
+          uid: message.uid,
+          partId: part2.partId,
+          sigPartId: part2.sigPartId
+        });
+      } catch {
+      }
+      if (message.crypto.smimeSigned) await smimeVerify(message.folder, message.uid, message.crypto.smimeSigned);
+      this.view.notice(t("SMIME.IMPORTED", "Zertifikate \xFCbernommen, soweit der Server sie lesen konnte."));
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
   async act(name, data) {
     const message = this.current;
     const ref = Number(data.ref || data.uid || 0);
@@ -8928,6 +9457,18 @@ ${body}`
       case "swap":
         this.letter.swap = !this.letter.swap;
         await this.paintLetter();
+        return;
+      case "decrypt":
+        await this.decryptOpen();
+        return;
+      case "verify":
+        await this.verifyOpen();
+        return;
+      case "autocrypt":
+        await this.importAutocrypt();
+        return;
+      case "smime-certs":
+        await this.importSmimeCerts();
         return;
       case "receipt":
       case "receipt-skip": {

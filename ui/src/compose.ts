@@ -1,4 +1,5 @@
 import { ApiError, call, explain, upload, type UploadTask } from "./api";
+import { keysFor, loadGnuKeys, rememberedPass, rememberPass, type GnuKey } from "./crypto";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import type { IdentityRow } from "./settings";
@@ -19,6 +20,8 @@ export interface ComposePreferences {
   requireTLS: boolean;
   pgpSign: boolean;
   pgpEncrypt: boolean;
+  /** GnuPG ist auf dem Server da. */
+  gnupg: boolean;
 }
 
 export interface ComposeFile {
@@ -67,6 +70,11 @@ export interface ComposeValues extends ComposeSeed {
   requireTLS: number;
   pgpSign: number;
   pgpEncrypt: number;
+  signFingerprint: string;
+  signPassphrase: string;
+  sign: string;
+  encryptFingerprints: string;
+  encryptCertificates: string[];
   messageFolder: string;
   messageUid: number;
 }
@@ -77,6 +85,7 @@ interface ComposeCallbacks {
   close(discard: boolean): void;
   mobile(open: boolean): void;
   notice(text: string): void;
+  passphrase(title: string, label: string): Promise<{ value: string; remember: boolean } | null>;
 }
 
 interface RecipientField {
@@ -219,6 +228,9 @@ export class Composer {
   private identities: ComposeIdentity[] = [];
   private prefs: ComposePreferences;
   private files: Attachment[] = [];
+  private gnuKeys: GnuKey[] | null = null;
+  private cryptoTimer = 0;
+  private missingKeys: string[] = [];
   private fields = new Map<string, RecipientField>();
   private seed: ComposeSeed | null = null;
   private mode: "html" | "plain" = "plain";
@@ -271,7 +283,10 @@ export class Composer {
               <label class="check"><input type="checkbox" name="receipt"> ${esc(t("COMPOSE.BUTTON_REQUEST_READ_RECEIPT", "Lesebestätigung anfordern"))}</label>
               <label class="check"><input type="checkbox" name="dsn"> ${esc(t("COMPOSE.BUTTON_REQUEST_DSN", "Zustellbestätigung anfordern"))}</label>
               <label class="check"><input type="checkbox" name="tls"> ${esc(t("COMPOSE.BUTTON_REQUIRE_TLS", "TLS erzwingen"))}</label>
+              <label class="check" data-crypto hidden><input type="checkbox" name="sign"> ${esc(t("CRYPTO.SIGN", "Signieren"))}</label>
+              <label class="check" data-crypto hidden><input type="checkbox" name="encrypt"> ${esc(t("CRYPTO.ENCRYPT", "Verschlüsseln"))}</label>
             </div></details>
+            <p class="quiet" id="compose-crypto" hidden></p>
             <span class="spacer"></span><span class="quiet live" id="compose-status"></span>
           </div>
           <p class="error" id="send-error" role="alert" hidden></p>
@@ -308,6 +323,8 @@ export class Composer {
     }));
     select.value = identities.some((item) => item.id === current) ? current : identities[0]?.id || "";
     select.disabled = identities.length < 2;
+    const crypto = prefs.gnupg || identities.some((item) => item.smimeCertificate || item.smimeKey);
+    this.root.querySelectorAll<HTMLElement>("[data-crypto]").forEach((row) => { row.hidden = !crypto; });
     this.editor.spellcheck = prefs.spellcheck;
     this.plain.spellcheck = prefs.spellcheck;
     (hostSave(this.root)).hidden = !prefs.draftsFolder;
@@ -355,7 +372,11 @@ export class Composer {
     this.fileInput.addEventListener("change", () => { this.addFiles([...(this.fileInput.files || [])]); this.fileInput.value = ""; });
     this.form.addEventListener("submit", (event) => { event.preventDefault(); this.send(); });
     this.form.addEventListener("input", (event) => { if (!(event.target as HTMLElement).closest(".recipient-box")) this.changed(); });
-    this.form.addEventListener("change", () => this.changed());
+    this.form.addEventListener("change", (event) => {
+      this.changed();
+      const name = (event.target as HTMLInputElement).name;
+      if (name === "sign" || name === "encrypt" || name === "identity") void this.lookUpKeys();
+    });
     (this.form.elements.namedItem("identity") as HTMLSelectElement).addEventListener("change", () => this.changeIdentity());
     this.editor.addEventListener("paste", (event) => {
       event.preventDefault();
@@ -430,8 +451,11 @@ export class Composer {
     set("receipt", this.prefs.readReceipt);
     set("dsn", this.prefs.dsn);
     set("tls", this.prefs.requireTLS);
+    set("sign", Boolean(identity?.pgpSign || this.prefs.pgpSign));
+    set("encrypt", Boolean(identity?.pgpEncrypt || this.prefs.pgpEncrypt));
     this.root.dataset.pgpSign = String(identity?.pgpSign || this.prefs.pgpSign);
     this.root.dataset.pgpEncrypt = String(identity?.pgpEncrypt || this.prefs.pgpEncrypt);
+    void this.lookUpKeys();
   }
 
   private identity(): ComposeIdentity | undefined {
@@ -521,6 +545,7 @@ export class Composer {
     field.list.hidden = true;
     this.paintRecipients(field);
     this.changed();
+    void this.lookUpKeys();
     return true;
   }
 
@@ -650,8 +675,13 @@ export class Composer {
       readReceiptRequest: (this.form.elements.namedItem("receipt") as HTMLInputElement).checked ? 1 : 0,
       dsn: (this.form.elements.namedItem("dsn") as HTMLInputElement).checked ? 1 : 0,
       requireTLS: (this.form.elements.namedItem("tls") as HTMLInputElement).checked ? 1 : 0,
-      pgpSign: this.root.dataset.pgpSign === "true" ? 1 : 0,
-      pgpEncrypt: this.root.dataset.pgpEncrypt === "true" ? 1 : 0,
+      pgpSign: (this.form.elements.namedItem("sign") as HTMLInputElement).checked ? 1 : 0,
+      pgpEncrypt: (this.form.elements.namedItem("encrypt") as HTMLInputElement).checked ? 1 : 0,
+      signFingerprint: "",
+      signPassphrase: "",
+      sign: "",
+      encryptFingerprints: "",
+      encryptCertificates: [],
       messageFolder: this.draftRef?.folder || "",
       messageUid: this.draftRef?.uid || 0
     };
@@ -659,15 +689,107 @@ export class Composer {
 
   send(): void {
     if (this.sending || this.saving) return;
+    void this.sendReady();
+  }
+
+  private async sendReady(): Promise<void> {
     try {
       const values = this.values(this.saveFolder());
       if (!values.to && !values.cc && !values.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empfänger an."));
       if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anhänge werden noch hochgeladen."));
       if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anhänge vor dem Senden."));
+      if (values.pgpEncrypt && this.missingKeys.length) {
+        throw new ApiError(0, t("CRYPTO.MISSING_KEYS", "Für diese Empfänger fehlt ein Schlüssel: %LIST%.").replace("%LIST%", this.missingKeys.join(", ")));
+      }
+      await this.attachCrypto(values);
       this.sending = true;
       this.setBusy(true, t("COMPOSE.SENDING", "Wird gesendet …"));
       this.callbacks.send(values);
     } catch (error) { this.setError(explain(error)); }
+  }
+
+  private async lookUpKeys(): Promise<void> {
+    window.clearTimeout(this.cryptoTimer);
+    const sign = (this.form.elements.namedItem("sign") as HTMLInputElement).checked;
+    const encrypt = (this.form.elements.namedItem("encrypt") as HTMLInputElement).checked;
+    const hint = this.root.querySelector("#compose-crypto") as HTMLElement;
+    if (!this.prefs.gnupg || (!sign && !encrypt)) {
+      this.missingKeys = [];
+      hint.hidden = true;
+      return;
+    }
+    this.cryptoTimer = window.setTimeout(async () => {
+      try {
+        if (!this.gnuKeys) this.gnuKeys = await loadGnuKeys();
+        const recipients = [...(this.fields.get("to")?.values || []), ...(this.fields.get("cc")?.values || [])];
+        const missing: string[] = [];
+        if (encrypt) {
+          for (const value of recipients) {
+            const found = await keysFor(value, this.gnuKeys);
+            if (!found.length) missing.push(emailOf(value));
+          }
+        }
+        this.missingKeys = missing;
+        hint.hidden = !missing.length;
+        hint.textContent = missing.length
+          ? t("CRYPTO.MISSING_KEYS", "Für diese Empfänger fehlt ein Schlüssel: %LIST%.").replace("%LIST%", missing.join(", "))
+          : "";
+      } catch (error) {
+        hint.hidden = false;
+        hint.textContent = explain(error);
+      }
+    }, 300);
+  }
+
+  private async attachCrypto(values: ComposeValues): Promise<void> {
+    const identity = this.identity();
+    const sign = values.pgpSign === 1;
+    const encrypt = values.pgpEncrypt === 1;
+    if (!sign && !encrypt) return;
+    if (this.prefs.gnupg && !this.gnuKeys) this.gnuKeys = await loadGnuKeys();
+    const from = emailOf(identity?.email || "");
+    const secret = (this.gnuKeys || []).find((key) => key.secret && key.email.toLowerCase() === from)
+      || (this.gnuKeys || []).find((key) => key.secret);
+    if (sign && secret) {
+      let pass = rememberedPass(secret.id);
+      if (!pass) {
+        const answer = await this.callbacks.passphrase(
+          t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"),
+          t("CRYPTO.PASSPHRASE", "Passphrase")
+        );
+        if (!answer) throw new ApiError(0, t("CRYPTO.PASSPHRASE_REQUIRED", "Ohne Passphrase wird nicht signiert."));
+        pass = answer.value;
+        rememberPass(secret.id, pass, answer.remember);
+      }
+      values.signFingerprint = secret.id;
+      values.signPassphrase = pass;
+    } else if (sign && identity?.smimeCertificate && identity.smimeKey) {
+      values.sign = "S/MIME";
+      let pass = rememberedPass(`smime:${identity.id}`);
+      if (!pass) {
+        const answer = await this.callbacks.passphrase(
+          t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"),
+          t("CRYPTO.PASSPHRASE", "Passphrase")
+        );
+        if (answer) {
+          pass = answer.value;
+          rememberPass(`smime:${identity.id}`, pass, answer.remember);
+        }
+      }
+      values.signPassphrase = pass;
+    }
+    if (encrypt && this.prefs.gnupg) {
+      const recipients = [values.to, values.cc].join(", ").split(",").map((item) => item.trim()).filter(Boolean);
+      const ids: string[] = [];
+      for (const value of recipients) {
+        const found = await keysFor(value, this.gnuKeys || []);
+        found.forEach((key) => { if (!ids.includes(key.id)) ids.push(key.id); });
+      }
+      if (secret && !ids.includes(secret.id)) ids.push(secret.id);
+      values.encryptFingerprints = JSON.stringify(ids);
+    } else if (encrypt && identity?.smimeCertificate) {
+      values.encryptCertificates = [identity.smimeCertificate];
+    }
   }
 
   private saveFolder(): string {

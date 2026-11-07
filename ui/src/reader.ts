@@ -1,5 +1,6 @@
 // Brief-Spalte: Kopf, Hinweisleisten, Anhänge, iframe und die Sammelansicht bei Mehrfachauswahl.
 import { icon, type IconName } from "./icons";
+import { t } from "./i18n";
 import type { CalendarEvent } from "./letter";
 
 export interface ReaderPerson { name: string; email: string }
@@ -56,6 +57,18 @@ export interface ReaderData {
   zip: boolean;
   calendar: CalendarEvent | null;
   place: ReaderPlace;
+  /** Verschlüsselung oder Signatur, leer wenn die Mail keines von beiden trägt. */
+  crypto: ReaderCrypto | null;
+}
+
+export interface ReaderCrypto {
+  encrypted: boolean;
+  signed: boolean;
+  autocrypt: boolean;
+  smime: boolean;
+  /** ok, bad oder noch offen. */
+  state: "" | "ok" | "bad";
+  text: string;
 }
 
 export interface BulkData {
@@ -137,6 +150,23 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
   if (data.receipt) {
     bars.push(bar("receipt", "receipt", `Der Absender bittet um eine Lesebestätigung an ${data.receipt}.`,
       textButton("m-receipt", "Bestätigung senden") + textButton("m-receipt-skip", "Nicht senden")));
+  }
+  if (data.crypto && (data.crypto.encrypted || data.crypto.signed || data.crypto.autocrypt)) {
+    const actions = [
+      data.crypto.encrypted ? textButton("m-decrypt", t("CRYPTO.DECRYPT", "Entschlüsseln")) : "",
+      data.crypto.signed ? textButton("m-verify", t("CRYPTO.VERIFY", "Signatur prüfen")) : "",
+      data.crypto.smime ? textButton("m-smime-certs", t("SMIME.IMPORT_FROM_MAIL", "Zertifikate übernehmen")) : "",
+      data.crypto.autocrypt ? textButton("m-autocrypt", t("CRYPTO.IMPORT_AUTOCRYPT", "Schlüssel übernehmen")) : ""
+    ].join("");
+    const mark = data.crypto.state === "bad" ? "shield-alert" : "shield-check";
+    const fallback = data.crypto.encrypted && data.crypto.signed
+      ? t("CRYPTO.BOTH", "Diese Mail ist verschlüsselt und signiert.")
+      : data.crypto.encrypted
+        ? t("CRYPTO.ENCRYPTED", "Diese Mail ist verschlüsselt.")
+        : data.crypto.signed
+          ? t("CRYPTO.SIGNED", "Diese Mail ist signiert.")
+          : t("CRYPTO.AUTOCRYPT", "Der Absender legt einen Schlüssel bei.");
+    bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
   }
 
   const cal = data.calendar ? `

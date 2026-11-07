@@ -11,6 +11,10 @@ import {
   buildTree, displayName, flattenTree, folderPath, parseAcl, parseFolders, renderAcl, KOLAB_KEYS,
   type FolderAction, type FolderDesk, type FolderInfo, type FolderModel
 } from "./folders";
+import {
+  autocryptHeader, autocryptKey, bodyFromDecrypt, emptyParts, gnupgDecrypt, loadGnuKeys, readParts,
+  pgpVerify, rememberedPass, rememberPass, smimeDecrypt, smimeVerify, downloadText, type CryptoParts
+} from "./crypto";
 import { t } from "./i18n";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
@@ -61,6 +65,10 @@ interface Msg {
   threadUnseen: number[];
   headers: Record<string, string>;
   auth: { spf: string; dkim: string; dmarc: string };
+  crypto: CryptoParts;
+  autocrypt: string;
+  cryptoState: "" | "ok" | "bad";
+  cryptoText: string;
 }
 
 interface ListResult {
@@ -491,6 +499,27 @@ class Session {
       return;
     }
     try {
+      if (name === "export-key") {
+        const row = this.desk?.keys[Number(data.index)];
+        if (!row) return;
+        if (row.source === "gnupg" && row.id) {
+          let pass = "";
+          if (row.secret) {
+            pass = rememberedPass(row.id);
+            if (!pass) {
+              const answer = await this.view.askSecret(t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"), t("CRYPTO.PASSPHRASE", "Passphrase"));
+              if (!answer) return;
+              pass = answer.value;
+              rememberPass(row.id, pass, answer.remember);
+            }
+          }
+          const pem = await call<string>("GnupgExportKey", { keyId: row.id, isPrivate: row.secret ? 1 : 0, passphrase: pass });
+          if (typeof pem === "string" && pem) downloadText(`${row.email || row.id}.asc`, pem);
+          return;
+        }
+        if (row.armored) downloadText(`${row.email || "key"}.asc`, row.armored);
+        return;
+      }
       if (name === "open") {
         this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
         this.view.showSettings(this.desk);
@@ -1109,7 +1138,11 @@ class Session {
       threads: Array.isArray(item.threads) ? item.threads.map(Number).filter(Boolean) : [],
       threadUnseen: Array.isArray(item.threadUnseen) ? item.threadUnseen.map(Number).filter(Boolean) : [],
       headers,
-      auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
+      auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) },
+      crypto: full ? readParts(item) : emptyParts(),
+      autocrypt: full ? autocryptHeader(headers) : "",
+      cryptoState: "",
+      cryptoText: ""
     };
   }
 
@@ -1375,7 +1408,17 @@ class Session {
       contacts: this.caps.contacts,
       zip: this.prefs.zip,
       calendar,
-      place: this.place()
+      place: this.place(),
+      crypto: message.crypto.pgpEncrypted || message.crypto.pgpSigned || message.crypto.smimeEncrypted || message.crypto.smimeSigned || message.autocrypt
+        ? {
+          encrypted: Boolean(message.crypto.pgpEncrypted || message.crypto.smimeEncrypted),
+          signed: Boolean(message.crypto.pgpSigned || message.crypto.smimeSigned),
+          autocrypt: Boolean(message.autocrypt),
+          smime: Boolean(message.crypto.smimeSigned || message.crypto.smimeEncrypted),
+          state: message.cryptoState,
+          text: message.cryptoText
+        }
+        : null
     };
     this.view.setReader(data, "", "");
   }
@@ -1405,7 +1448,8 @@ class Session {
       markdown: Boolean(data.markdown), spellcheck: Boolean(data.allowSpellcheck), autosave: Boolean(data.AllowDraftAutosave ?? true),
       draftsFolder: this.draftsFolder, sentFolder: this.sentFolder, replySameFolder: Boolean(data.ReplySameFolder),
       attachmentLimit: Number(data.attachmentLimit || 0), readReceipt: Boolean(data.requestReadReceipt), dsn: Boolean(data.requestDsn),
-      requireTLS: Boolean(data.requireTLS), pgpSign: Boolean(data.pgpSign), pgpEncrypt: Boolean(data.pgpEncrypt)
+      requireTLS: Boolean(data.requireTLS), pgpSign: Boolean(data.pgpSign), pgpEncrypt: Boolean(data.pgpEncrypt),
+      gnupg: this.caps.gnupg
     }, this.identities);
   }
 
@@ -1827,6 +1871,94 @@ class Session {
   }
 
   /** Mail-Aktionen aus der Oberfläche (Phase 1). */
+  private async passFor(id: string): Promise<string | null> {
+    const known = rememberedPass(id);
+    if (known) return known;
+    const answer = await this.view.askSecret(t("CRYPTO.PASSPHRASE_TITLE", "Passphrase"), t("CRYPTO.PASSPHRASE", "Passphrase"));
+    if (!answer) return null;
+    rememberPass(id, answer.value, answer.remember);
+    return answer.value;
+  }
+
+  private async decryptOpen(): Promise<void> {
+    const message = this.current;
+    if (!message) return;
+    try {
+      let raw = "";
+      if (message.crypto.pgpEncrypted && this.caps.gnupg) {
+        const keys = await loadGnuKeys();
+        const secret = keys.find((key) => key.secret) || null;
+        const pass = await this.passFor(secret?.id || "gnupg");
+        if (pass == null) return;
+        raw = await gnupgDecrypt(message.folder, message.uid, message.crypto.pgpEncrypted.partId, secret?.id || "", pass);
+      } else if (message.crypto.smimeEncrypted) {
+        const identity = this.identities.find((item) => item.smimeKey && item.smimeCertificate) || null;
+        const pass = await this.passFor(`smime:${identity?.id || ""}`);
+        if (pass == null) return;
+        raw = await smimeDecrypt(message.folder, message.uid, message.crypto.smimeEncrypted.partId, identity?.smimeCertificate || "", identity?.smimeKey || "", pass);
+      } else return;
+      if (!raw) throw new ApiError(0, t("CRYPTO.DECRYPT_FAIL", "Die Mail ließ sich nicht entschlüsseln."));
+      const body = bodyFromDecrypt(raw);
+      if (body.html) { message.html = body.html; this.letter.mode = "html"; }
+      if (body.plain) message.plain = body.plain;
+      message.cryptoState = "ok";
+      message.cryptoText = t("CRYPTO.DECRYPTED", "Entschlüsselt.");
+      await this.paintLetter();
+    } catch (error) {
+      message.cryptoState = "bad";
+      message.cryptoText = explain(error);
+      await this.paintLetter();
+    }
+  }
+
+  private async verifyOpen(): Promise<void> {
+    const message = this.current;
+    if (!message) return;
+    try {
+      const result = message.crypto.pgpSigned
+        ? await pgpVerify(message.folder, message.uid, message.crypto.pgpSigned)
+        : message.crypto.smimeSigned
+          ? await smimeVerify(message.folder, message.uid, message.crypto.smimeSigned)
+          : null;
+      if (!result) return;
+      message.cryptoState = result.ok ? "ok" : "bad";
+      message.cryptoText = result.text;
+    } catch (error) {
+      message.cryptoState = "bad";
+      message.cryptoText = explain(error);
+    }
+    await this.paintLetter();
+  }
+
+  private async importAutocrypt(): Promise<void> {
+    const message = this.current;
+    const parsed = message ? autocryptKey(message.autocrypt) : null;
+    if (!message || !parsed) return;
+    try {
+      await call("PgpImportKey", { key: parsed.key, keyId: "", email: parsed.email, backup: 1, gnuPG: this.caps.gnupg ? 1 : 0 });
+      this.view.notice(t("CRYPTO.KEY_IMPORTED", "Schlüssel übernommen."));
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+
+  private async importSmimeCerts(): Promise<void> {
+    const message = this.current;
+    const part = message?.crypto.smimeSigned || message?.crypto.smimeEncrypted;
+    if (!message || !part) return;
+    try {
+      try {
+        await call("SMimeImportCertificatesFromMessage", {
+          folder: message.folder, uid: message.uid, partId: part.partId, sigPartId: part.sigPartId
+        });
+      } catch { /* Die Server-Aktion speichert die Zertifikate beim Prüfen. */ }
+      if (message.crypto.smimeSigned) await smimeVerify(message.folder, message.uid, message.crypto.smimeSigned);
+      this.view.notice(t("SMIME.IMPORTED", "Zertifikate übernommen, soweit der Server sie lesen konnte."));
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+
   private async act(name: string, data: Record<string, string>): Promise<void> {
     const message = this.current;
     const ref = Number(data.ref || data.uid || 0);
@@ -1983,6 +2115,18 @@ class Session {
       case "swap":
         this.letter.swap = !this.letter.swap;
         await this.paintLetter();
+        return;
+      case "decrypt":
+        await this.decryptOpen();
+        return;
+      case "verify":
+        await this.verifyOpen();
+        return;
+      case "autocrypt":
+        await this.importAutocrypt();
+        return;
+      case "smime-certs":
+        await this.importSmimeCerts();
         return;
       case "receipt":
       case "receipt-skip": {

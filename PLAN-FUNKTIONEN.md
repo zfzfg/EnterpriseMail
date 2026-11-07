@@ -411,7 +411,7 @@ Hinweis aus der README: In der Vorschau ist ManageSieve aus. Für die Prüfung S
 
 ---
 
-## 9. Phase 7: Verschlüsselung
+## 9. Phase 7: Verschlüsselung – ERLEDIGT
 
 Alt: `dev/Stores/User/{OpenPGP,GnuPG,Pgp,SMime,Mailvelope}.js`, `dev/View/Popup/OpenPgp*.js`, `SMimeImport.js`, `Settings/User/Security.js`, `dev/Model/MimeHeaderAutocrypt.js`.
 `AGENTS.md` sagt: kein neues Krypto-Produkt bauen. Also nur die Server-Wege (GnuPG, S/MIME) und die vorhandenen Aktionen nutzen. Browser-OpenPGP (OpenPGP.js) und Mailvelope nur, wenn der Benutzer es ausdrücklich will. Vorher fragen.
@@ -422,6 +422,8 @@ Alt: `dev/Stores/User/{OpenPGP,GnuPG,Pgp,SMime,Mailvelope}.js`, `dev/View/Popup/
 - Schlüssel-Abschnitt ergänzen: Schlüssel anzeigen und exportieren (`GnupgExportKey`), löschen (`GnupgDeleteKey`, `DeletePGPKey`) mit Bestätigung, Schlüsselpaar erzeugen über GnuPG (`GnupgGenerateKey`), gespeicherte Schlüssel (`GetStoredPGPKeys`, `StorePGPKey`, `PgpStoreKeyPair`).
 - S/MIME: Zertifikat erzeugen (`SMimeCreateCertificate`), privaten Schlüssel exportieren (`SMimeExportPrivateKey`), Zertifikate aus einer Mail übernehmen (`SMimeImportCertificatesFromMessage`).
 - Autocrypt-Kopf beim Lesen: Schlüssel zum Import anbieten.
+
+Umgesetzt über die Server-Aktionen in `ui/src/crypto.ts` (GnuPG, S/MIME). `SMimeImportCertificatesFromMessage` ist im PHP leer; Zertifikate aus einer Mail landen über `SMimeVerifyMessage`. In der Vorschau ohne GnuPG-Schlüssel nicht live entschlüsselt.
 
 ---
 
@@ -490,7 +492,7 @@ Vorgehen:
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Erledigt |
 | 5 | Kontakte | Erledigt |
 | 6 | Sieve-Formular, Abwesenheitsnotiz | Erledigt |
-| 7 | Verschlüsselung | Niedrig bis mittel |
+| 7 | Verschlüsselung | Erledigt |
 | 8 | Admin | Mittel |
 | 9 | Plugins | Nach Rückfrage beim Benutzer |
 

@@ -201,6 +201,7 @@ export interface MailView {
   setAccounts(items: AccountItem[]): void;
   pickFolder(title: string, folders: PickerFolder[], exclude: string): Promise<string | null>;
   ask(title: string, label: string, value?: string): Promise<string | null>;
+  askSecret(title: string, label: string): Promise<{ value: string; remember: boolean } | null>;
   confirm(title: string, text: string, ok: string, danger?: boolean): Promise<boolean>;
   preview(name: string, url: string, kind: "image" | "pdf" | "text"): void;
   configureCompose(prefs: ComposePreferences, identities: ComposeIdentity[]): void;
@@ -238,7 +239,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   let book: Book | null = null;
   let composePrefs: ComposePreferences = {
     editor: "Plain", markdown: false, spellcheck: false, autosave: true, draftsFolder: "", sentFolder: "",
-    replySameFolder: false, attachmentLimit: 0, readReceipt: false, dsn: false, requireTLS: false, pgpSign: false, pgpEncrypt: false
+    replySameFolder: false, attachmentLimit: 0, readReceipt: false, dsn: false, requireTLS: false, pgpSign: false, pgpEncrypt: false, gnupg: false
   };
   let composeIdentities: ComposeIdentity[] = [];
 
@@ -549,6 +550,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <form class="dialog-body" data-action="prompt-form">
             <h2 id="prompt-title" class="title title-md"></h2>
             <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
+            <label class="check" id="prompt-remember-row" hidden><input id="prompt-remember" type="checkbox"> ${esc(t("CRYPTO.REMEMBER_SESSION", "Für diese Sitzung merken"))}</label>
             <div class="dialog-actions">
               <button type="button" class="text-btn" data-action="close-dialog">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("check", "Übernehmen")}</button>
@@ -615,7 +617,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       save: (values) => actions.saveCompose(values),
       close: (discard) => actions.closeCompose(discard),
       mobile: (open) => { if (!wide()) pane(open ? "compose" : "list"); },
-      notice: (text) => { const slot = shell?.querySelector("#notice"); if (slot) slot.textContent = text; }
+      notice: (text) => { const slot = shell?.querySelector("#notice"); if (slot) slot.textContent = text; },
+      passphrase: (title, label) => promptDialog(title, label, "", true)
     });
     composer.configure(composePrefs, composeIdentities);
     book = mountBook(next.querySelector("#book") as HTMLElement, {
@@ -956,6 +959,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         order[index] = order[next];
         order[next] = swap;
         void actions.settings?.(list === "accounts" ? "sort-accounts" : "sort-identities", { order: order.join(",") });
+      } else if (action === "settings-export") {
+        void actions.settings?.("export-key", { index: target.dataset.index || "" });
       } else if (action === "settings-import") {
         void actions.settings?.("import-account", { email: target.dataset.email || "" });
       } else if (action === "mailto-register") {
@@ -986,7 +991,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const payload = {
           id: target.dataset.id || "",
           email: target.dataset.email || "",
-          name: target.dataset.name || ""
+          name: target.dataset.name || "",
+          secret: target.dataset.secret || "",
+          index: target.dataset.index || ""
         };
         void (async () => {
           if (action === "settings-delete") {
@@ -1640,6 +1647,39 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     actions.act("f-desk", {});
   }
 
+  function promptDialog(title: string, label: string, value: string, secret: boolean): Promise<{ value: string; remember: boolean } | null> {
+    const dialog = shell?.querySelector("#prompt-dlg") as HTMLDialogElement | null;
+    if (!dialog) return Promise.resolve(null);
+    const input = dialog.querySelector("#prompt-input") as HTMLInputElement;
+    const form = dialog.querySelector("form") as HTMLFormElement;
+    const rememberRow = dialog.querySelector("#prompt-remember-row") as HTMLElement;
+    const remember = dialog.querySelector("#prompt-remember") as HTMLInputElement;
+    (dialog.querySelector("#prompt-title") as HTMLElement).textContent = title;
+    (dialog.querySelector("#prompt-label") as HTMLElement).textContent = label;
+    input.type = secret ? "password" : "text";
+    input.autocomplete = secret ? "current-password" : "off";
+    input.value = value;
+    remember.checked = false;
+    rememberRow.hidden = !secret;
+    dialog.returnValue = "";
+    dialog.showModal();
+    input.focus({ preventScroll: true });
+    return new Promise((resolve) => {
+      const onSubmit = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        dialog.close("ok");
+      };
+      form.addEventListener("submit", onSubmit);
+      dialog.addEventListener("close", () => {
+        form.removeEventListener("submit", onSubmit);
+        input.type = "text";
+        rememberRow.hidden = true;
+        resolve(dialog.returnValue === "ok" ? { value: input.value, remember: remember.checked } : null);
+      }, { once: true });
+    });
+  }
+
   return {
     showLogin,
     setLoginBusy,
@@ -1875,28 +1915,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       });
     },
     ask(title, label, value = "") {
-      const dialog = shell?.querySelector("#prompt-dlg") as HTMLDialogElement | null;
-      if (!dialog) return Promise.resolve(null);
-      const input = dialog.querySelector("#prompt-input") as HTMLInputElement;
-      const form = dialog.querySelector("form") as HTMLFormElement;
-      (dialog.querySelector("#prompt-title") as HTMLElement).textContent = title;
-      (dialog.querySelector("#prompt-label") as HTMLElement).textContent = label;
-      input.value = value;
-      dialog.returnValue = "";
-      dialog.showModal();
-      input.focus({ preventScroll: true });
-      return new Promise((resolve) => {
-        const onSubmit = (event: Event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          dialog.close("ok");
-        };
-        form.addEventListener("submit", onSubmit);
-        dialog.addEventListener("close", () => {
-          form.removeEventListener("submit", onSubmit);
-          resolve(dialog.returnValue === "ok" ? input.value.trim() : null);
-        }, { once: true });
-      });
+      return promptDialog(title, label, value, false).then((row) => row?.value ?? null);
+    },
+    askSecret(title, label) {
+      return promptDialog(title, label, "", true);
     },
     confirm(title, text, ok, danger = true) {
       return chooseDialog(title, text, ok, "", danger).then((value) => value === "ok");
