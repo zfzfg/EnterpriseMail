@@ -2265,10 +2265,10 @@ function renderReader(body, data, expanded) {
       <div class="files-head"><span class="mono">${data.files.length === 1 ? "1 Anhang" : `${data.files.length} Anh\xE4nge`}</span><span class="spacer"></span>
         ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">Alle als ZIP</span></button>` : ""}
       </div>
-      <ul class="file-list">
+      <ul class="file-list${data.simpleFiles ? " simple" : ""}">
         ${data.files.map((file) => `
           <li class="file">
-            ${file.thumb ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc4(file.name)} ansehen"><img src="${esc4(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
+            ${file.thumb && !data.simpleFiles ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc4(file.name)} ansehen"><img src="${esc4(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">
               ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc4(file.name)}">${esc4(file.name)}</button>` : `<span class="file-name" title="${esc4(file.name)}">${esc4(file.name)}</span>`}
               <span class="quiet">${esc4(file.size)}</span>
@@ -2614,6 +2614,7 @@ function createView(root3, actions) {
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc5(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzuf\xFCgen"))}</span></button></li>
         </ul>
       </div>`;
     const next = root3.querySelector(".shell");
@@ -2737,7 +2738,7 @@ function createView(root3, actions) {
     };
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
     else layer.addEventListener("transitionend", finish, { once: true });
-    opener?.focus();
+    opener?.focus({ preventScroll: true });
     opener = null;
   }
   function toggleFullscreen(force) {
@@ -2797,7 +2798,7 @@ function createView(root3, actions) {
         if (open) more.querySelector(".menu-item:not([hidden])")?.focus({ preventScroll: true });
       } else if (action === "m-address") {
         openAddrMenu(target);
-      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search") {
+      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search" || action === "m-addr-contact") {
         closeMenu();
         actions.act(action.slice(2), addrTarget);
       } else if (action === "m-check") {
@@ -3283,6 +3284,8 @@ function createView(root3, actions) {
     },
     setReader(data, loading2, error) {
       const body = shell?.querySelector("#reader-body");
+      const addContact = shell?.querySelector("[data-action='m-addr-contact']");
+      if (addContact) addContact.hidden = !data?.contacts;
       paintBar(data);
       if (!body) return;
       body.replaceChildren();
@@ -3809,6 +3812,8 @@ var Session = class {
   tagged = /* @__PURE__ */ new Set();
   alertItems = [];
   category = "all";
+  /** Laufende Nummer der Listenanfragen. */
+  listSeq = 0;
   mainEmail = "";
   caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
   desk = null;
@@ -3834,6 +3839,7 @@ var Session = class {
     soundName: "new-mail",
     useChecks: true,
     listInline: false,
+    simpleFiles: false,
     newWindow: false,
     zip: false,
     thumbs: false,
@@ -3952,6 +3958,7 @@ var Session = class {
       soundName: String(data.NotificationSound || "new-mail"),
       useChecks: bool(data.UseCheckboxesInList, true),
       listInline: bool(data.ListInlineAttachments, false),
+      simpleFiles: bool(data.simpleAttachmentsList, false),
       newWindow: bool(data.messageNewWindow, false),
       zip: Boolean(capa.AttachmentsActions),
       thumbs: Boolean(capa.AttachmentThumbnails),
@@ -4111,18 +4118,34 @@ var Session = class {
     const count = this.prefs.showUnreadCount && inbox?.unread ? `(${inbox.unread}) ` : "";
     document.title = `${count}${this.email}`;
   }
+  /** Suchstring, den der Server bekommt: KI-Kategorie oder die Suche (Format `name=wert&…` wie `AdvancedSearch.js`). */
+  listQuery() {
+    const keyword = (name) => `keyword=${encodeURIComponent("$ai_" + name)}`;
+    if (this.category === "needs_reply") return `${keyword("needs_reply")}&unanswered`;
+    if (["personal", "newsletter", "notification", "invoice"].includes(this.category)) return keyword(this.category);
+    return this.search;
+  }
+  /** Kennung des Listenkontexts; Antworten zu einem anderen Kontext werden verworfen. */
+  listContext() {
+    return JSON.stringify([this.accountHash, this.folder, this.listQuery()]);
+  }
   async loadList(append, quiet = false) {
     const start = append ? this.offset : 0;
-    if (!append && !quiet) this.view.setList([], "Mails werden geladen \u2026", "", false, Boolean(this.search));
+    const query = this.listQuery();
+    const context = this.listContext();
+    const seq = ++this.listSeq;
+    const stale = () => seq !== this.listSeq || context !== this.listContext();
+    if (!append && !quiet) this.view.setList([], "Mails werden geladen \u2026", "", false, Boolean(query));
     try {
       const result = await call("MessageList", {
         folder: this.folder,
         offset: start,
         limit: quiet && !append ? Math.max(this.pageSize, this.messages.length) : this.pageSize,
-        search: this.category === "needs_reply" ? "keyword:$ai_needs_reply is:unanswered" : this.category === "personal" ? "keyword:$ai_personal" : this.category === "newsletter" ? "keyword:$ai_newsletter" : this.category === "notification" ? "keyword:$ai_notification" : this.category === "invoice" ? "keyword:$ai_invoice" : this.search,
+        search: query,
         sort: "",
         uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
       });
+      if (stale()) return;
       const batch = (result["@Collection"] || []).map((item) => this.parseMessage(item));
       this.messages = append ? this.messages.concat(batch) : batch;
       this.offset = start + batch.length;
@@ -4137,10 +4160,11 @@ var Session = class {
       [...this.checked].forEach((uid) => {
         if (!present.has(uid)) this.checked.delete(uid);
       });
-      this.hasMore = this.search ? batch.length >= this.pageSize : this.offset < this.total;
+      this.hasMore = query ? batch.length >= this.pageSize : this.offset < this.total;
       this.paintList();
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
+      if (stale()) return;
       this.hasMore = false;
       this.view.setList(this.rows(), "", explain(error), false, Boolean(this.search));
     }
@@ -4203,6 +4227,7 @@ var Session = class {
       spamScore: Number(item.spamScore || 0),
       spamResult: String(item.spamResult || ""),
       isSpam: Boolean(item.isSpam),
+      hasVirus: Boolean(item.hasVirus),
       readReceipt: String(item.readReceipt || ""),
       headers,
       auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
@@ -4388,7 +4413,7 @@ var Session = class {
       calendar = this.calendarCache.get(ics.hash) || null;
       if (token2 !== this.renderToken || this.current !== message) return;
     }
-    const virus = /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "") && !/clean|no/i.test(message.headers["x-virus-status"] || "clean");
+    const virus = message.hasVirus || /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "") && !/clean|no/i.test(message.headers["x-virus-status"] || "clean");
     const spam = virus ? "Virenwarnung: Der Server hat in dieser Mail einen Virus gemeldet." : message.isSpam ? `Als Spam erkannt${message.spamScore ? ` (Wert ${message.spamScore})` : ""}${message.spamResult ? ` \xB7 ${message.spamResult}` : ""}.` : message.spamScore > 0 ? `Spam-Wert ${message.spamScore}${message.spamResult ? ` \xB7 ${message.spamResult}` : ""}.` : "";
     const receiptKey = `${message.folder}:${message.uid}`;
     const data = {
@@ -4423,6 +4448,8 @@ var Session = class {
       receipt: message.readReceipt && !hasFlag(message.flags, "$mdnsent") && !this.receiptSkipped.has(receiptKey) && message.folder !== this.sentFolder ? message.readReceipt : "",
       unsubscribe: Boolean(parseUnsubscribe(message.headers["list-unsubscribe"] || "", message.headers["list-unsubscribe-post"] || "")),
       files,
+      simpleFiles: this.prefs.simpleFiles,
+      contacts: this.caps.contacts,
       zip: this.prefs.zip,
       calendar,
       place: this.place()
@@ -5129,8 +5156,21 @@ ${body}`
       case "addr-search":
         if (data.email) {
           const input = document.querySelector("#search");
-          if (input) input.value = `from:${data.email}`;
-          await this.setSearch(`from:${data.email}`);
+          const query = `from=${encodeURIComponent(data.email)}`;
+          if (input) input.value = query;
+          await this.setSearch(query);
+        }
+        return;
+      case "addr-contact":
+        if (data.email && this.caps.contacts) {
+          try {
+            let card = writeProp(void 0, "fn", (data.name || "").trim() || data.email);
+            card = writeProp(card, "email", data.email);
+            await call("ContactSave", { uid: "", jCard: card });
+            this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugef\xFCgt.`);
+          } catch (error) {
+            this.view.notice(explain(error));
+          }
         }
         return;
       case "accounts":

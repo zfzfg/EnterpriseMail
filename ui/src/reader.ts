@@ -49,6 +49,10 @@ export interface ReaderData {
   receipt: string;
   unsubscribe: boolean;
   files: ReaderFile[];
+  /** Einfache Anhangsliste (`simpleAttachmentsList`): kompakte Zeilen ohne Vorschaubild. */
+  simpleFiles: boolean;
+  /** Kontakte verfügbar: Adressmenü bietet „Zu Kontakten“. */
+  contacts: boolean;
   zip: boolean;
   calendar: CalendarEvent | null;
   place: ReaderPlace;
@@ -151,10 +155,10 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
       <div class="files-head"><span class="mono">${data.files.length === 1 ? "1 Anhang" : `${data.files.length} Anhänge`}</span><span class="spacer"></span>
         ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">Alle als ZIP</span></button>` : ""}
       </div>
-      <ul class="file-list">
+      <ul class="file-list${data.simpleFiles ? " simple" : ""}">
         ${data.files.map((file) => `
           <li class="file">
-            ${file.thumb
+            ${file.thumb && !data.simpleFiles
               ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc(file.name)} ansehen"><img src="${esc(file.thumb)}" alt="" loading="lazy"></button>`
               : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">

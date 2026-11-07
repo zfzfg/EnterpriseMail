@@ -119,7 +119,7 @@ function propText(card: unknown, names: string[]): string {
   return "";
 }
 
-function writeProp(card: unknown, name: string, value: string): unknown[] {
+export function writeProp(card: unknown, name: string, value: string): unknown[] {
   const rows = Array.isArray(card) && card[0] === "vcard" && Array.isArray(card[1])
     ? (card[1] as unknown[][]).map((row) => (Array.isArray(row) ? row.slice() : row))
     : [["version", {}, "text", "4.0"]];

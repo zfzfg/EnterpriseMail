@@ -428,6 +428,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzufügen"))}</span></button></li>
         </ul>
       </div>`;
     const next = root.querySelector(".shell") as HTMLElement | null;
@@ -545,7 +546,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     const finish = () => { layer.hidden = true; };
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
     else layer.addEventListener("transitionend", finish, { once: true });
-    opener?.focus();
+    opener?.focus({ preventScroll: true });
     opener = null;
   }
 
@@ -609,7 +610,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         if (open) (more.querySelector(".menu-item:not([hidden])") as HTMLElement | null)?.focus({ preventScroll: true });
       } else if (action === "m-address") {
         openAddrMenu(target);
-      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search") {
+      } else if (action === "m-addr-write" || action === "m-addr-copy" || action === "m-addr-search" || action === "m-addr-contact") {
         closeMenu();
         actions.act(action.slice(2), addrTarget);
       } else if (action === "m-check") {
@@ -1082,6 +1083,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     },
     setReader(data, loading, error) {
       const body = shell?.querySelector("#reader-body") as HTMLElement | null;
+      const addContact = shell?.querySelector("[data-action='m-addr-contact']") as HTMLElement | null;
+      if (addContact) addContact.hidden = !data?.contacts;
       paintBar(data);
       if (!body) return;
       body.replaceChildren();

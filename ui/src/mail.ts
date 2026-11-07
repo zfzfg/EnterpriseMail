@@ -5,7 +5,7 @@ import {
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
 import type { ReaderFile, ReaderPlace } from "./reader";
-import { applyDesk, loadDesk, readCaps, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
+import { applyDesk, loadDesk, readCaps, writeProp, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
 import type { ComposeValues } from "./compose";
 import {
   createView, type ChatTurn, type ComposeSeed, type FolderRow, type MailView, type MessageRow,
@@ -57,6 +57,7 @@ interface Msg {
   spamScore: number;
   spamResult: string;
   isSpam: boolean;
+  hasVirus: boolean;
   readReceipt: string;
   headers: Record<string, string>;
   auth: { spf: string; dkim: string; dmarc: string };
@@ -91,6 +92,7 @@ interface Prefs {
   soundName: string;
   useChecks: boolean;
   listInline: boolean;
+  simpleFiles: boolean;
   newWindow: boolean;
   zip: boolean;
   thumbs: boolean;
@@ -224,6 +226,8 @@ class Session {
   private tagged = new Set<string>();
   private alertItems: { folder: string; uid: number; type: string; title: string }[] = [];
   private category = "all";
+  /** Laufende Nummer der Listenanfragen. */
+  private listSeq = 0;
   private mainEmail = "";
   private caps: Caps = { accounts: false, identities: false, contacts: false, sieve: false, openpgp: false, gnupg: false };
   private desk: SettingsSnapshot | null = null;
@@ -232,7 +236,7 @@ class Session {
     viewImages: "ask", whitelist: "", proxy: false, removeColors: false, allowStyles: false, minFontSize: 5,
     maxBlockquotes: 0, collapseBlockquotes: true, viewHtml: true, hideDeleted: true, showNext: false, readAuto: true,
     readDelay: 5, checkInterval: 15, showUnreadCount: false, desktop: true, sound: true, soundName: "new-mail",
-    useChecks: true, listInline: false, newWindow: false, zip: false, thumbs: false, webPath: ""
+    useChecks: true, listInline: false, simpleFiles: false, newWindow: false, zip: false, thumbs: false, webPath: ""
   };
   private trashFolder = "";
   private junkFolder = "";
@@ -345,6 +349,7 @@ class Session {
       soundName: String(data.NotificationSound || "new-mail"),
       useChecks: bool(data.UseCheckboxesInList, true),
       listInline: bool(data.ListInlineAttachments, false),
+      simpleFiles: bool(data.simpleAttachmentsList, false),
       newWindow: bool(data.messageNewWindow, false),
       zip: Boolean(capa.AttachmentsActions),
       thumbs: Boolean(capa.AttachmentThumbnails),
@@ -512,23 +517,37 @@ class Session {
     document.title = `${count}${this.email}`;
   }
 
+  /** Suchstring, den der Server bekommt: KI-Kategorie oder die Suche (Format `name=wert&…` wie `AdvancedSearch.js`). */
+  private listQuery(): string {
+    const keyword = (name: string) => `keyword=${encodeURIComponent("$ai_" + name)}`;
+    if (this.category === "needs_reply") return `${keyword("needs_reply")}&unanswered`;
+    if (["personal", "newsletter", "notification", "invoice"].includes(this.category)) return keyword(this.category);
+    return this.search;
+  }
+
+  /** Kennung des Listenkontexts; Antworten zu einem anderen Kontext werden verworfen. */
+  private listContext(): string {
+    return JSON.stringify([this.accountHash, this.folder, this.listQuery()]);
+  }
+
   private async loadList(append: boolean, quiet = false): Promise<void> {
     const start = append ? this.offset : 0;
-    if (!append && !quiet) this.view.setList([], "Mails werden geladen …", "", false, Boolean(this.search));
+    const query = this.listQuery();
+    const context = this.listContext();
+    const seq = ++this.listSeq;
+    // Eine neuere Anfrage im selben Kontext ersetzt die ältere; eine Antwort zu einem alten Kontext zeichnet nie.
+    const stale = () => seq !== this.listSeq || context !== this.listContext();
+    if (!append && !quiet) this.view.setList([], "Mails werden geladen …", "", false, Boolean(query));
     try {
       const result = await call<ListResult>("MessageList", {
         folder: this.folder,
         offset: start,
         limit: quiet && !append ? Math.max(this.pageSize, this.messages.length) : this.pageSize,
-        search: this.category === "needs_reply" ? "keyword:$ai_needs_reply is:unanswered"
-          : this.category === "personal" ? "keyword:$ai_personal"
-          : this.category === "newsletter" ? "keyword:$ai_newsletter"
-          : this.category === "notification" ? "keyword:$ai_notification"
-          : this.category === "invoice" ? "keyword:$ai_invoice"
-          : this.search,
+        search: query,
         sort: "",
         uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0
       });
+      if (stale()) return;
       const batch = (result["@Collection"] || []).map((item) => this.parseMessage(item));
       this.messages = append ? this.messages.concat(batch) : batch;
       this.offset = start + batch.length;
@@ -541,10 +560,11 @@ class Session {
       }
       const present = new Set(this.messages.map((message) => message.uid));
       [...this.checked].forEach((uid) => { if (!present.has(uid)) this.checked.delete(uid); });
-      this.hasMore = this.search ? batch.length >= this.pageSize : this.offset < this.total;
+      this.hasMore = query ? batch.length >= this.pageSize : this.offset < this.total;
       this.paintList();
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
+      if (stale()) return;
       this.hasMore = false;
       this.view.setList(this.rows(), "", explain(error), false, Boolean(this.search));
     }
@@ -608,6 +628,7 @@ class Session {
       spamScore: Number(item.spamScore || 0),
       spamResult: String(item.spamResult || ""),
       isSpam: Boolean(item.isSpam),
+      hasVirus: Boolean(item.hasVirus),
       readReceipt: String(item.readReceipt || ""),
       headers,
       auth: { spf: authStatus(item.spf), dkim: authStatus(item.dkim), dmarc: authStatus(item.dmarc) }
@@ -802,7 +823,8 @@ class Session {
       if (token !== this.renderToken || this.current !== message) return;
     }
 
-    const virus = /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "")
+    // Feld `hasVirus` (falls ein Server es liefert), sonst die Kopfzeilen wie bisher.
+    const virus = message.hasVirus || /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "")
       && !/clean|no/i.test(message.headers["x-virus-status"] || "clean");
     const spam = virus ? "Virenwarnung: Der Server hat in dieser Mail einen Virus gemeldet."
       : message.isSpam ? `Als Spam erkannt${message.spamScore ? ` (Wert ${message.spamScore})` : ""}${message.spamResult ? ` · ${message.spamResult}` : ""}.`
@@ -839,6 +861,8 @@ class Session {
         && message.folder !== this.sentFolder ? message.readReceipt : "",
       unsubscribe: Boolean(parseUnsubscribe(message.headers["list-unsubscribe"] || "", message.headers["list-unsubscribe-post"] || "")),
       files,
+      simpleFiles: this.prefs.simpleFiles,
+      contacts: this.caps.contacts,
       zip: this.prefs.zip,
       calendar,
       place: this.place()
@@ -1501,8 +1525,21 @@ class Session {
       case "addr-search":
         if (data.email) {
           const input = document.querySelector("#search") as HTMLInputElement | null;
-          if (input) input.value = `from:${data.email}`;
-          await this.setSearch(`from:${data.email}`);
+          const query = `from=${encodeURIComponent(data.email)}`;
+          if (input) input.value = query;
+          await this.setSearch(query);
+        }
+        return;
+      case "addr-contact":
+        if (data.email && this.caps.contacts) {
+          try {
+            let card = writeProp(undefined, "fn", (data.name || "").trim() || data.email);
+            card = writeProp(card, "email", data.email);
+            await call("ContactSave", { uid: "", jCard: card });
+            this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugefügt.`);
+          } catch (error) {
+            this.view.notice(explain(error));
+          }
         }
         return;
       case "accounts":

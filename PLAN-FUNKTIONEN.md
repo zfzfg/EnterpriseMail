@@ -1,6 +1,6 @@
 # Plan: Alte Funktionen in die neue Oberfläche holen
 
-Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (HEAD `cdfc6334a`).
+Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–2 in `740fa6cf5`, `18db471cb`, `2c5598608`, danach Nachbesserungen, siehe 4a).
 Bezugspunkt: Seit `90127a2d6` (Neue Mail-Hülle) läuft die Oberfläche als eigener TypeScript-Client unter `ui/`. Das alte Knockout-Frontend wurde in `388c3815d` entfernt. Den letzten vollständigen Stand des alten Frontends enthält **`387e27b19`**.
 
 Dieser Plan ist für eine KI geschrieben, die ihn umsetzt. Arbeite die Phasen der Reihe nach ab. Jede Phase endet mit einem Commit und einer Prüfung im Browser.
@@ -259,6 +259,20 @@ Neues Modul `ui/src/compose.ts`.
 
 ---
 
+## 4a. Nachbesserungen an Phase 0–2 (2026-11-07)
+
+> Nach einem Codeabgleich mit den Commits `740fa6cf5`, `18db471cb` und `2c5598608` korrigiert:
+> - **Hover:** Die restlichen Hover-Regeln in `shell.css` (Ordner, Menüeinträge, Text-/Symbolknöpfe, Filter, Tintenknopf) stehen jetzt in `@media (hover: hover)`. Der aktive Ordner (`aria-current`) bleibt außerhalb hervorgehoben.
+> - **Fokus:** `closeLayer` in `view.ts` gibt den Fokus mit `preventScroll: true` zurück.
+> - **„Zu Kontakten“** im Adressmenü des Briefs (fehlte aus 3.7). Nur sichtbar bei Kontakt-Fähigkeit (`caps.contacts`), speichert über `ContactSave` mit jCard (`writeProp` aus `settings.ts` wird dafür exportiert) und meldet das Ergebnis.
+> - **`simpleAttachmentsList`** wird aus den AppData gelesen: einspaltige, kompakte Anhangsliste ohne Vorschaubilder. Vorschau/Lightbox über den Dateinamen, Download und ZIP bleiben.
+> - **Virenwarnung** zusätzlich über ein Feld `hasVirus` im `Message`-Ergebnis; die Kopfzeilen-Erkennung bleibt der aktuelle Serverweg (der Server liefert `hasVirus` derzeit nicht).
+> - **Veraltete Listenantworten:** `loadList` hat eine Anfragefolge (`listSeq`) und eine Kontextprüfung (Konto, Ordner, effektive Suche). Nur die Antwort zur aktuellen Auswahl wird gezeichnet, auch bei Fehlern. Phase 3 erweitert den Kontext um Sortierung und Thread.
+> - **„Weitere“ bei KI-Kategorien:** Bei aktiver Kategorie gilt jetzt dieselbe Regel wie bei der Suche (volle Seite = es gibt mehr), statt der Gesamtzahl des Ordners.
+> - **Suchsyntax:** Der Client nutzt das Format des alten `AdvancedSearch.js` (`name=wert&…`, z. B. `from=a%40b.de`, `keyword=%24ai_invoice&unanswered`), auch für „Mails von dieser Adresse“ und die KI-Kategorien. Der Server versteht zusätzlich das RainLoop-Format `from:… is:…`, das alte Frontend erzeugte es aber nicht.
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`, Token-Prüfung (0 Fehler, die fünf bekannten Roh-Hex-Warnungen in `letter.ts`). **Im Browser ungetestet**, weil die Docker-Vorschau bei dieser Nachbesserung nicht lief; das holt die Browserprüfung von Phase 3 nach.
+
 ## 5. Phase 3: Ordner und Suche
 
 Alt: `dev/Settings/User/Folders.js`, `Views/User/SettingsFolders.html`, `SettingsFolderItem.html`, `Popups Folder*`, `dev/Common/Folders.js`.
@@ -282,7 +296,7 @@ Alt: `dev/Settings/User/Folders.js`, `Views/User/SettingsFolders.html`, `Setting
 ### 5.3 Erweiterte Suche
 Alt: `dev/View/Popup/AdvancedSearch.js`.
 - Knopf `filter` neben dem Suchfeld öffnet ein Formular: Von, An, Betreff, Text, Datum (von/bis oder Zeitraum), Größe, mit Anhang, ungelesen, markiert, beantwortet, Schlagwort, Unterordner einschließen.
-- Ergebnis als Suchstring im SnappyMail-Format (`from:`, `to:`, `subject:`, `text:`, `date:`, `has:attachment`, `is:unseen`, `is:flagged`, `is:answered`, `keyword:`, `in:subfolders`); Format aus `AdvancedSearch.js` übernehmen. Der String steht danach sichtbar im Suchfeld.
+- Ergebnis als Suchstring im SnappyMail-Format aus `AdvancedSearch.js`, URL-kodiert: `from=…&to=…&subject=…&text=…&since=…&before=…&keyword=…&larger=…&smaller=…&in=subtree` sowie die Merker `attachment`, `unseen`, `flagged`, `answered`/`unanswered` (siehe `parseQueryString` in `MailSo/Imap/SearchCriterias.php`). Der String steht danach sichtbar im Suchfeld.
 - Schnellfilter-Chips unter dem Suchfeld: Ungelesen, Markiert, Mit Anhang.
 
 ### 5.4 Sortierung und Threads
