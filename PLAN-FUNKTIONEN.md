@@ -386,7 +386,17 @@ Neues Modul `ui/src/contacts.ts`. Kontakte bekommen eine eigene Ansicht (Eintrag
 
 ---
 
-## 8. Phase 6: Filter (Sieve) mit Formular
+## 8. Phase 6: Filter (Sieve) mit Formular – ERLEDIGT
+
+> Umgesetzt in `ui/src/sieve/script.ts` und `ui/src/sieve/form.ts`, angebunden in `settings.ts` und `view.ts`.
+>
+> Ein Skript wird in Regeln zerlegt: Name, aktiv, alle oder eine Bedingung (Von, An, Betreff, Kopfzeile, Text, Größe; enthält, ist, beginnt, endet, Regex), Aktionen (verschieben, kopieren, weiterleiten mit und ohne Kopie, ablehnen, verwerfen, gelesen, markieren, stop). Die Abwesenheitsnotiz ist ein eigener Block (an/aus, Zeitraum über `currentdate`, Betreff, Text, Adressen, Intervall) und erscheint nur, wenn die Erweiterung `vacation` in `Filters` → `Capa` steht oder das Skript sie schon enthält. Sortierung per Ziehen und über Auf/Ab. „Skript bearbeiten“ öffnet den Rohtext. Was der Parser nicht abbildet, bleibt nur dort, mit dem Grund davor.
+>
+> Speichern läuft über `FiltersScriptSave`, Aktivieren über `FiltersScriptActivate`.
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`, Token-Prüfung Schicht `app` ohne neue Fehler. Ein Rundlauf aus Formularfeldern in Sieve und zurück hält Regeln, abgeschaltete Regeln und die Abwesenheitsnotiz. Ein `set` aus `variables` bleibt Rohtext.
+>
+> **Nicht geprüft:** der Filter-Abschnitt im Browser. In der Docker-Vorschau ist ManageSieve aus, der Abschnitt bleibt zu.
 
 Alt: `dev/Sieve/**` (Parser, Modelle, Commands, Extensions), `dev/Settings/User/Filters.js`, `Views/User/SettingsFilters*.html`, `PopupsFilter.html`, `PopupsSieveScript.html`.
 
@@ -479,7 +489,7 @@ Vorgehen:
 | 3 | Ordner, Suche, Sortierung, Threads | Erledigt |
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Erledigt |
 | 5 | Kontakte | Erledigt |
-| 6 | Sieve-Formular, Abwesenheitsnotiz | Mittel (Abwesenheit hoch) |
+| 6 | Sieve-Formular, Abwesenheitsnotiz | Erledigt |
 | 7 | Verschlüsselung | Niedrig bis mittel |
 | 8 | Admin | Mittel |
 | 9 | Plugins | Nach Rückfrage beim Benutzer |

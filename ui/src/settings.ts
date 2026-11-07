@@ -1,6 +1,9 @@
 import { ApiError, call, explain, plugin } from "./api";
+import { parseFolders } from "./folders";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
+import { renderFilterEditor } from "./sieve/form";
+import { parseFilterScript } from "./sieve/script";
 import { readAppearance, type Appearance } from "./theme";
 
 export { writeProp } from "./jcard";
@@ -72,6 +75,8 @@ export interface SettingsSnapshot {
   accounts: AccountRow[];
   identities: IdentityRow[];
   scripts: ScriptRow[] | null;
+  sieveCapa: string[];
+  folderNames: string[];
   keys: KeyRow[];
   certs: CertRow[];
   notes: { accounts: string; contacts: string; filters: string; keys: string; certs: string };
@@ -158,6 +163,8 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
     accounts: [{ email: main, name: "", current: currentEmail === main, main: true, unread: null }],
     identities: [],
     scripts: caps.sieve ? [] : null,
+    sieveCapa: [],
+    folderNames: [],
     keys: [],
     certs: [],
     notes: { accounts: "", contacts: "", filters: "", keys: "", certs: "" },
@@ -186,10 +193,16 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
     const filters = await tryCall<{ Scripts?: unknown }>("Filters");
     if (filters.error) snap.notes.filters = filters.error;
     else if (filters.value) {
-      snap.scripts = values(filters.value.Scripts).map((item) => {
+      const bag = filters.value as { Scripts?: unknown; Capa?: unknown };
+      snap.sieveCapa = values(bag.Capa).map((item) => text(item)).filter(Boolean);
+      snap.scripts = values(bag.Scripts).map((item) => {
         const row = item as { name?: string; active?: boolean; body?: string };
         return { name: text(row.name), active: Boolean(row.active), body: text(row.body) };
       }).filter((row) => row.name);
+      const tree = await tryCall<Record<string, unknown>>("Folders");
+      if (!tree.error && tree.value) {
+        snap.folderNames = parseFolders(tree.value).folders.filter((item) => item.selectable).map((item) => item.fullName);
+      }
     }
   }
 
@@ -775,9 +788,11 @@ export function renderDesk(section: string, snap: SettingsSnapshot | null, edit:
     const current = edit?.kind === "script" && !edit.fresh
       ? snap.scripts.find((item) => item.name === edit.id)
       : null;
+    const source = current?.body || "";
+    const parsed = parseFilterScript(source);
     const editor = adding ? form("save-script", `
       ${field(t("GLOBAL.NAME", "Name"), "name", current?.name || "", "text", current ? "readonly" : "required")}
-      ${field(t("SETTINGS_DESK.SCRIPT", "Skript"), "body", current?.body || "", "area", "code")}
+      ${renderFilterEditor(current?.name || "", source, parsed.ok ? parsed.script : null, parsed.ok ? "" : parsed.reason, snap.folderNames, snap.sieveCapa.includes("vacation"), snap.sieveCapa)}
     `, t("GLOBAL.SAVE", "Speichern"), true) : "";
     const add = adding ? "" : button("settings-edit", t("SETTINGS_FILTERS.BUTTON_ADD_SCRIPT", "Skript hinzufügen"), { kind: "script", fresh: "1" });
     return `${error}<p class="mono">${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</p>${note(snap.notes.filters, true)}<ul class="set-list">${rows}</ul>${rows ? "" : note(t("SETTINGS_DESK.EMPTY", "Nichts vorhanden."))}${add}${editor}`;

@@ -61,7 +61,7 @@ Die Plugin-Beschreibung steht in `plugins/ai-copilot/README`. Die ältere Schild
 
 ## Einstellungen und Admin
 
-Einstellungen hängen am Konto-Menü: Erscheinungsbild, Allgemein, Sicherheit, Konten, Identitäten, Filter, Schlüssel und, wenn das Plugin aktiv ist, der Assistent. Das Adressbuch ist eine eigene Ansicht in der Seitenleiste und im Konto-Menü (`ui/src/contacts.ts`). In den Einstellungen bleibt davon nur die CardDAV-Synchronisierung, und nur wenn die AppData `ContactsSync` enthalten. Allgemein, Sicherheit und diese Synchronisierung speichern jedes Feld sofort. Ein Abschnitt bleibt zu, wenn der Server die Fähigkeit nicht hat. OpenPGP und S/MIME sind Liste, Import und die Felder an der Identität. Eine abgelaufene Sitzung öffnet den Anmelde-Dialog über dem Postfach.
+Einstellungen hängen am Konto-Menü: Erscheinungsbild, Allgemein, Sicherheit, Konten, Identitäten, Filter, Schlüssel und, wenn das Plugin aktiv ist, der Assistent. Das Adressbuch ist eine eigene Ansicht in der Seitenleiste und im Konto-Menü (`ui/src/contacts.ts`). In den Einstellungen bleibt davon nur die CardDAV-Synchronisierung, und nur wenn die AppData `ContactsSync` enthalten. Allgemein, Sicherheit und diese Synchronisierung speichern jedes Feld sofort. Ein Abschnitt bleibt zu, wenn der Server die Fähigkeit nicht hat. Filter sind das Formular aus Regeln und Abwesenheitsnotiz (`ui/src/sieve/`). Ein Skript, das sich nicht in Regeln zerlegen lässt, bleibt im Textfeld. OpenPGP und S/MIME sind Liste, Import und die Felder an der Identität. Eine abgelaufene Sitzung öffnet den Anmelde-Dialog über dem Postfach.
 
 Der Admin ist dieselbe Token-Datei, dicht, unter `/?admin`. Anmeldung, Domainliste, Aktivieren, Deaktivieren, Löschen, Abmelden.
 

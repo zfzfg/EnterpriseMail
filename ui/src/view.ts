@@ -5,6 +5,8 @@ import { t } from "./i18n";
 import { renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
 import { mountBook, type Book } from "./contacts";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
+import { ruleCard, syncFilterRow } from "./sieve/form";
+import { compileFilterForm, parseFilterScript } from "./sieve/script";
 import { renderFolderDesk, renderFolderMenu, renderQuota, renderSidebarRows, type FolderAction, type FolderDesk, type SidebarData } from "./folders";
 import { readSearchForm, renderSearchForm, serializeSearch, type QuickFlag, type SearchCriteria } from "./search";
 import { applyAppearance, type Appearance } from "./theme";
@@ -930,8 +932,19 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const box = shell?.querySelector<HTMLInputElement>("input[name='notice_ack']");
         if (box) box.checked = false;
         void actions.settings?.("assist-save", { notice_ack: "" });
+      } else if (action === "rule-add" || action === "cond-add" || action === "act-add" || action === "rule-remove" || action === "cond-remove" || action === "act-remove") {
+        editFilterDom(target, action);
+      } else if (action === "script-mode") {
+        toggleScriptMode(target);
       } else if (action === "settings-move") {
         const list = target.dataset.list || "";
+        if (list === "rules") {
+          const card = target.closest<HTMLElement>("[data-rule]");
+          if (!card) return;
+          const sibling = target.dataset.dir === "down" ? card.nextElementSibling : card.previousElementSibling;
+          if (sibling) target.dataset.dir === "down" ? sibling.after(card) : sibling.before(card);
+          return;
+        }
         const dir = target.dataset.dir === "down" ? 1 : -1;
         const rows = [...(shell?.querySelectorAll<HTMLElement>(list === "accounts" ? "[data-sort='account']" : "[data-sort='identity']") || [])];
         const key = list === "accounts" ? "email" : "id";
@@ -1082,8 +1095,18 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const data: Record<string, string> = {};
         new FormData(form).forEach((value, key) => { data[key] = String(value); });
         form.querySelectorAll<HTMLInputElement>("input[type='checkbox']").forEach((box) => {
-          data[box.name] = box.checked ? "1" : "";
+          if (box.name) data[box.name] = box.checked ? "1" : "";
         });
+        if (form.dataset.kind === "save-script") {
+          try {
+            const capa = (form.querySelector("[data-sieve-capa]")?.getAttribute("data-sieve-capa") || "").split(" ").filter(Boolean);
+            data.body = compileFilterForm(form, capa);
+          } catch (error) {
+            const slot = shell?.querySelector<HTMLElement>("#settings-error");
+            if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = error instanceof Error ? error.message : "Das Skript lässt sich nicht speichern."; }
+            return;
+          }
+        }
         void actions.settings?.(form.dataset.kind || "", data);
       }
     });
@@ -1151,6 +1174,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         return;
       }
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
+      const filterPart = (event.target as HTMLElement).dataset?.part;
+      if (filterPart === "field" || filterPart === "type") {
+        const row = (event.target as HTMLElement).closest<HTMLElement>(".rule-line");
+        if (row) syncFilterRow(row);
+      }
       const pref = input.dataset.pref || (event.target as HTMLSelectElement).dataset?.pref;
       if (!pref) return;
       const control = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -1171,6 +1199,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     shell.addEventListener("dragstart", (event) => {
       const row = (event.target as HTMLElement).closest<HTMLElement>("[data-sort]");
       if (!row || !event.dataTransfer) return;
+      if (row.dataset.sort === "rule") {
+        row.classList.add("dragging-rule");
+        event.dataTransfer.setData("application/x-sm-sort", "rule");
+        event.dataTransfer.effectAllowed = "move";
+        return;
+      }
       event.dataTransfer.setData("application/x-sm-sort", `${row.dataset.sort}:${row.dataset.email || row.dataset.id || ""}`);
       event.dataTransfer.effectAllowed = "move";
     });
@@ -1184,6 +1218,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const raw = event.dataTransfer?.getData("application/x-sm-sort") || "";
       if (!row || !raw) return;
       event.preventDefault();
+      if (raw === "rule" && row.dataset.sort === "rule") {
+        const from = shell?.querySelector<HTMLElement>(".dragging-rule");
+        if (from && from !== row) {
+          const nodes = [...(row.parentElement?.children || [])];
+          if (nodes.indexOf(from) < nodes.indexOf(row)) row.after(from);
+          else row.before(from);
+        }
+        return;
+      }
       const [kind, id] = raw.split(":");
       if (row.dataset.sort !== kind || !id) return;
       const rows = [...(shell?.querySelectorAll<HTMLElement>(`[data-sort='${kind}']`) || [])];
@@ -1195,6 +1238,73 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       order.splice(to, 0, id);
       void actions.settings?.(kind === "account" ? "sort-accounts" : "sort-identities", { order: order.join(",") });
     });
+    shell.addEventListener("dragend", () => shell?.querySelector(".dragging-rule")?.classList.remove("dragging-rule"));
+
+    function editFilterDom(target: HTMLElement, action: string): void {
+      const form = target.closest("form");
+      if (!form) return;
+      if (action === "rule-remove") { target.closest("[data-rule]")?.remove(); return; }
+      if (action === "cond-remove") { target.closest("[data-cond]")?.remove(); return; }
+      if (action === "act-remove") { target.closest("[data-act]")?.remove(); return; }
+      const kind = action === "rule-add" ? "rule" : action === "cond-add" ? "cond" : "act";
+      const template = form.querySelector<HTMLTemplateElement>(`[data-${kind}-template]`);
+      const host = action === "rule-add" ? form.querySelector("[data-rule-list]")
+        : target.closest("[data-rule]")?.querySelector(kind === "cond" ? ".conds" : ".acts");
+      if (!template || !host) return;
+      host.append(template.content.cloneNode(true));
+      form.querySelector("[data-rule-empty]")?.remove();
+      const added = host.lastElementChild as HTMLElement | null;
+      added?.querySelectorAll<HTMLElement>(".rule-line").forEach((row) => syncFilterRow(row));
+    }
+
+    function toggleScriptMode(target: HTMLElement): void {
+      const form = target.closest("form");
+      if (!form) return;
+      const rawBox = form.querySelector<HTMLInputElement>("[data-part='use-raw']");
+      const rawPane = form.querySelector<HTMLElement>("[data-editor='raw']");
+      const formPane = form.querySelector<HTMLElement>("[data-editor='form']");
+      const area = form.querySelector<HTMLTextAreaElement>("textarea[name='body']");
+      const slot = shell?.querySelector<HTMLElement>("#settings-error");
+      const label = target.querySelector(".btn-label");
+      const capa = (form.querySelector("[data-sieve-capa]")?.getAttribute("data-sieve-capa") || "").split(" ").filter(Boolean);
+      const fail = (text: string) => { if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = text; } };
+      if (!rawBox?.checked) {
+        try {
+          if (area) area.value = compileFilterForm(form, capa);
+          rawBox && (rawBox.checked = true);
+          if (rawPane) rawPane.hidden = false;
+          if (formPane) formPane.hidden = true;
+          if (label) label.textContent = t("SETTINGS_FILTERS.SHOW_RULES", "Als Regeln zeigen");
+          if (slot) slot.hidden = true;
+        } catch (error) {
+          fail(error instanceof Error ? error.message : "Das Skript lässt sich nicht zeigen.");
+        }
+        return;
+      }
+      const parsed = parseFilterScript(area?.value || "");
+      if (!parsed.ok) { fail(parsed.reason); return; }
+      const list = form.querySelector("[data-rule-list]");
+      if (list) list.innerHTML = parsed.script.rules.map((rule) => ruleCard(rule, [])).join("");
+      const vacation = parsed.script.vacation;
+      const set = (part: string, value: string) => {
+        const node = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-part='${part}']`);
+        if (node) node.value = value;
+      };
+      const on = form.querySelector<HTMLInputElement>("[data-part='vacation-on']");
+      if (on) on.checked = Boolean(vacation?.on);
+      set("vacation-from", vacation?.from || "");
+      set("vacation-until", vacation?.until || "");
+      set("vacation-days", vacation?.days || "7");
+      set("vacation-subject", vacation?.subject || "");
+      set("vacation-addresses", vacation?.addresses || "");
+      set("vacation-text", vacation?.text || "");
+      rawBox.checked = false;
+      if (rawPane) rawPane.hidden = true;
+      if (formPane) formPane.hidden = false;
+      if (label) label.textContent = t("SETTINGS_FILTERS.EDIT_SCRIPT", "Skript bearbeiten");
+      if (slot) slot.hidden = true;
+      if (!parsed.script.rules.length && !list?.childElementCount) list?.insertAdjacentHTML("beforebegin", "");
+    }
 
     if (keyHandler) document.removeEventListener("keydown", keyHandler);
     keyHandler = (event: KeyboardEvent) => {
