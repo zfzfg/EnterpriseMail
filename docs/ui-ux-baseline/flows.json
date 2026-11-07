@@ -1,0 +1,83 @@
+{
+  "capturedAt": "2026-11-07T05:18:59.533Z",
+  "flows": [
+    {
+      "name": "j-k-enter",
+      "ok": true,
+      "detail": "j=76 k=79 title=Undelivered Mail Returned to Sender"
+    },
+    {
+      "name": "view-menu-escape-focus",
+      "ok": true,
+      "detail": "menuFocused=true hidden=true back=view-menu"
+    },
+    {
+      "name": "compose-c-and-close-focus",
+      "ok": true,
+      "detail": "focusInComposer=INPUT: stillOpen=0 back=view-menu"
+    },
+    {
+      "name": "pane-keys-1280",
+      "ok": true,
+      "detail": "2uid=true 3reader=false 1sidebar=true"
+    },
+    {
+      "name": "narrow-backslash-and-123",
+      "ok": true,
+      "detail": "afterSlash=list after2=list after3=reader"
+    },
+    {
+      "name": "question-opens-keys",
+      "ok": true,
+      "detail": "dialog=true"
+    }
+  ],
+  "notes": [
+    "flow ok j-k-enter j=76 k=79 title=Undelivered Mail Returned to Sender",
+    "flow ok view-menu-escape-focus menuFocused=true hidden=true back=view-menu",
+    "flow ok compose-c-and-close-focus focusInComposer=INPUT: stillOpen=0 back=view-menu",
+    "flow ok pane-keys-1280 2uid=true 3reader=false 1sidebar=true",
+    "flow ok narrow-backslash-and-123 afterSlash=list after2=list after3=reader",
+    "flow ok question-opens-keys dialog=true",
+    "shot light-w375-inbox",
+    "shot light-w799-inbox",
+    "shot light-w800-inbox",
+    "shot light-w1279-inbox",
+    "shot light-w1280-inbox",
+    "shot light-w1600-inbox",
+    "shot light-w1280-current",
+    "shot light-w1280-checked",
+    "shot light-w1280-flagged",
+    "shot light-w1280-empty",
+    "shot light-w1280-attachment",
+    "shot light-w1280-security",
+    "shot light-w1280-long-subject",
+    "shot light-w1280-long-labels",
+    "shot light-w1280-menu",
+    "shot light-w1280-account-menu",
+    "shot light-w1280-composer",
+    "shot light-w375-composer",
+    "shot light-w1280-assistant",
+    "shot light-w1600-reader",
+    "shot dark-w375-inbox",
+    "shot dark-w799-inbox",
+    "shot dark-w800-inbox",
+    "shot dark-w1279-inbox",
+    "shot dark-w1280-inbox",
+    "shot dark-w1600-inbox",
+    "shot dark-w1280-current",
+    "shot dark-w1280-checked",
+    "shot dark-w1280-flagged",
+    "shot dark-w1280-empty",
+    "shot dark-w1280-attachment",
+    "shot dark-w1280-security",
+    "shot dark-w1280-long-subject",
+    "shot dark-w1280-long-labels",
+    "shot dark-w1280-menu",
+    "shot dark-w1280-account-menu",
+    "shot dark-w1280-composer",
+    "shot dark-w375-composer",
+    "shot dark-w1280-assistant",
+    "shot dark-w1600-reader"
+  ]
+}
