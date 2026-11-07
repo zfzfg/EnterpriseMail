@@ -1,5 +1,5 @@
 import type { AssistFlags } from "./assistant";
-import { iconClose, iconMenu } from "./icons";
+import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
 import { applyAppearance, type Appearance } from "./theme";
@@ -11,6 +11,7 @@ export interface FolderRow {
   unread: number;
   current: boolean;
   inbox: boolean;
+  role: string;
 }
 
 export interface MessageRow {
@@ -22,6 +23,10 @@ export interface MessageRow {
   unseen: boolean;
   current: boolean;
   category?: string;
+  flagged?: boolean;
+  answered?: boolean;
+  forwarded?: boolean;
+  attachment?: boolean;
 }
 
 export interface AttachmentRow {
@@ -113,11 +118,31 @@ function categoryMark(category?: string): string {
   return `<span class="cat">${mark}${esc(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 
+function rowMarks(row: MessageRow): string {
+  const marks: [boolean | undefined, IconName, string][] = [
+    [row.attachment, "attachment", "Mit Anhang"],
+    [row.answered, "answered", "Beantwortet"],
+    [row.forwarded, "forwarded", "Weitergeleitet"],
+    [row.flagged, "flag-filled", "Markiert"]
+  ];
+  const html = marks.filter(([on]) => on).map(([, name, label]) => icon(name, label)).join("");
+  return html ? `<span class="marks">${html}</span>` : "";
+}
+
 function esc(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
   }[char] ?? char));
 }
+
+/** Knopfinhalt: Symbol plus Text. Der Text bleibt der zugängliche Name, auch wenn er schmal ausgeblendet ist. */
+function withIcon(name: IconName, label: string): string {
+  return `${icon(name)}<span class="btn-label">${esc(label)}</span>`;
+}
+
+const ROLE_ICON: Record<string, IconName> = {
+  inbox: "inbox", sent: "sent", drafts: "drafts", trash: "trash", archive: "archive", junk: "spam", spam: "spam"
+};
 
 export interface MailView {
   showLogin(title: string): void;
@@ -205,8 +230,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</button>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
           <p class="group-label mono">${esc(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
@@ -216,7 +241,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         </aside>
         <section class="list-pane" aria-label="Mails">
           <div class="pane-head">
-            <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${iconMenu}</button>
+            <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
           </div>
           <form class="search-wrap" data-action="search">
@@ -234,15 +259,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn" data-action="back" hidden>${esc(t("GLOBAL.BACK", "Zurück"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zurück"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn" data-action="reply" hidden>${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn" data-action="reply-all" hidden>${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn" data-action="forward" hidden>${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn" data-action="archive" hidden>${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
-            <button type="button" class="text-btn" data-action="unread" hidden>Ungelesen</button>
-            <button type="button" class="text-btn" data-action="delete" hidden>${esc(t("GLOBAL.DELETE", "Löschen"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
+            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc(t("GLOBAL.DELETE", "Löschen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
@@ -252,10 +277,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <section class="composer" hidden aria-label="Neue Mail">
           <form class="composer-form">
             <div class="composer-bar">
-              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
               <span class="title title-md" id="compose-title">Neue Mail</span>
               <span class="spacer"></span>
-              <button type="submit" class="ink-btn">${esc(t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
+              <button type="submit" class="ink-btn">${withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
             </div>
             <div class="fields">
               <p class="quiet" id="compose-from"></p>
@@ -268,9 +293,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </form>
         </section>
         <nav class="tabbar" aria-label="Navigation">
-          <button type="button" class="text-btn" data-action="pane-folders">Ordner</button>
-          <button type="button" class="text-btn" data-action="pane-search">Suche</button>
-          <button type="button" class="ink-btn" data-action="compose">${esc(t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
+          <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
+          <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", "Suche")}</button>
+          <button type="button" class="ink-btn" data-action="compose">${withIcon("compose", t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
         </nav>
         <dialog id="settings" class="dialog-wide" aria-labelledby="settings-title">
           <div class="dialog-body">
@@ -278,15 +303,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <div class="sheet-head" style="padding:0;border:0;min-height:0">
                 <h2 id="settings-title" class="title title-md">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
                 <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
               </div>
               <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
-                <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${esc(t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${esc(t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${esc(t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${esc(t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${esc(t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${withIcon("filter", t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${withIcon("key", t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
               </nav>
             </div>
             <div id="settings-panel"></div>
@@ -297,7 +322,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
               <li><span>Nächste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
@@ -317,7 +342,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <h2 id="confirm-title" class="title title-md">Wirklich löschen?</h2>
             <div class="dialog-actions">
               <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-              <button type="button" class="danger" value="ok">${esc(t("GLOBAL.DELETE", "Löschen"))}</button>
+              <button type="button" class="danger" value="ok">${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
             </div>
           </div>
         </dialog>
@@ -658,7 +683,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       ask.type = "button";
       ask.className = "text-btn";
       ask.dataset.action = "open-sheet";
-      ask.textContent = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
+      ask.innerHTML = withIcon("assist", t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
+      ask.classList.add("bar-btn");
+      ask.title = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
       shell.querySelector(".reader-bar")?.append(ask);
       const sheet = document.createElement("aside");
       sheet.className = "sheet";
@@ -668,7 +695,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <span class="title title-md">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
           <span class="mono quiet">${esc(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${iconClose}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-log" id="chat-log">
           <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
@@ -702,8 +729,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           ${tones.map(([id, label], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="text-btn" data-action="generate">${esc(t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
-          <button type="button" class="text-btn" data-action="stop-generate" hidden>${esc(t("AI_COPILOT.STOP", "Stopp"))}</button>
+          <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
+          <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zurück</button>
         </div>
         <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc(t("AI_COPILOT.APPLY_SUBJECT", "Übernehmen"))}</button></p>
@@ -746,7 +773,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
   function folderButton(row: FolderRow): string {
     const count = row.unread > 0 ? `<span class="count">${row.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc(row.fullName)}" aria-current="${row.current ? "page" : "false"}" style="padding-left:${8 + row.depth * 12}px"><span>${esc(row.name)}</span>${count}</button>`;
+    return `<button type="button" class="folder" data-folder="${esc(row.fullName)}" aria-current="${row.current ? "page" : "false"}" style="padding-left:${8 + row.depth * 12}px">${icon(ROLE_ICON[row.role] || (row.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc(row.name)}</span>${count}</button>`;
   }
 
   return {
@@ -759,7 +786,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const rest = rows.filter((row) => !inbox.includes(row));
       const inboxEl = shell?.querySelector("#folder-inbox");
       const restEl = shell?.querySelector("#folder-rest");
-      if (inboxEl) inboxEl.innerHTML = inbox.map(folderButton).join("") || `<button type="button" class="folder" data-folder="INBOX">Posteingang</button>`;
+      if (inboxEl) inboxEl.innerHTML = inbox.map(folderButton).join("") || `<button type="button" class="folder" data-folder="INBOX">${icon("inbox")}<span class="folder-name">Posteingang</span></button>`;
       if (restEl) restEl.innerHTML = rest.map(folderButton).join("");
       const current = rows.find((row) => row.current);
       if (current && shell) {
@@ -779,7 +806,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         box.innerHTML = rows.map((row) => `
           <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" aria-current="${row.current ? "true" : "false"}">
             <span class="who">${esc(row.who)}</span>
-            <span class="when">${esc(row.when)}</span>
+            <span class="when">${rowMarks(row)}${esc(row.when)}</span>
             <span class="subj">${esc(row.subject || "(ohne Betreff)")}${categoryMark(row.category)}</span>
             <span class="peek">${esc(row.preview)}</span>
           </button>`).join("");
@@ -888,7 +915,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const slot = shell?.querySelector("#send-error") as HTMLElement | null;
       if (button) {
         button.disabled = busy;
-        button.textContent = busy ? "Wird gesendet …" : t("COMPOSE.BUTTON_SEND", "Senden");
+        button.innerHTML = busy ? withIcon("loading", "Wird gesendet …") : withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"));
       }
       if (slot) {
         slot.hidden = !error;

@@ -284,7 +284,44 @@ h1, .title {
 .text-btn[hidden], .icon-btn[hidden], .ink-btn[hidden] { display: none; }
 
 .icon-btn { padding: 0; }
-.icon-btn svg { width: 16px; height: 16px; display: block; }
+
+/* Pixel-Symbole: 9x9-Raster in viewBox 30. Nur 20 px und 40 px, dann liegen alle Kanten auf ganzen Pixeln. */
+.icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: block;
+  fill: currentColor;
+}
+.icon-lg { width: 40px; height: 40px; }
+.icon-loading rect { animation: icon-step 900ms steps(1, end) infinite; }
+.icon-loading rect:nth-child(2) { animation-delay: 300ms; }
+.icon-loading rect:nth-child(3) { animation-delay: 600ms; }
+@keyframes icon-step { 0%, 66% { opacity: 1; } 33% { opacity: 0.25; } }
+
+.danger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; }
+.folder .icon { color: var(--text-quiet); }
+.folder[aria-current="page"] .icon { color: inherit; }
+.folder-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .marks { display: inline-flex; gap: 2px; margin-right: 6px; vertical-align: middle; }
+.msg .marks .icon { width: 20px; height: 20px; }
+.settings-nav .text-btn { justify-content: flex-start; }
+
+/* Reader-Leiste: Symbol plus Text ab 1280 px, darunter nur Symbol. Der Text bleibt für Screenreader. */
+.bar-btn { padding: 0; }
+.bar-btn .btn-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (min-width: 1280px) {
+  .bar-btn { padding: 0 10px; }
+  .bar-btn .btn-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+}
 
 .ink-btn {
   background: var(--foreground);
@@ -679,6 +716,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .sheet, .composer { transition: none; }
+  .icon-loading rect { animation: none; }
   .folder:hover, .count-row:hover, .text-btn:hover, .icon-btn:hover, .filter:hover, .seg:hover, .prompt:hover {
     transition: none;
   }

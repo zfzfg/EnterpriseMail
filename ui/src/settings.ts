@@ -1,4 +1,5 @@
 import { ApiError, call, explain } from "./api";
+import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { readAppearance, type Appearance } from "./theme";
 
@@ -352,9 +353,17 @@ function check(name: string, label: string, on: boolean): string {
   return `<label class="check"><input type="checkbox" name="${name}"${on ? " checked" : ""}> ${esc(label)}</label>`;
 }
 
+const BUTTON_ICON: Record<string, IconName> = {
+  "settings-edit": "compose",
+  "settings-delete": "delete",
+  "settings-switch": "user",
+  "settings-activate": "check"
+};
+
 function button(action: string, label: string, attrs: Record<string, string>, danger = false): string {
   const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${esc(value)}"`).join("");
-  return `<button type="button" class="${danger ? "danger" : "text-btn"}" data-action="${action}"${extra}>${esc(label)}</button>`;
+  const name: IconName = attrs.fresh ? "plus" : BUTTON_ICON[action] || "chevron-right";
+  return `<button type="button" class="${danger ? "danger" : "text-btn"}" data-action="${action}"${extra}>${icon(name)}<span class="btn-label">${esc(label)}</span></button>`;
 }
 
 function row(title: string, meta: string, actions: string): string {
@@ -363,7 +372,7 @@ function row(title: string, meta: string, actions: string): string {
 
 function form(kind: string, inner: string, submit: string, cancel: boolean): string {
   const back = cancel ? `<button type="button" class="text-btn" data-action="settings-cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>` : "";
-  return `<form class="fields" data-action="settings-form" data-kind="${kind}">${inner}<div class="dialog-actions">${back}<button type="submit" class="ink-btn">${esc(submit)}</button></div></form>`;
+  return `<form class="fields" data-action="settings-form" data-kind="${kind}">${inner}<div class="dialog-actions">${back}<button type="submit" class="ink-btn">${icon(kind === "search-contacts" ? "search" : kind.startsWith("import") ? "upload" : kind === "save-account" ? "account-add" : "save")}<span class="btn-label">${esc(submit)}</span></button></div></form>`;
 }
 
 function note(textValue: string, error = false): string {

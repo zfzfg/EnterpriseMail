@@ -7,6 +7,7 @@ Dieses Repo ist der Fork `zfzfg/snappymail`. Das PHP-JSON von SnappyMail bleibt 
 - `ui/src/main.ts` startet das Postfach, `ui/src/admin.ts` den Admin. Beide sind getrennte esbuild-Bundles.
 - `ui/src/api.ts` ist der einzige HTTP-Client. `call` spricht `/?/Json/`, `adminCall` spricht `/?/{adminKey}/Json/`, `plugin` hängt `Plugin` vor die Aktion, `streamEvents` liest SSE von `/?/AiStream/`. Keinen zweiten Client daneben bauen.
 - `ui/src/mail.ts` hält die Sitzung. `ui/src/view.ts` malt das Postfach. `ui/src/assistant.ts` liest, ob der Assistent überhaupt an ist. `ui/src/settings.ts` lädt Konten, Identitäten, Kontakte, Filter und Schlüssel.
+- Symbole: Quelle `ui/src/icons/icons.txt` (9×9-Pixelraster), `ui/scripts/icons.mjs` erzeugt `ui/src/icons.ts`. Nur `icon(name)` verwenden, keine fremden SVGs. Größe 20 px oder 40 px. Reine Symbolknöpfe brauchen `aria-label`.
 - `ui/src/styles/app-tokens.css` ist die einzige Token-Datei. Der Dateiname muss `app-tokens.css` bleiben. Tailwind kommt über `ui/src/styles/app.css`, die Mail-Teile über `shell.css`.
 - Ausgabe: `snappymail/v/0.0.0/static/css/app.css`, `static/css/admin.css`, `static/js/app.js`, `static/js/admin.js`, `static/fonts/`. `Service.php` zeigt für `data-admin="0"` auf `app.*` und für `data-admin="1"` auf `admin.*`.
 - `plugins/ai-copilot` ist PHP plus Sprachdateien. Kein eigenes `style.css` und kein Knockout. Die Hooks sind die Schnittstelle.

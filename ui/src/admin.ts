@@ -1,4 +1,5 @@
 import { adminCall, explain, loadAdminApp } from "./api";
+import { icon } from "./icons";
 import { t } from "./i18n";
 import { applyAppearance, readAppearance, watchSystemTheme } from "./theme";
 
@@ -97,7 +98,7 @@ async function showDomains(root: HTMLElement, weak: boolean): Promise<void> {
       <div class="admin-head">
         <h1 class="title">${esc(t("TOP_PANEL.LABEL_ADMIN_PANEL", "Adminpanel"))}</h1>
         <span class="spacer"></span>
-        <button type="button" class="text-btn" data-action="logout">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</button>
+        <button type="button" class="text-btn" data-action="logout">${icon("logout")}<span class="btn-label">${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
       </div>
       ${weak ? `<p class="error">${esc(t("TAB_DOMAINS.WEAK_PASSWORD", "Das Admin-Passwort steht noch in der Standarddatei."))}</p>` : ""}
       <p class="mono">${esc(t("SETTINGS_LABELS.DOMAINS", "Domains"))}</p>
@@ -108,7 +109,7 @@ async function showDomains(root: HTMLElement, weak: boolean): Promise<void> {
           <h2 id="confirm-title" class="title title-md">${esc(t("TAB_DOMAINS.DELETE_ARE_YOU_SURE", "Sind Sie sicher?"))}</h2>
           <div class="dialog-actions">
             <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-            <button type="button" class="danger" value="ok">${esc(t("GLOBAL.DELETE", "Löschen"))}</button>
+            <button type="button" class="danger" value="ok">${icon("delete")}<span class="btn-label">${esc(t("GLOBAL.DELETE", "Löschen"))}</span></button>
           </div>
         </div>
       </dialog>
@@ -141,7 +142,7 @@ async function paintDomains(root: HTMLElement): Promise<void> {
       const toggle = item.disabled
         ? t("TAB_DOMAINS.BUTTON_ENABLE", "Aktivieren")
         : t("TAB_DOMAINS.BUTTON_DISABLE", "Deaktivieren");
-      return `<li class="set-row"><span class="grow"><strong title="${esc(name)}">${esc(name)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span><button type="button" class="text-btn" data-action="toggle" data-name="${esc(name)}" data-disabled="${item.disabled ? "1" : "0"}">${esc(toggle)}</button><button type="button" class="danger" data-action="delete" data-name="${esc(name)}">${esc(t("GLOBAL.DELETE", "Löschen"))}</button></li>`;
+      return `<li class="set-row"><span class="grow"><strong title="${esc(name)}">${esc(name)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span><button type="button" class="text-btn" data-action="toggle" data-name="${esc(name)}" data-disabled="${item.disabled ? "1" : "0"}">${icon(item.disabled ? "check" : "minus")}<span class="btn-label">${esc(toggle)}</span></button><button type="button" class="danger" data-action="delete" data-name="${esc(name)}">${icon("delete")}<span class="btn-label">${esc(t("GLOBAL.DELETE", "Löschen"))}</span></button></li>`;
     }).join("");
     list.querySelectorAll<HTMLButtonElement>("[data-action='toggle']").forEach((button) => {
       button.addEventListener("click", () => {

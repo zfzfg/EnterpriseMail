@@ -28,6 +28,7 @@ interface Msg {
   html: string;
   plain: string;
   attachments: { name: string; size: number; href: string }[];
+  hasAttachment: boolean;
   category: string;
 }
 
@@ -68,8 +69,12 @@ function when(stamp: number): string {
   return date.toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
+function hasFlag(flags: string[], name: string): boolean {
+  return flags.some((flag) => flag.toLowerCase() === name);
+}
+
 function seen(flags: string[]): boolean {
-  return flags.some((flag) => flag.toLowerCase() === "\\seen");
+  return hasFlag(flags, "\\seen");
 }
 
 function plainFromHtml(html: string): string {
@@ -273,7 +278,8 @@ class Session {
           depth: Math.min(2, Math.max(0, parts.length - 1)),
           unread: folder.unread,
           current: folder.fullName === this.folder,
-          inbox: folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX"
+          inbox: folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX",
+          role: folder.role
         };
       });
     this.view.setFolders(rows);
@@ -349,6 +355,10 @@ class Session {
       html: String(item.html || ""),
       plain: String(item.plain || ""),
       attachments,
+      hasAttachment: attachments.length > 0 || Boolean(
+        item.attachments && typeof item.attachments === "object" &&
+        ((item.attachments as { "@Collection"?: Record<string, unknown>[] })["@Collection"] || []).some((file) => !file.isInline)
+      ),
       category: String(item.aiCategory || "")
     };
   }
@@ -362,7 +372,11 @@ class Session {
       when: when(message.date),
       unseen: !seen(message.flags),
       current: message.uid === this.selected,
-      category: message.category
+      category: message.category,
+      flagged: hasFlag(message.flags, "\\flagged"),
+      answered: hasFlag(message.flags, "\\answered"),
+      forwarded: hasFlag(message.flags, "$forwarded"),
+      attachment: message.hasAttachment
     }));
   }
 
