@@ -511,11 +511,13 @@ Erledigt 2026-11-07. Aufnahmen und Tastaturfälle liegen in `docs/ui-ux-baseline
 
 ## Phase 1 — Semantic tokens and typography (P0)
 
-- [ ] Add spacing, state-surface, functional-shadow, type, and motion tokens in `shell.css`; keep `app-tokens.css` canonical.
-- [ ] Implement message-title, list-primary, metadata, and mono-label roles.
-- [ ] Verify composer body remains at least 16 px.
-- [ ] Measure all new quiet-text combinations in light/dark; retain `--text-quiet` wherever a faint token misses 4.5:1.
-- [ ] Add increased-contrast overrides.
+Erledigt 2026-11-07. `--text-faint` bleibt `--text-quiet`: 56 % Vordergrund liegt auf Hell bei 4.04:1, auf der Seitenleiste bei 3.98:1 und auf `--muted` bei 3.95:1. 68 % bleibt bei 5.98:1 hell und 8.67:1 dunkel.
+
+- [x] Add spacing, state-surface, functional-shadow, type, and motion tokens in `shell.css`; keep `app-tokens.css` canonical.
+- [x] Implement message-title, list-primary, metadata, and mono-label roles.
+- [x] Verify composer body remains at least 16 px.
+- [x] Measure all new quiet-text combinations in light/dark; retain `--text-quiet` wherever a faint token misses 4.5:1.
+- [x] Add increased-contrast overrides.
 
 **Exit:** token linter passes; normal text meets 4.5:1; no hard-coded component hex values.
 
