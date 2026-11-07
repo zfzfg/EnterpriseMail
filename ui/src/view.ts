@@ -167,6 +167,11 @@ function withIcon(name: IconName, label: string): string {
   return `${icon(name)}<span class="btn-label">${esc(label)}</span>`;
 }
 
+/** Einheitliche Kennzeichnung für Knöpfe, die beim Klick ein KI-Modell aufrufen. */
+function withAssist(label: string): string {
+  return `${withIcon("assist", label)}<span class="ai-tag" aria-hidden="true">KI</span>`;
+}
+
 const ROLE_ICON: Record<string, IconName> = {
   inbox: "inbox", sent: "sent", drafts: "drafts", trash: "trash", archive: "archive", junk: "spam", spam: "spam"
 };
@@ -1132,7 +1137,6 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         event.preventDefault();
         const area = form.querySelector("textarea") as HTMLTextAreaElement;
         actions.assist?.("ask", { text: area.value });
-        area.value = "";
       } else if (form.dataset.action === "settings-form") {
         event.preventDefault();
         const data: Record<string, string> = {};
@@ -1524,13 +1528,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!shell) return;
     if (flags.alerts) {
       const block = document.createElement("div");
+      const deadlineLabel = t("AI_COPILOT.CHECK_DUE", "Fristen mit KI auslesen");
+      const deadlineHint = t("AI_COPILOT.CHECK_DUE_HINT", "Fristen und Fälligkeiten mit KI aus den Mails lesen");
       block.innerHTML = `
         <p class="group-label mono">Heute</p>
         <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>Offene Antworten</span><span class="count" data-count="reply">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
         <p class="quiet" id="dues"></p>
-        <button type="button" class="text-btn" data-action="deadlines">Fristen lesen</button>`;
+        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
       shell.querySelector(".account")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
@@ -1540,52 +1546,62 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       filters.setAttribute("role", "toolbar");
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)] as [string, string][];
+      const triageHint = t("AI_COPILOT.TRIAGE_LLM_HINT", "Mails dieser Seite mit KI einordnen");
       filters.innerHTML = cats.map(([id, label], index) =>
         `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(id === "all" ? t("AI_COPILOT.TAB_ALL", label) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc(triageHint)}" title="${esc(triageHint)}">${withAssist(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
       const button = document.createElement("button");
+      const searchHint = t("AI_COPILOT.SEARCH_HINT", "Suchtext als natürliche Sprache mit KI verstehen");
       button.type = "button";
-      button.className = "text-btn";
+      button.className = "text-btn ai-action";
       button.dataset.action = "lang-search";
       button.hidden = true;
-      button.textContent = "Als Sprache verstehen";
+      button.innerHTML = withAssist(t("AI_COPILOT.SEARCH_INTERPRET", "Suchanfrage mit KI interpretieren"));
+      button.title = searchHint;
+      button.setAttribute("aria-label", searchHint);
       searchForm.append(button);
       const hint = document.createElement("div");
       hint.id = "translated";
       hint.hidden = true;
       hint.className = "translate";
-      hint.innerHTML = `<p class="quiet" id="translate-why"></p><input class="search" id="translate-q" aria-label="Übersetzte Suche"><button type="button" class="text-btn" data-action="run-search">Suchen</button>`;
+      hint.innerHTML = `<div class="translate-copy"><span class="mono quiet">${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}</span><p class="quiet" id="translate-why"></p></div><input class="search" id="translate-q" aria-label="${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}"><button type="button" class="ink-btn" data-action="run-search">${esc(t("AI_COPILOT.SEARCH_RUN", "Suchen"))}</button>`;
       searchForm.after(hint);
       const input = shell.querySelector("#search") as HTMLInputElement;
       input.addEventListener("input", () => { button.hidden = !input.value.trim(); });
     }
     if (flags.summarize || flags.replies) {
-      const strip = document.createElement("div");
+      const strip = document.createElement("section");
       strip.id = "strip";
+      strip.className = "assist-strip";
+      strip.setAttribute("aria-label", t("AI_COPILOT.PANEL_LABEL", "KI-Unterstützung für diese Mail"));
+      strip.setAttribute("aria-live", "polite");
       shell.querySelector("#reader-body")?.before(strip);
     }
     if (flags.chat) {
       const ask = document.createElement("button");
+      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Mit KI im Copilot-Chat zu dieser Mail fragen");
       ask.type = "button";
-      ask.className = "text-btn";
+      ask.className = "text-btn assist-trigger ai-action";
       ask.dataset.action = "open-sheet";
-      ask.innerHTML = withIcon("assist", t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
+      ask.innerHTML = withAssist(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
       ask.classList.add("bar-btn", "primary");
-      ask.title = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
+      ask.title = askHint;
+      ask.setAttribute("aria-label", askHint);
       shell.querySelector(".reader-bar")?.append(ask);
       const sheet = document.createElement("aside");
       sheet.className = "sheet";
       sheet.hidden = true;
+      sheet.setAttribute("aria-labelledby", "copilot-title");
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc(flags.provider)}</span>
+          <h2 class="title title-md" id="copilot-title">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</h2>
           <span class="spacer"></span>
           <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
         </div>
+        <div class="sheet-meta mono quiet">${esc(flags.provider)}</div>
         <div class="sheet-log" id="chat-log">
           <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
@@ -1594,12 +1610,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <button type="button" class="prompt" data-action="prompt">Fasse die geöffnete Mail zusammen</button>
           </div>
         </div>
-        <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
+        <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
+          <label class="sr" for="ask">${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}</label>
           <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}"></textarea>
           <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
-        <p class="error" id="chat-error" hidden></p>`;
+        <p class="error sheet-error" id="chat-error" role="alert" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
     }
     if (flags.draft) {
@@ -1607,6 +1624,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       tools.className = "draft-tools";
       const tones = [["professional", "Professionell"], ["friendly", "Freundlich"], ["casual", "Locker"], ["concise", "Knapp"], ["formal", "Förmlich"]];
       tools.innerHTML = `
+        <div class="draft-heading"><span class="mono quiet">${esc(t("AI_COPILOT.DRAFT_ASSIST", "KI-Entwurf"))}</span><span class="quiet">${esc(t("AI_COPILOT.DRAFT_EDIT_HINT", "Sie können das Ergebnis vor dem Senden bearbeiten."))}</span></div>
         <div class="modes" role="toolbar" aria-label="Art">
           <button type="button" class="seg" data-action="mode" data-mode="new" aria-pressed="true">Neue Mail</button>
           <button type="button" class="seg" data-action="mode" data-mode="reply" aria-pressed="false">Antwort</button>
@@ -1618,12 +1636,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           ${tones.map(([id, label], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
+          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist(t("AI_COPILOT.GENERATE", "Entwurf mit KI erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
-          <button type="button" class="text-btn" data-action="revert-draft" hidden>Zurück</button>
+          <button type="button" class="text-btn" data-action="revert-draft" hidden>${esc(t("AI_COPILOT.REVERT_DRAFT", "Vorherigen Text wiederherstellen"))}</button>
         </div>
         <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc(t("AI_COPILOT.APPLY_SUBJECT", "Übernehmen"))}</button></p>
-        <p class="quiet" id="draft-status"></p>`;
+        <p class="quiet" id="draft-status" role="status" aria-live="polite"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
     const consent = document.createElement("dialog");
@@ -2076,88 +2094,122 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!state) return;
       if (state.loading) {
         const p = document.createElement("p");
-        p.className = "quiet";
+        p.className = "assist-status quiet";
+        p.setAttribute("role", "status");
         p.textContent = state.loading;
         strip.append(p);
         return;
       }
       if (state.error) {
         const p = document.createElement("p");
-        p.className = "error";
+        p.className = "error assist-status";
+        p.setAttribute("role", "alert");
         p.textContent = state.error;
         strip.append(p);
       }
-      const row = document.createElement("div");
-      row.className = "strip-row";
+      const actions = document.createElement("div");
+      actions.className = "assist-actions";
       if (!state.tldr && state.showSummarize) {
         const button = document.createElement("button");
+        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen");
         button.type = "button";
-        button.className = "text-btn";
+        button.className = "text-btn assist-action ai-action";
         button.dataset.action = "summarize";
-        button.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
-        row.append(button);
-      } else if (state.tldr) {
-        const label = document.createElement("span");
-        label.className = "mono";
-        label.textContent = "Zusammenfassung";
-        const text = document.createElement("p");
-        text.textContent = state.tldr;
-        const again = document.createElement("button");
-        again.type = "button";
-        again.className = "text-btn";
-        again.dataset.action = "summarize";
-        again.dataset.force = "1";
-        again.textContent = t("AI_COPILOT.REGENERATE", "Neu erzeugen");
-        row.append(label, text, again);
-        if (state.cached) {
-          const note = document.createElement("p");
-          note.className = "quiet";
-          note.textContent = "aus dem Zwischenspeicher";
-          row.append(note);
-        }
-        const caveat = document.createElement("p");
-        caveat.className = "quiet";
-        caveat.textContent = "Kann Angaben enthalten, die so nicht in der Mail stehen. Der Brief darunter ist die Quelle.";
-        row.append(caveat);
+        button.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Mit KI zusammenfassen"));
+        button.title = hint;
+        button.setAttribute("aria-label", hint);
+        actions.append(button);
       }
       if (state.showReplies && !state.replies.length) {
         const replies = document.createElement("button");
+        const hint = t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge mit KI erzeugen");
         replies.type = "button";
-        replies.className = "text-btn";
+        replies.className = "text-btn assist-action ai-action";
         replies.dataset.action = "replies";
-        replies.textContent = t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge");
-        row.append(replies);
+        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antworten mit KI vorschlagen"));
+        replies.title = hint;
+        replies.setAttribute("aria-label", hint);
+        actions.append(replies);
       }
-      state.replies.forEach((reply, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "prompt";
-        button.dataset.action = "use-reply";
-        button.dataset.index = String(index);
-        button.textContent = reply.label;
-        row.append(button);
-      });
+      if (actions.childElementCount) strip.append(actions);
+      if (state.tldr) {
+        const result = document.createElement("div");
+        result.className = "assist-result";
+        const label = document.createElement("span");
+        label.className = "mono quiet";
+        label.textContent = t("AI_COPILOT.SUMMARY", "Zusammenfassung");
+        const text = document.createElement("p");
+        text.className = "assist-summary";
+        text.textContent = state.tldr;
+        const meta = document.createElement("div");
+        meta.className = "assist-meta";
+        const again = document.createElement("button");
+        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf erneut mit KI zusammenfassen");
+        again.type = "button";
+        again.className = "text-btn ai-action";
+        again.dataset.action = "summarize";
+        again.dataset.force = "1";
+        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"));
+        again.title = hint;
+        again.setAttribute("aria-label", hint);
+        meta.append(again);
+        if (state.cached) {
+          const note = document.createElement("span");
+          note.className = "quiet";
+          note.textContent = t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher");
+          meta.append(note);
+        }
+        const caveat = document.createElement("p");
+        caveat.className = "quiet assist-caveat";
+        caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit dem Brief abgleichen: Zusammenfassungen können Angaben falsch interpretieren.");
+        result.append(label, text, meta, caveat);
+        strip.append(result);
+      }
+      if (state.replies.length) {
+        const group = document.createElement("div");
+        group.className = "assist-replies";
+        const label = document.createElement("p");
+        label.className = "quiet";
+        label.textContent = t("AI_COPILOT.REPLY_HINT", "Vorschlag auswählen und als bearbeitbaren Entwurf öffnen:");
+        const prompts = document.createElement("div");
+        prompts.className = "prompts reply-prompts";
+        state.replies.forEach((reply, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "prompt";
+          button.dataset.action = "use-reply";
+          button.dataset.index = String(index);
+          button.textContent = reply.label;
+          prompts.append(button);
+        });
+        group.append(label, prompts);
+        strip.append(group);
+      }
       if (state.model) {
         const model = document.createElement("p");
-        model.className = "mono quiet";
+        model.className = "mono quiet assist-model";
         model.textContent = state.model;
-        row.append(model);
+        strip.append(model);
       }
-      strip.append(row);
     },
     setChat(turns, thinking, context = "") {
       const log = shell?.querySelector("#chat-log");
       const chip = shell?.querySelector("#context-chip") as HTMLButtonElement | null;
       const error = shell?.querySelector("#chat-error") as HTMLElement | null;
+      const busy = Boolean(thinking) && !thinking.startsWith("!");
+      shell?.querySelectorAll<HTMLButtonElement>(".sheet-form button, .sheet [data-action='prompt']").forEach((button) => { button.disabled = busy; });
+      const area = shell?.querySelector("#ask") as HTMLTextAreaElement | null;
+      if (area) area.setAttribute("aria-busy", String(busy));
       if (chip) {
         chip.hidden = !context;
-        chip.textContent = context ? `${context} · ohne Bezug` : "";
+        chip.textContent = context ? `${t("AI_COPILOT.CONTEXT", "Bezug")}: ${context} · ${t("AI_COPILOT.DROP_CONTEXT", "Bezug entfernen")}` : "";
       }
       if (error) {
         error.hidden = !thinking.startsWith("!");
         error.textContent = thinking.startsWith("!") ? thinking.slice(1) : "";
       }
       if (!log) return;
+      log.setAttribute("aria-busy", String(busy));
       log.replaceChildren();
       if (!turns.length && !thinking) {
         const p = document.createElement("p");
@@ -2196,7 +2248,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           if (!action.state) {
             const run = document.createElement("button");
             run.type = "button";
-            run.className = "text-btn";
+            run.className = "ink-btn";
             run.dataset.action = "run-action";
             run.dataset.index = String(index);
             run.textContent = t("AI_COPILOT.RUN", "Ausführen");
@@ -2217,9 +2269,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         });
         log.append(item);
       });
-      if (thinking && !thinking.startsWith("!")) {
+      if (busy) {
         const p = document.createElement("p");
-        p.className = "quiet";
+        p.className = "quiet thinking";
+        p.setAttribute("role", "status");
         p.textContent = thinking;
         log.append(p);
       }

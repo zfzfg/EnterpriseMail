@@ -888,7 +888,7 @@ var bodies = {
   "account-add": '<rect x="7.5" y="1.5" width="9" height="3"/><rect x="4.5" y="4.5" width="3" height="3"/><rect x="16.5" y="4.5" width="3" height="3"/><rect x="4.5" y="7.5" width="3" height="3"/><rect x="16.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="9" height="3"/><rect x="22.5" y="10.5" width="3" height="3"/><rect x="19.5" y="13.5" width="9" height="3"/><rect x="1.5" y="16.5" width="12" height="3"/><rect x="22.5" y="16.5" width="3" height="3"/><rect x="1.5" y="19.5" width="3" height="3"/><rect x="13.5" y="19.5" width="3" height="3"/><rect x="1.5" y="22.5" width="3" height="3"/><rect x="13.5" y="22.5" width="3" height="3"/>',
   "answered": '<rect x="10.5" y="4.5" width="3" height="3"/><rect x="7.5" y="7.5" width="3" height="3"/><rect x="4.5" y="10.5" width="18" height="3"/><rect x="7.5" y="13.5" width="3" height="3"/><rect x="22.5" y="13.5" width="3" height="3"/><rect x="10.5" y="16.5" width="3" height="3"/><rect x="22.5" y="16.5" width="3" height="3"/><rect x="22.5" y="19.5" width="3" height="3"/><rect x="22.5" y="22.5" width="3" height="3"/>',
   "archive": '<rect x="1.5" y="1.5" width="27" height="3"/><rect x="1.5" y="4.5" width="3" height="3"/><rect x="25.5" y="4.5" width="3" height="3"/><rect x="1.5" y="7.5" width="27" height="3"/><rect x="4.5" y="10.5" width="3" height="3"/><rect x="22.5" y="10.5" width="3" height="3"/><rect x="4.5" y="13.5" width="3" height="3"/><rect x="10.5" y="13.5" width="9" height="3"/><rect x="22.5" y="13.5" width="3" height="3"/><rect x="4.5" y="16.5" width="3" height="3"/><rect x="22.5" y="16.5" width="3" height="3"/><rect x="4.5" y="19.5" width="3" height="3"/><rect x="22.5" y="19.5" width="3" height="3"/><rect x="4.5" y="22.5" width="21" height="3"/>',
-  "assist": '<rect x="13.5" y="1.5" width="3" height="3"/><rect x="10.5" y="4.5" width="9" height="3"/><rect x="13.5" y="7.5" width="3" height="3"/><rect x="4.5" y="10.5" width="3" height="3"/><rect x="22.5" y="10.5" width="3" height="3"/><rect x="1.5" y="13.5" width="9" height="3"/><rect x="19.5" y="13.5" width="9" height="3"/><rect x="4.5" y="16.5" width="3" height="3"/><rect x="22.5" y="16.5" width="3" height="3"/><rect x="13.5" y="19.5" width="3" height="3"/><rect x="10.5" y="22.5" width="9" height="3"/><rect x="13.5" y="25.5" width="3" height="3"/>',
+  "assist": '<rect x="7.5" y="1.5" width="3" height="3"/><rect x="4.5" y="4.5" width="9" height="3"/><rect x="7.5" y="7.5" width="3" height="3"/><rect x="19.5" y="7.5" width="3" height="3"/><rect x="1.5" y="10.5" width="15" height="3"/><rect x="19.5" y="10.5" width="9" height="3"/><rect x="7.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="4.5" y="16.5" width="9" height="3"/><rect x="7.5" y="19.5" width="3" height="3"/>',
   "attach": '<rect x="10.5" y="1.5" width="9" height="3"/><rect x="7.5" y="4.5" width="3" height="3"/><rect x="19.5" y="4.5" width="3" height="3"/><rect x="7.5" y="7.5" width="3" height="3"/><rect x="13.5" y="7.5" width="3" height="3"/><rect x="19.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="3" height="3"/><rect x="13.5" y="10.5" width="3" height="3"/><rect x="19.5" y="10.5" width="3" height="3"/><rect x="7.5" y="13.5" width="3" height="3"/><rect x="13.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="7.5" y="16.5" width="3" height="3"/><rect x="13.5" y="16.5" width="3" height="3"/><rect x="19.5" y="16.5" width="3" height="3"/><rect x="7.5" y="19.5" width="3" height="3"/><rect x="19.5" y="19.5" width="3" height="3"/><rect x="10.5" y="22.5" width="9" height="3"/>',
   "attachment": '<rect x="10.5" y="1.5" width="9" height="3"/><rect x="7.5" y="4.5" width="3" height="3"/><rect x="19.5" y="4.5" width="3" height="3"/><rect x="7.5" y="7.5" width="3" height="3"/><rect x="13.5" y="7.5" width="3" height="3"/><rect x="19.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="3" height="3"/><rect x="13.5" y="10.5" width="3" height="3"/><rect x="19.5" y="10.5" width="3" height="3"/><rect x="7.5" y="13.5" width="3" height="3"/><rect x="13.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="7.5" y="16.5" width="3" height="3"/><rect x="13.5" y="16.5" width="3" height="3"/><rect x="19.5" y="16.5" width="3" height="3"/><rect x="7.5" y="19.5" width="3" height="3"/><rect x="19.5" y="19.5" width="3" height="3"/><rect x="10.5" y="22.5" width="9" height="3"/>',
   "back": '<rect x="13.5" y="4.5" width="3" height="3"/><rect x="10.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="3" height="3"/><rect x="4.5" y="13.5" width="21" height="3"/><rect x="7.5" y="16.5" width="3" height="3"/><rect x="10.5" y="19.5" width="3" height="3"/><rect x="13.5" y="22.5" width="3" height="3"/>',
@@ -4554,9 +4554,24 @@ function renderReader(body, data, expanded) {
     </div>`;
   const frame = document.createElement("iframe");
   frame.className = "letter";
-  frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
+  frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
   frame.title = "Brief";
+  const fit = () => {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    const height = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0);
+    if (height) frame.style.height = `${Math.max(240, Math.ceil(height))}px`;
+  };
+  frame.addEventListener("load", () => {
+    fit();
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    const observer = new ResizeObserver(fit);
+    if (doc.documentElement) observer.observe(doc.documentElement);
+    if (doc.body) observer.observe(doc.body);
+    void doc.fonts?.ready.then(fit);
+  });
   frame.srcdoc = data.srcdoc;
   body.querySelector(".read-measure")?.append(frame);
 }
@@ -5354,6 +5369,9 @@ function esc9(value) {
 }
 function withIcon(name, label2) {
   return `${icon(name)}<span class="btn-label">${esc9(label2)}</span>`;
+}
+function withAssist(label2) {
+  return `${withIcon("assist", label2)}<span class="ai-tag" aria-hidden="true">KI</span>`;
 }
 var ROLE_ICON2 = {
   inbox: "inbox",
@@ -6277,7 +6295,6 @@ function createView(root3, actions) {
         event.preventDefault();
         const area = form2.querySelector("textarea");
         actions.assist?.("ask", { text: area.value });
-        area.value = "";
       } else if (form2.dataset.action === "settings-form") {
         event.preventDefault();
         const data = {};
@@ -6714,13 +6731,15 @@ function createView(root3, actions) {
     if (!shell) return;
     if (flags.alerts) {
       const block = document.createElement("div");
+      const deadlineLabel = t("AI_COPILOT.CHECK_DUE", "Fristen mit KI auslesen");
+      const deadlineHint = t("AI_COPILOT.CHECK_DUE_HINT", "Fristen und F\xE4lligkeiten mit KI aus den Mails lesen");
       block.innerHTML = `
         <p class="group-label mono">Heute</p>
         <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>Offene Antworten</span><span class="count" data-count="reply">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
         <p class="quiet" id="dues"></p>
-        <button type="button" class="text-btn" data-action="deadlines">Fristen lesen</button>`;
+        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc9(deadlineHint)}" title="${esc9(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
       shell.querySelector(".account")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
@@ -6730,24 +6749,28 @@ function createView(root3, actions) {
       filters.setAttribute("role", "toolbar");
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
+      const triageHint = t("AI_COPILOT.TRIAGE_LLM_HINT", "Mails dieser Seite mit KI einordnen");
       filters.innerHTML = cats.map(
         ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc9(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc9(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc9(triageHint)}" title="${esc9(triageHint)}">${withAssist(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
       const button3 = document.createElement("button");
+      const searchHint = t("AI_COPILOT.SEARCH_HINT", "Suchtext als nat\xFCrliche Sprache mit KI verstehen");
       button3.type = "button";
-      button3.className = "text-btn";
+      button3.className = "text-btn ai-action";
       button3.dataset.action = "lang-search";
       button3.hidden = true;
-      button3.textContent = "Als Sprache verstehen";
+      button3.innerHTML = withAssist(t("AI_COPILOT.SEARCH_INTERPRET", "Suchanfrage mit KI interpretieren"));
+      button3.title = searchHint;
+      button3.setAttribute("aria-label", searchHint);
       searchForm.append(button3);
       const hint = document.createElement("div");
       hint.id = "translated";
       hint.hidden = true;
       hint.className = "translate";
-      hint.innerHTML = `<p class="quiet" id="translate-why"></p><input class="search" id="translate-q" aria-label="\xDCbersetzte Suche"><button type="button" class="text-btn" data-action="run-search">Suchen</button>`;
+      hint.innerHTML = `<div class="translate-copy"><span class="mono quiet">${esc9(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}</span><p class="quiet" id="translate-why"></p></div><input class="search" id="translate-q" aria-label="${esc9(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}"><button type="button" class="ink-btn" data-action="run-search">${esc9(t("AI_COPILOT.SEARCH_RUN", "Suchen"))}</button>`;
       searchForm.after(hint);
       const input2 = shell.querySelector("#search");
       input2.addEventListener("input", () => {
@@ -6755,29 +6778,35 @@ function createView(root3, actions) {
       });
     }
     if (flags.summarize || flags.replies) {
-      const strip = document.createElement("div");
+      const strip = document.createElement("section");
       strip.id = "strip";
+      strip.className = "assist-strip";
+      strip.setAttribute("aria-label", t("AI_COPILOT.PANEL_LABEL", "KI-Unterst\xFCtzung f\xFCr diese Mail"));
+      strip.setAttribute("aria-live", "polite");
       shell.querySelector("#reader-body")?.before(strip);
     }
     if (flags.chat) {
       const ask = document.createElement("button");
+      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Mit KI im Copilot-Chat zu dieser Mail fragen");
       ask.type = "button";
-      ask.className = "text-btn";
+      ask.className = "text-btn assist-trigger ai-action";
       ask.dataset.action = "open-sheet";
-      ask.innerHTML = withIcon("assist", t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
+      ask.innerHTML = withAssist(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
       ask.classList.add("bar-btn", "primary");
-      ask.title = t("AI_COPILOT.ASK_COPILOT", "Copilot fragen");
+      ask.title = askHint;
+      ask.setAttribute("aria-label", askHint);
       shell.querySelector(".reader-bar")?.append(ask);
       const sheet = document.createElement("aside");
       sheet.className = "sheet";
       sheet.hidden = true;
+      sheet.setAttribute("aria-labelledby", "copilot-title");
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc9(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc9(flags.provider)}</span>
+          <h2 class="title title-md" id="copilot-title">${esc9(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</h2>
           <span class="spacer"></span>
           <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc9(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
         </div>
+        <div class="sheet-meta mono quiet">${esc9(flags.provider)}</div>
         <div class="sheet-log" id="chat-log">
           <p class="quiet">${esc9(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
@@ -6786,12 +6815,13 @@ function createView(root3, actions) {
             <button type="button" class="prompt" data-action="prompt">Fasse die ge\xF6ffnete Mail zusammen</button>
           </div>
         </div>
-        <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
+        <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
+          <label class="sr" for="ask">${esc9(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}</label>
           <textarea id="ask" rows="2" placeholder="${esc9(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
           <button type="submit" class="ink-btn">${esc9(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
-        <p class="error" id="chat-error" hidden></p>`;
+        <p class="error sheet-error" id="chat-error" role="alert" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
     }
     if (flags.draft) {
@@ -6799,6 +6829,7 @@ function createView(root3, actions) {
       tools.className = "draft-tools";
       const tones = [["professional", "Professionell"], ["friendly", "Freundlich"], ["casual", "Locker"], ["concise", "Knapp"], ["formal", "F\xF6rmlich"]];
       tools.innerHTML = `
+        <div class="draft-heading"><span class="mono quiet">${esc9(t("AI_COPILOT.DRAFT_ASSIST", "KI-Entwurf"))}</span><span class="quiet">${esc9(t("AI_COPILOT.DRAFT_EDIT_HINT", "Sie k\xF6nnen das Ergebnis vor dem Senden bearbeiten."))}</span></div>
         <div class="modes" role="toolbar" aria-label="Art">
           <button type="button" class="seg" data-action="mode" data-mode="new" aria-pressed="true">Neue Mail</button>
           <button type="button" class="seg" data-action="mode" data-mode="reply" aria-pressed="false">Antwort</button>
@@ -6810,12 +6841,12 @@ function createView(root3, actions) {
           ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc9(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
+          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc9(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist(t("AI_COPILOT.GENERATE", "Entwurf mit KI erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
-          <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
+          <button type="button" class="text-btn" data-action="revert-draft" hidden>${esc9(t("AI_COPILOT.REVERT_DRAFT", "Vorherigen Text wiederherstellen"))}</button>
         </div>
         <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc9(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
-        <p class="quiet" id="draft-status"></p>`;
+        <p class="quiet" id="draft-status" role="status" aria-live="polite"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
     const consent = document.createElement("dialog");
@@ -7272,88 +7303,124 @@ function createView(root3, actions) {
       if (!state) return;
       if (state.loading) {
         const p = document.createElement("p");
-        p.className = "quiet";
+        p.className = "assist-status quiet";
+        p.setAttribute("role", "status");
         p.textContent = state.loading;
         strip.append(p);
         return;
       }
       if (state.error) {
         const p = document.createElement("p");
-        p.className = "error";
+        p.className = "error assist-status";
+        p.setAttribute("role", "alert");
         p.textContent = state.error;
         strip.append(p);
       }
-      const row2 = document.createElement("div");
-      row2.className = "strip-row";
+      const actions2 = document.createElement("div");
+      actions2.className = "assist-actions";
       if (!state.tldr && state.showSummarize) {
         const button3 = document.createElement("button");
+        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen");
         button3.type = "button";
-        button3.className = "text-btn";
+        button3.className = "text-btn assist-action ai-action";
         button3.dataset.action = "summarize";
-        button3.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
-        row2.append(button3);
-      } else if (state.tldr) {
-        const label2 = document.createElement("span");
-        label2.className = "mono";
-        label2.textContent = "Zusammenfassung";
-        const text2 = document.createElement("p");
-        text2.textContent = state.tldr;
-        const again = document.createElement("button");
-        again.type = "button";
-        again.className = "text-btn";
-        again.dataset.action = "summarize";
-        again.dataset.force = "1";
-        again.textContent = t("AI_COPILOT.REGENERATE", "Neu erzeugen");
-        row2.append(label2, text2, again);
-        if (state.cached) {
-          const note2 = document.createElement("p");
-          note2.className = "quiet";
-          note2.textContent = "aus dem Zwischenspeicher";
-          row2.append(note2);
-        }
-        const caveat = document.createElement("p");
-        caveat.className = "quiet";
-        caveat.textContent = "Kann Angaben enthalten, die so nicht in der Mail stehen. Der Brief darunter ist die Quelle.";
-        row2.append(caveat);
+        button3.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Mit KI zusammenfassen"));
+        button3.title = hint;
+        button3.setAttribute("aria-label", hint);
+        actions2.append(button3);
       }
       if (state.showReplies && !state.replies.length) {
         const replies = document.createElement("button");
+        const hint = t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschl\xE4ge mit KI erzeugen");
         replies.type = "button";
-        replies.className = "text-btn";
+        replies.className = "text-btn assist-action ai-action";
         replies.dataset.action = "replies";
-        replies.textContent = t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschl\xE4ge");
-        row2.append(replies);
+        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antworten mit KI vorschlagen"));
+        replies.title = hint;
+        replies.setAttribute("aria-label", hint);
+        actions2.append(replies);
       }
-      state.replies.forEach((reply, index) => {
-        const button3 = document.createElement("button");
-        button3.type = "button";
-        button3.className = "prompt";
-        button3.dataset.action = "use-reply";
-        button3.dataset.index = String(index);
-        button3.textContent = reply.label;
-        row2.append(button3);
-      });
+      if (actions2.childElementCount) strip.append(actions2);
+      if (state.tldr) {
+        const result = document.createElement("div");
+        result.className = "assist-result";
+        const label2 = document.createElement("span");
+        label2.className = "mono quiet";
+        label2.textContent = t("AI_COPILOT.SUMMARY", "Zusammenfassung");
+        const text2 = document.createElement("p");
+        text2.className = "assist-summary";
+        text2.textContent = state.tldr;
+        const meta = document.createElement("div");
+        meta.className = "assist-meta";
+        const again = document.createElement("button");
+        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf erneut mit KI zusammenfassen");
+        again.type = "button";
+        again.className = "text-btn ai-action";
+        again.dataset.action = "summarize";
+        again.dataset.force = "1";
+        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"));
+        again.title = hint;
+        again.setAttribute("aria-label", hint);
+        meta.append(again);
+        if (state.cached) {
+          const note2 = document.createElement("span");
+          note2.className = "quiet";
+          note2.textContent = t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher");
+          meta.append(note2);
+        }
+        const caveat = document.createElement("p");
+        caveat.className = "quiet assist-caveat";
+        caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit dem Brief abgleichen: Zusammenfassungen k\xF6nnen Angaben falsch interpretieren.");
+        result.append(label2, text2, meta, caveat);
+        strip.append(result);
+      }
+      if (state.replies.length) {
+        const group2 = document.createElement("div");
+        group2.className = "assist-replies";
+        const label2 = document.createElement("p");
+        label2.className = "quiet";
+        label2.textContent = t("AI_COPILOT.REPLY_HINT", "Vorschlag ausw\xE4hlen und als bearbeitbaren Entwurf \xF6ffnen:");
+        const prompts = document.createElement("div");
+        prompts.className = "prompts reply-prompts";
+        state.replies.forEach((reply, index) => {
+          const button3 = document.createElement("button");
+          button3.type = "button";
+          button3.className = "prompt";
+          button3.dataset.action = "use-reply";
+          button3.dataset.index = String(index);
+          button3.textContent = reply.label;
+          prompts.append(button3);
+        });
+        group2.append(label2, prompts);
+        strip.append(group2);
+      }
       if (state.model) {
         const model = document.createElement("p");
-        model.className = "mono quiet";
+        model.className = "mono quiet assist-model";
         model.textContent = state.model;
-        row2.append(model);
+        strip.append(model);
       }
-      strip.append(row2);
     },
     setChat(turns, thinking, context = "") {
       const log = shell?.querySelector("#chat-log");
       const chip = shell?.querySelector("#context-chip");
       const error = shell?.querySelector("#chat-error");
+      const busy = Boolean(thinking) && !thinking.startsWith("!");
+      shell?.querySelectorAll(".sheet-form button, .sheet [data-action='prompt']").forEach((button3) => {
+        button3.disabled = busy;
+      });
+      const area = shell?.querySelector("#ask");
+      if (area) area.setAttribute("aria-busy", String(busy));
       if (chip) {
         chip.hidden = !context;
-        chip.textContent = context ? `${context} \xB7 ohne Bezug` : "";
+        chip.textContent = context ? `${t("AI_COPILOT.CONTEXT", "Bezug")}: ${context} \xB7 ${t("AI_COPILOT.DROP_CONTEXT", "Bezug entfernen")}` : "";
       }
       if (error) {
         error.hidden = !thinking.startsWith("!");
         error.textContent = thinking.startsWith("!") ? thinking.slice(1) : "";
       }
       if (!log) return;
+      log.setAttribute("aria-busy", String(busy));
       log.replaceChildren();
       if (!turns.length && !thinking) {
         const p = document.createElement("p");
@@ -7392,7 +7459,7 @@ function createView(root3, actions) {
           if (!action.state) {
             const run = document.createElement("button");
             run.type = "button";
-            run.className = "text-btn";
+            run.className = "ink-btn";
             run.dataset.action = "run-action";
             run.dataset.index = String(index);
             run.textContent = t("AI_COPILOT.RUN", "Ausf\xFChren");
@@ -7413,9 +7480,10 @@ function createView(root3, actions) {
         });
         log.append(item);
       });
-      if (thinking && !thinking.startsWith("!")) {
+      if (busy) {
         const p = document.createElement("p");
-        p.className = "quiet";
+        p.className = "quiet thinking";
+        p.setAttribute("role", "status");
         p.textContent = thinking;
         log.append(p);
       }
@@ -7652,6 +7720,7 @@ var Session = class {
   chat = [];
   turns = [];
   chatActions = [];
+  chatBusy = false;
   replies = [];
   draftBackup = "";
   draftAbort = null;
@@ -9937,7 +10006,16 @@ ${body}`
       this.view.pressCategory(data.kind === "invoice" ? "invoice" : "needs_reply");
       return;
     }
-    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines" || name === "ask") {
+    if (name === "ask") {
+      if (this.chatBusy) return;
+      this.chatBusy = true;
+      if (!await this.consent()) {
+        this.chatBusy = false;
+        this.view.setChat(this.turns, "", this.contextLabel());
+        return;
+      }
+    }
+    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines") {
       if (!await this.consent()) return;
     }
     if (name === "lang-search") {
@@ -10056,7 +10134,12 @@ ${body}`
     }
     if (name === "ask") {
       const text2 = (data.text || "").trim();
-      if (!text2) return;
+      if (!text2) {
+        this.chatBusy = false;
+        return;
+      }
+      const area = document.querySelector("#ask");
+      if (area) area.value = "";
       this.chat.push({ role: "user", content: text2 });
       this.turns.push({ role: "user", text: text2, trace: [], actions: [] });
       this.view.setChat(this.turns, "Copilot arbeitet \u2026", this.contextLabel());
@@ -10078,6 +10161,8 @@ ${body}`
         this.view.setChat(this.turns, "", this.contextLabel());
       } catch (error) {
         this.view.setChat(this.turns, "!" + explain(error), this.contextLabel());
+      } finally {
+        this.chatBusy = false;
       }
       return;
     }
@@ -10139,7 +10224,7 @@ ${body}`
         }
         if (event === "error") throw new ApiError(1, String(payload.error || "Verbindung unterbrochen."));
       }, this.draftAbort.signal);
-      this.view.setDraftBusy(false, this.summaryModel);
+      this.view.setDraftBusy(false, `Entwurf eingef\xFCgt.${this.summaryModel ? ` \xB7 ${this.summaryModel}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         this.view.setDraftBusy(false, "Abgebrochen.");

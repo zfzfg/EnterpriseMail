@@ -216,9 +216,26 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
     </div>`;
   const frame = document.createElement("iframe");
   frame.className = "letter";
-  frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
+  // Ohne Skripte im Brief darf der Leser die Dokumenthöhe auslesen. So scrollt
+  // die Mail mit dem äußeren Leserbereich statt in einem abgeschnittenen iframe.
+  frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
   frame.title = "Brief";
+  const fit = () => {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    const height = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0);
+    if (height) frame.style.height = `${Math.max(240, Math.ceil(height))}px`;
+  };
+  frame.addEventListener("load", () => {
+    fit();
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    const observer = new ResizeObserver(fit);
+    if (doc.documentElement) observer.observe(doc.documentElement);
+    if (doc.body) observer.observe(doc.body);
+    void doc.fonts?.ready.then(fit);
+  });
   frame.srcdoc = data.srcdoc;
   body.querySelector(".read-measure")?.append(frame);
 }

@@ -240,6 +240,7 @@ class Session {
   private chat: { role: "user" | "assistant"; content: string }[] = [];
   private turns: ChatTurn[] = [];
   private chatActions: Record<string, unknown>[] = [];
+  private chatBusy = false;
   private replies: { label: string; body: string }[] = [];
   private draftBackup = "";
   private draftAbort: AbortController | null = null;
@@ -2475,7 +2476,16 @@ class Session {
       this.view.pressCategory(data.kind === "invoice" ? "invoice" : "needs_reply");
       return;
     }
-    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines" || name === "ask") {
+    if (name === "ask") {
+      if (this.chatBusy) return;
+      this.chatBusy = true;
+      if (!await this.consent()) {
+        this.chatBusy = false;
+        this.view.setChat(this.turns, "", this.contextLabel());
+        return;
+      }
+    }
+    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines") {
       if (!await this.consent()) return;
     }
     if (name === "lang-search") {
@@ -2594,7 +2604,12 @@ class Session {
     }
     if (name === "ask") {
       const text = (data.text || "").trim();
-      if (!text) return;
+      if (!text) {
+        this.chatBusy = false;
+        return;
+      }
+      const area = document.querySelector("#ask") as HTMLTextAreaElement | null;
+      if (area) area.value = "";
       this.chat.push({ role: "user", content: text });
       this.turns.push({ role: "user", text, trace: [], actions: [] });
       this.view.setChat(this.turns, "Copilot arbeitet …", this.contextLabel());
@@ -2616,6 +2631,8 @@ class Session {
         this.view.setChat(this.turns, "", this.contextLabel());
       } catch (error) {
         this.view.setChat(this.turns, "!" + explain(error), this.contextLabel());
+      } finally {
+        this.chatBusy = false;
       }
       return;
     }
@@ -2679,7 +2696,7 @@ class Session {
         }
         if (event === "error") throw new ApiError(1, String(payload.error || "Verbindung unterbrochen."));
       }, this.draftAbort.signal);
-      this.view.setDraftBusy(false, this.summaryModel);
+      this.view.setDraftBusy(false, `Entwurf eingefügt.${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         this.view.setDraftBusy(false, "Abgebrochen.");
