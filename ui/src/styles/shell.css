@@ -908,6 +908,55 @@ a.icon-btn { color: inherit; text-decoration: none; }
 .compose-file { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 2px 2px 8px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); }
 .compose-file .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- Phase 2: Schreiben ---------- */
+#compose-host { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+#compose-host .composer, #compose-host .compose-dock { pointer-events: auto; }
+.composer-form { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.compose-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px 16px; }
+.compose-fields { padding: 12px 0 8px; gap: 4px; }
+.compose-fields .field { display: grid; grid-template-columns: 7rem minmax(0, 1fr); align-items: center; gap: 8px; }
+.compose-fields .field[hidden], .compose-recipient[hidden] { display: none; }
+.compose-recipient { position: relative; display: grid; grid-template-columns: 7rem minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: var(--row); }
+.field-label { font-weight: 500; }
+.compose-more { grid-column: 2; justify-self: end; padding: 0 4px; font-size: 12px; white-space: nowrap; }
+.recipient-box { position: relative; display: flex; align-items: center; min-width: 0; min-height: var(--row); border-bottom: 1px solid var(--border); }
+.recipient-chips { display: contents; }
+.recipient-box input { flex: 1 1 6rem; min-width: 3rem; min-height: var(--row); padding: 4px 0; border: 0; background: transparent; }
+.recipient-chip { display: inline-flex; flex: 0 1 auto; align-items: center; min-width: 0; max-width: 100%; margin: 2px 4px 2px 0; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--muted); overflow: hidden; }
+.recipient-chip.invalid { border-color: var(--destructive); color: var(--destructive); }
+.recipient-chip button { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; }
+.recipient-chip .icon { width: 20px; height: 20px; }
+.recipient-suggestions { position: absolute; z-index: 8; top: 100%; left: 0; right: 0; max-height: 14rem; overflow: auto; border: 1px solid var(--border); background: var(--popover); }
+.recipient-suggestions button { display: block; width: 100%; min-height: var(--row); padding: 6px 8px; border: 0; background: transparent; color: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipient-suggestions button[aria-selected="true"] { background: var(--accent); }
+.editor-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.editor-tools [hidden] { display: none; }
+.tool-separator { width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
+.compose-html, .compose-plain { width: 100%; min-height: 18rem; padding: 16px 0; border: 0; background: transparent; color: inherit; font: inherit; line-height: 1.55; resize: vertical; overflow: auto; }
+.compose-html[hidden], .compose-plain[hidden] { display: none; }
+.compose-html:empty::before { content: attr(data-placeholder); color: var(--text-quiet); pointer-events: none; }
+.compose-html blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid var(--border); color: var(--text-quiet); }
+.compose-bottom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.compose-options { min-width: 10rem; }
+.compose-option-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; }
+.compose-drop-hint { margin: 8px 0 0; font-size: 12px; }
+.composer.dragging .compose-scroll { outline: 2px solid var(--primary); outline-offset: -2px; }
+.compose-file progress { width: 5rem; height: 4px; accent-color: var(--foreground); }
+.compose-dock { position: absolute; z-index: 6; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; max-width: min(28rem, calc(100% - 32px)); min-height: var(--hit); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--popover); color: var(--popover-foreground); font: inherit; }
+.compose-dock[hidden] { display: none; }
+.compose-dock span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-close-actions { flex-wrap: wrap; }
+@media (max-width: 599px) {
+  .compose-scroll { padding: 0 12px 12px; }
+  .compose-fields .field, .compose-recipient { grid-template-columns: 5rem minmax(0, 1fr); }
+  .compose-more { grid-column: 2; justify-self: start; }
+  .compose-option-grid { grid-template-columns: 1fr; }
+  .compose-html, .compose-plain { min-height: 14rem; }
+}
+@media (hover: hover) {
+  .recipient-suggestions button:hover, .compose-dock:hover { background: var(--accent); }
+}
+
 /* ---------- Phase 1: Vollbild ---------- */
 .shell[data-full="true"][data-sidebar] { grid-template-columns: minmax(0, 1fr); }
 .shell[data-full="true"] .sidebar,

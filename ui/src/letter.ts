@@ -148,11 +148,13 @@ export function parseUnsubscribe(header: string, post: string): Unsubscribe | nu
 }
 
 /** mailto:-Adresse in Empfänger, Betreff und Text zerlegen. */
-export function parseMailto(link: string): { to: string; subject: string; body: string } {
+export function parseMailto(link: string): { to: string; cc: string; bcc: string; subject: string; body: string } {
   const [address, query = ""] = link.replace(/^mailto:/i, "").split("?");
   const params = new URLSearchParams(query);
   return {
     to: decodeURIComponent(address || ""),
+    cc: params.get("cc") || "",
+    bcc: params.get("bcc") || "",
     subject: params.get("subject") || "",
     body: params.get("body") || ""
   };

@@ -110,6 +110,36 @@ async function postJson(url, action, params) {
 function call(action, params = {}) {
   return postJson(`${root()}?/Json/&q[]=/0/`, action, params);
 }
+function upload(file, onProgress) {
+  const request = new XMLHttpRequest();
+  const promise = new Promise((resolve, reject) => {
+    request.open("POST", `${root()}?/Upload/&q[]=/0/`);
+    request.setRequestHeader("Accept", "application/json");
+    request.setRequestHeader("X-SM-Token", token);
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
+    });
+    request.addEventListener("error", () => reject(new ApiError(1, "Der Upload ist fehlgeschlagen.")));
+    request.addEventListener("abort", () => reject(new ApiError(0, "Der Upload wurde abgebrochen.")));
+    request.addEventListener("load", () => {
+      try {
+        const data = JSON.parse(request.responseText);
+        const attachment = data.Result?.Attachment;
+        if (request.status < 200 || request.status >= 300 || !attachment?.tempName) {
+          reject(new ApiError(Number(data.Result?.code || data.code || 999), String(data.Result?.message || data.message || "Der Upload ist fehlgeschlagen.")));
+          return;
+        }
+        resolve(attachment);
+      } catch {
+        reject(new ApiError(1, "Der Server hat den Upload nicht best\xE4tigt."));
+      }
+    });
+    const body = new FormData();
+    body.append("uploader", file, file.name);
+    request.send(body);
+  });
+  return { promise, abort: () => request.abort() };
+}
 async function plugin(action, params = {}) {
   const result = await call("Plugin" + action, params);
   if (result && typeof result === "object" && "error" in result && result.error) {
@@ -645,8 +675,8 @@ function externalUrls(html) {
   return [...urls];
 }
 function plainToHtml(text2, collapse) {
-  const esc5 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
-  const linkify = (value) => esc5(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
+  const esc6 = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+  const linkify = (value) => esc6(value).replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => {
     const clean = stripTracking(url.replace(/&amp;/g, "&")).replace(/&/g, "&amp;");
     return `<a href="${clean}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
@@ -783,6 +813,8 @@ function parseMailto(link) {
   const params = new URLSearchParams(query);
   return {
     to: decodeURIComponent(address2 || ""),
+    cc: params.get("cc") || "",
+    bcc: params.get("bcc") || "",
     subject: params.get("subject") || "",
     body: params.get("body") || ""
   };
@@ -1268,7 +1300,10 @@ function lookSection() {
       ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
       ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
       ${choice("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
-    </fieldset>`;
+    </fieldset>
+    <p class="mono">${esc2(t("SETTINGS_GENERAL.MAILTO_LINKS", "E-Mail-Adressen"))}</p>
+    <p class="quiet">${esc2(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links k\xF6nnen direkt hier eine neue Nachricht \xF6ffnen."))}</p>
+    <button type="button" class="text-btn" data-action="mailto-register">${icon("external")}<span>${esc2(t("SETTINGS_GENERAL.MAILTO", "Als Programm f\xFCr mailto:-Links registrieren"))}</span></button>`;
 }
 function renderDesk(section, snap, edit) {
   const error = `<p class="error" id="settings-error" hidden></p>`;
@@ -1376,20 +1411,773 @@ function renderDesk(section, snap, edit) {
     <details><summary>${esc2(t("SMIME.POPUP_IMPORT_TITLE", "S/MIME-Zertifikat importieren"))}</summary>${certImport}</details>`;
 }
 
-// src/reader.ts
+// src/compose.ts
+var ADDRESS = /^(?:[^\s@]+@[^\s@]+\.[^\s@]+|[^\s@]+@[^\s@]+)$/;
+var ALLOWED_TAGS2 = /* @__PURE__ */ new Set(["A", "B", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "I", "LI", "OL", "P", "PRE", "S", "STRONG", "U", "UL"]);
+var ALLOWED_ATTR = /* @__PURE__ */ new Set(["href", "title"]);
 function esc3(value) {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
+}
+function button2(action, symbol, label2, extra = "") {
+  return `<button type="button" class="icon-btn" data-compose="${action}" aria-label="${esc3(label2)}" title="${esc3(label2)}" ${extra}>${icon(symbol)}</button>`;
+}
+function sizeLabel(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+function addresses(value) {
+  const result = [];
+  let current = "";
+  let quoted = false;
+  let angle = 0;
+  for (const char of value) {
+    if (char === '"') quoted = !quoted;
+    if (!quoted && char === "<") angle++;
+    if (!quoted && char === ">") angle = Math.max(0, angle - 1);
+    if (!quoted && !angle && (char === "," || char === ";")) {
+      if (current.trim()) result.push(current.trim());
+      current = "";
+    } else current += char;
+  }
+  if (current.trim()) result.push(current.trim());
+  return result;
+}
+function emailOf(value) {
+  return (value.match(/<([^>]+)>/)?.[1] || value).trim();
+}
+function validAddress(value) {
+  return ADDRESS.test(emailOf(value));
+}
+function htmlToPlain(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+  doc.querySelectorAll("p,div,li,blockquote,pre").forEach((node) => node.append("\n"));
+  doc.querySelectorAll("li").forEach((node) => node.prepend("\u2022 "));
+  return (doc.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+function plainToHtml2(text2, quoted = false) {
+  const lines = text2.replace(/\r/g, "").split("\n");
+  const normal = [];
+  const quote2 = [];
+  const flush = () => {
+    if (quote2.length) {
+      const content = quote2.map((line2) => esc3(line2.replace(/^> ?/, ""))).join("<br>");
+      normal.push(`<blockquote>${content}</blockquote>`);
+      quote2.length = 0;
+    }
+  };
+  lines.forEach((line2) => {
+    if (quoted && /^>/.test(line2)) quote2.push(line2);
+    else {
+      flush();
+      normal.push(esc3(line2));
+    }
+  });
+  flush();
+  return normal.join("<br>");
+}
+function markdownToHtml(text2) {
+  const escaped = esc3(text2.replace(/\r/g, ""));
+  const blocks = escaped.split(/\n{2,}/).map((block) => {
+    if (/^```/.test(block)) return `<pre><code>${block.replace(/^```[^\n]*\n?|```$/g, "")}</code></pre>`;
+    if (/^(?:&gt; ?)/.test(block)) return `<blockquote>${block.replace(/^&gt; ?/gm, "").replace(/\n/g, "<br>")}</blockquote>`;
+    const lines = block.split("\n");
+    if (lines.every((line2) => /^[-*] /.test(line2))) return `<ul>${lines.map((line2) => `<li>${line2.slice(2)}</li>`).join("")}</ul>`;
+    if (lines.every((line2) => /^\d+\. /.test(line2))) return `<ol>${lines.map((line2) => `<li>${line2.replace(/^\d+\. /, "")}</li>`).join("")}</ol>`;
+    const heading = block.match(/^(#{1,3}) (.+)$/);
+    if (heading) return `<p><strong>${heading[2]}</strong></p>`;
+    return `<p>${block.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/_([^_]+)_/g, "<em>$1</em>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>').replace(/\n/g, "<br>")}</p>`;
+  });
+  return blocks.join("");
+}
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const clean = (node) => {
+    [...node.children].forEach((child) => {
+      clean(child);
+      if (!ALLOWED_TAGS2.has(child.tagName)) {
+        child.replaceWith(...child.childNodes);
+        return;
+      }
+      [...child.attributes].forEach((attr) => {
+        if (!ALLOWED_ATTR.has(attr.name.toLowerCase()) || child.tagName !== "A" && attr.name.toLowerCase() === "href") child.removeAttribute(attr.name);
+      });
+      if (child.tagName === "A") {
+        const href = child.getAttribute("href") || "";
+        if (!/^(https?:|mailto:)/i.test(href)) child.removeAttribute("href");
+        child.setAttribute("rel", "noopener noreferrer");
+      }
+    });
+  };
+  clean(doc.body);
+  return doc.body.innerHTML;
+}
+var Composer = class {
+  constructor(host, prefs, callbacks) {
+    this.callbacks = callbacks;
+    this.prefs = prefs;
+    host.innerHTML = `<section class="composer" hidden aria-label="${esc3(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}">
+      <form class="composer-form">
+        <div class="composer-bar">
+          ${button2("close", "close", t("GLOBAL.CLOSE", "Schlie\xDFen"))}
+          <span class="title title-md" id="compose-title">${esc3(t("COMPOSE.NEW_MESSAGE", "Neue Mail"))}</span><span class="spacer"></span>
+          ${button2("save", "save", t("COMPOSE.BUTTON_SAVE", "Entwurf speichern"))}
+          ${button2("minimize", "minimize", t("COMPOSE.BUTTON_MINIMIZE", "Minimieren"))}
+          <button type="submit" class="ink-btn">${icon("send")}<span>${esc3(t("COMPOSE.BUTTON_SEND", "Senden"))}</span></button>
+        </div>
+        <div class="compose-scroll">
+          <div class="fields compose-fields">
+            <label class="field"><span>${esc3(t("GLOBAL.FROM", "Von"))}</span><select name="identity" id="compose-identity"></select></label>
+            <div class="compose-recipient"><span class="field-label">${esc3(t("GLOBAL.TO", "An"))}</span><div class="recipient-box" data-recipient="to"></div><button type="button" class="text-btn compose-more" data-compose="more-fields">Cc \xB7 Bcc \xB7 ${esc3(t("GLOBAL.REPLY_TO", "Antwort an"))}</button></div>
+            <div class="compose-recipient" data-extra="cc" hidden><span class="field-label">${esc3(t("GLOBAL.CC", "Cc"))}</span><div class="recipient-box" data-recipient="cc"></div></div>
+            <div class="compose-recipient" data-extra="bcc" hidden><span class="field-label">${esc3(t("GLOBAL.BCC", "Bcc"))}</span><div class="recipient-box" data-recipient="bcc"></div></div>
+            <label class="field" data-extra="reply" hidden><span>${esc3(t("GLOBAL.REPLY_TO", "Antwort an"))}</span><input name="replyTo" type="email" autocomplete="email"></label>
+            <label class="field"><span>${esc3(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
+          </div>
+          <ul class="compose-files" id="compose-files" aria-label="${esc3(t("GLOBAL.ATTACHMENTS", "Anh\xE4nge"))}" hidden></ul>
+          <div class="compose-editor-wrap">
+            <div class="editor-tools" role="toolbar" aria-label="${esc3(t("COMPOSE.FORMAT_TEXT", "Text formatieren"))}">
+              ${button2("bold", "bold", t("COMPOSE.BOLD", "Fett"))}${button2("italic", "italic", t("COMPOSE.ITALIC", "Kursiv"))}${button2("underline", "underline", t("COMPOSE.UNDERLINE", "Unterstrichen"))}
+              <span class="tool-separator"></span>${button2("insertUnorderedList", "list-bullet", t("COMPOSE.BULLETED_LIST", "Aufz\xE4hlung"))}${button2("insertOrderedList", "list-number", t("COMPOSE.NUMBERED_LIST", "Nummerierte Liste"))}
+              ${button2("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button2("link", "link", t("COMPOSE.INSERT_LINK", "Link einf\xFCgen"))}${button2("removeFormat", "close", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
+              <span class="spacer"></span><button type="button" class="seg" data-compose="mode" aria-pressed="false">HTML</button>
+            </div>
+            <div class="compose-html" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc3(t("GLOBAL.TEXT", "Nachricht"))}" data-placeholder="${esc3(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></div>
+            <textarea class="compose-plain" name="body" aria-label="${esc3(t("GLOBAL.TEXT", "Nachricht"))}" placeholder="${esc3(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></textarea>
+          </div>
+          <div class="compose-bottom">
+            <input type="file" id="compose-upload" multiple hidden>
+            <button type="button" class="text-btn" data-compose="attach">${icon("attach")}<span>${esc3(t("COMPOSE.ATTACH_FILES", "Anh\xE4ngen"))}</span></button>
+            <details class="compose-options"><summary>${esc3(t("COMPOSE.SEND_OPTIONS", "Sendeoptionen"))}</summary><div class="compose-option-grid">
+              <label class="check"><input type="checkbox" name="important"> ${esc3(t("COMPOSE.BUTTON_MARK_AS_IMPORTANT", "Wichtig markieren"))}</label>
+              <label class="check"><input type="checkbox" name="receipt"> ${esc3(t("COMPOSE.BUTTON_REQUEST_READ_RECEIPT", "Lesebest\xE4tigung anfordern"))}</label>
+              <label class="check"><input type="checkbox" name="dsn"> ${esc3(t("COMPOSE.BUTTON_REQUEST_DSN", "Zustellbest\xE4tigung anfordern"))}</label>
+              <label class="check"><input type="checkbox" name="tls"> ${esc3(t("COMPOSE.BUTTON_REQUIRE_TLS", "TLS erzwingen"))}</label>
+            </div></details>
+            <span class="spacer"></span><span class="quiet live" id="compose-status"></span>
+          </div>
+          <p class="error" id="send-error" role="alert" hidden></p>
+          <p class="quiet compose-drop-hint">${esc3(t("COMPOSE.ATTACH_DROP_FILES_DESC", "Dateien hier ablegen, um sie anzuh\xE4ngen."))}</p>
+        </div>
+      </form>
+    </section>
+    <button type="button" class="compose-dock" hidden data-compose="restore">${icon("compose")}<span id="compose-dock-title">${esc3(t("COMPOSE.RESUME_DRAFT", "Entwurf fortsetzen"))}</span>${icon("chevron-up")}</button>
+    <dialog id="compose-close" aria-labelledby="compose-close-title"><div class="dialog-body">
+      <h2 id="compose-close-title" class="title title-md">${esc3(t("COMPOSE.SAVE_DRAFT", "Entwurf speichern?"))}</h2><p class="quiet">${esc3(t("COMPOSE.UNSAVED_WARNING", "Die \xC4nderungen gehen sonst verloren."))}</p>
+      <div class="dialog-actions compose-close-actions"><button type="button" class="text-btn" value="cancel">${esc3(t("COMPOSE.CONTINUE_WRITING", "Weiter schreiben"))}</button><button type="button" class="danger" value="discard">${esc3(t("COMPOSE.DISCARD", "Verwerfen"))}</button><button type="button" class="ink-btn" value="save">${icon("save")}<span>${esc3(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
+    </div></dialog>`;
+    this.root = host.querySelector(".composer");
+    this.form = host.querySelector(".composer-form");
+    this.editor = host.querySelector(".compose-html");
+    this.plain = host.querySelector(".compose-plain");
+    this.fileInput = host.querySelector("#compose-upload");
+    this.closeDialog = host.querySelector("#compose-close");
+    ["to", "cc", "bcc"].forEach((name) => this.makeRecipients(name));
+    this.wire();
+    this.setMode(prefs.editor === "Html" ? "html" : "plain");
+  }
+  root;
+  form;
+  editor;
+  plain;
+  identities = [];
+  prefs;
+  files = [];
+  fields = /* @__PURE__ */ new Map();
+  seed = null;
+  mode = "plain";
+  draftRef = null;
+  baseline = "";
+  autosaveTimer = 0;
+  saving = false;
+  sending = false;
+  minimized = false;
+  fileInput;
+  closeDialog;
+  opener = null;
+  configure(prefs, identities) {
+    this.prefs = prefs;
+    this.identities = identities;
+    const select = this.form.elements.namedItem("identity");
+    const current = select.value;
+    select.replaceChildren(...identities.map((identity) => {
+      const option = document.createElement("option");
+      option.value = identity.id;
+      option.textContent = `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`;
+      return option;
+    }));
+    select.value = identities.some((item) => item.id === current) ? current : identities[0]?.id || "";
+    select.disabled = identities.length < 2;
+    this.editor.spellcheck = prefs.spellcheck;
+    this.plain.spellcheck = prefs.spellcheck;
+    hostSave(this.root).hidden = !prefs.draftsFolder;
+  }
+  makeRecipients(name) {
+    const box = this.root.querySelector(`[data-recipient='${name}']`);
+    box.innerHTML = `<div class="recipient-chips"></div><input type="text" autocomplete="off" aria-label="${esc3(name === "to" ? "An" : name === "cc" ? "Cc" : "Bcc")}"><div class="recipient-suggestions" role="listbox" hidden></div>`;
+    const field2 = { name, box, input: box.querySelector("input"), list: box.querySelector(".recipient-suggestions"), values: [], suggestions: [], active: -1, timer: 0, request: 0 };
+    this.fields.set(name, field2);
+    field2.input.addEventListener("input", () => this.suggestions(field2));
+    field2.input.addEventListener("keydown", (event) => this.fieldKey(event, field2));
+    field2.input.addEventListener("blur", () => window.setTimeout(() => {
+      this.commitInput(field2);
+      field2.list.hidden = true;
+    }, 100));
+    box.addEventListener("click", (event) => {
+      if (!event.target.closest("button")) field2.input.focus({ preventScroll: true });
+    });
+  }
+  wire() {
+    this.root.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-compose]");
+      if (!target) return;
+      const action = target.dataset.compose || "";
+      if (["bold", "italic", "underline", "insertUnorderedList", "insertOrderedList", "removeFormat"].includes(action)) {
+        this.editor.focus({ preventScroll: true });
+        document.execCommand(action);
+        this.changed();
+      } else if (action === "quote") {
+        this.editor.focus({ preventScroll: true });
+        document.execCommand("formatBlock", false, "blockquote");
+        this.changed();
+      } else if (action === "link") {
+        const href = window.prompt(t("COMPOSE.LINK_ADDRESS", "Link-Adresse"), "https://");
+        if (href && /^https?:\/\//i.test(href)) {
+          this.editor.focus({ preventScroll: true });
+          document.execCommand("createLink", false, href);
+          this.changed();
+        }
+      } else if (action === "mode") this.setMode(this.mode === "html" ? "plain" : "html");
+      else if (action === "more-fields") this.root.querySelectorAll("[data-extra]").forEach((row2) => {
+        row2.hidden = false;
+      });
+      else if (action === "attach") this.fileInput.click();
+      else if (action === "save") void this.save(false);
+      else if (action === "close") void this.requestClose();
+      else if (action === "minimize") this.minimize();
+    });
+    this.root.parentElement?.querySelector("[data-compose='restore']")?.addEventListener("click", () => this.restore());
+    this.fileInput.addEventListener("change", () => {
+      this.addFiles([...this.fileInput.files || []]);
+      this.fileInput.value = "";
+    });
+    this.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.send();
+    });
+    this.form.addEventListener("input", (event) => {
+      if (!event.target.closest(".recipient-box")) this.changed();
+    });
+    this.form.addEventListener("change", () => this.changed());
+    this.form.elements.namedItem("identity").addEventListener("change", () => this.changeIdentity());
+    this.editor.addEventListener("paste", (event) => {
+      event.preventDefault();
+      const html = event.clipboardData?.getData("text/html") || "";
+      const text2 = event.clipboardData?.getData("text/plain") || "";
+      document.execCommand("insertHTML", false, html ? sanitizeHtml(html) : plainToHtml2(text2));
+      this.changed();
+    });
+    this.root.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      this.root.classList.add("dragging");
+    });
+    this.root.addEventListener("dragleave", (event) => {
+      if (!this.root.contains(event.relatedTarget)) this.root.classList.remove("dragging");
+    });
+    this.root.addEventListener("drop", (event) => {
+      event.preventDefault();
+      this.root.classList.remove("dragging");
+      this.addFiles([...event.dataTransfer?.files || []]);
+    });
+    this.closeDialog.querySelectorAll("button[value]").forEach((button3) => {
+      button3.addEventListener("click", () => this.closeDialog.close(button3.value));
+    });
+    this.closeDialog.addEventListener("close", () => {
+      if (this.closeDialog.returnValue === "save") void this.save(true);
+      else if (this.closeDialog.returnValue === "discard") this.finishClose(true);
+      this.closeDialog.returnValue = "";
+    });
+    document.addEventListener("keydown", (event) => {
+      if (this.root.hidden || this.minimized || this.closeDialog.open) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void this.save(false);
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        this.send();
+      } else if (event.key === "Escape" && !this.root.querySelector("dialog[open]")) {
+        event.preventDefault();
+        void this.requestClose();
+      }
+    });
+  }
+  open(seed) {
+    this.seed = seed;
+    this.draftRef = seed.draftRef || null;
+    this.files = [];
+    this.root.querySelector("#compose-title").textContent = seed.title;
+    (this.root.parentElement?.querySelector("#compose-dock-title")).textContent = seed.subject || seed.title;
+    this.fields.forEach((field2, name) => {
+      field2.values = addresses(String(seed[name] || ""));
+      field2.input.value = "";
+      this.paintRecipients(field2);
+    });
+    this.form.elements.namedItem("subject").value = seed.subject;
+    this.form.elements.namedItem("replyTo").value = seed.replyTo || "";
+    this.root.querySelectorAll("[data-extra]").forEach((row2) => {
+      row2.hidden = true;
+    });
+    if (seed.cc) this.root.querySelector("[data-extra='cc']").hidden = false;
+    if (seed.bcc) this.root.querySelector("[data-extra='bcc']").hidden = false;
+    if (seed.replyTo) this.root.querySelector("[data-extra='reply']").hidden = false;
+    const identity = this.identities.find((item) => item.id === seed.identityId) || this.identities[0];
+    this.form.elements.namedItem("identity").value = identity?.id || "";
+    this.mode = this.prefs.editor === "Html" ? "html" : "plain";
+    this.plain.value = seed.body;
+    this.editor.innerHTML = seed.html ? sanitizeHtml(seed.html) : plainToHtml2(seed.body, seed.mode === "reply");
+    this.paintMode();
+    this.setOptions();
+    this.applyIdentity(identity, true);
+    this.setStatus("");
+    this.setError("");
+    this.root.hidden = false;
+    this.root.dataset.open = "false";
+    this.minimized = false;
+    (this.root.parentElement?.querySelector(".compose-dock")).hidden = true;
+    requestAnimationFrame(() => {
+      this.root.dataset.open = "true";
+    });
+    this.callbacks.mobile(true);
+    this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const target = seed.to ? seed.subject ? this.mode === "html" ? this.editor : this.plain : this.form.elements.namedItem("subject") : this.fields.get("to")?.input;
+    target?.focus({ preventScroll: true });
+    this.baseline = this.fingerprint();
+    this.scheduleAutosave();
+  }
+  setOptions() {
+    const identity = this.identity();
+    const set = (name, value) => {
+      this.form.elements.namedItem(name).checked = value;
+    };
+    set("important", false);
+    set("receipt", this.prefs.readReceipt);
+    set("dsn", this.prefs.dsn);
+    set("tls", this.prefs.requireTLS);
+    this.root.dataset.pgpSign = String(identity?.pgpSign || this.prefs.pgpSign);
+    this.root.dataset.pgpEncrypt = String(identity?.pgpEncrypt || this.prefs.pgpEncrypt);
+  }
+  identity() {
+    return this.identities.find((item) => item.id === this.form.elements.namedItem("identity").value) || this.identities[0];
+  }
+  signature(identity, html) {
+    let signature = identity.signature || "";
+    const isHtml = signature.startsWith(":HTML:");
+    if (isHtml) signature = signature.slice(6);
+    const from = `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`;
+    signature = signature.replace(/{{FROM-FULL}}|{{FROM}}/g, from).replace(/{{DATE}}/g, (/* @__PURE__ */ new Date()).toLocaleString()).replace(/{{TIME}}/g, (/* @__PURE__ */ new Date()).toLocaleTimeString()).replace(/{{MOMENT:[^}]+}}/g, "");
+    return html ? isHtml ? sanitizeHtml(signature) : plainToHtml2(signature) : isHtml ? htmlToPlain(signature) : signature;
+  }
+  applyIdentity(identity, initial) {
+    if (!identity) return;
+    if (initial || this.seed?.mode === "new" || !this.seed?.mode) {
+      if (identity.replyTo && !this.form.elements.namedItem("replyTo").value) {
+        this.form.elements.namedItem("replyTo").value = identity.replyTo;
+        this.root.querySelector("[data-extra='reply']").hidden = false;
+      }
+      const bcc = this.fields.get("bcc");
+      if (bcc && identity.bcc && !bcc.values.length) {
+        bcc.values = addresses(identity.bcc);
+        this.paintRecipients(bcc);
+        this.root.querySelector("[data-extra='bcc']").hidden = false;
+      }
+    }
+    this.root.querySelectorAll(".compose-signature").forEach((node) => node.remove());
+    const signature = this.signature(identity, this.mode === "html");
+    if (!signature) return;
+    if (this.mode === "html") {
+      const node = document.createElement("div");
+      node.className = "compose-signature";
+      node.innerHTML = `<br>${signature}`;
+      if (identity.signatureInsertBefore) this.editor.prepend(node);
+      else this.editor.append(node);
+    } else {
+      const cleaned = this.plain.value.replace(/\n*-- \n[\s\S]*?(?=\n\n|$)/g, "");
+      this.plain.value = identity.signatureInsertBefore ? `
+
+-- 
+${signature}${cleaned}` : `${cleaned}
+
+-- 
+${signature}`;
+    }
+  }
+  changeIdentity() {
+    const identity = this.identity();
+    this.applyIdentity(identity, false);
+    this.root.dataset.pgpSign = String(identity?.pgpSign || this.prefs.pgpSign);
+    this.root.dataset.pgpEncrypt = String(identity?.pgpEncrypt || this.prefs.pgpEncrypt);
+    this.changed();
+  }
+  setMode(mode) {
+    if (mode === this.mode) {
+      this.paintMode();
+      return;
+    }
+    if (mode === "html") this.editor.innerHTML = this.prefs.markdown ? markdownToHtml(this.plain.value) : plainToHtml2(this.plain.value, true);
+    else this.plain.value = htmlToPlain(this.editor.innerHTML);
+    this.mode = mode;
+    this.paintMode();
+    this.changed();
+  }
+  paintMode() {
+    this.editor.hidden = this.mode !== "html";
+    this.plain.hidden = this.mode === "html";
+    this.root.querySelectorAll(".editor-tools > [data-compose]:not([data-compose='mode']), .tool-separator").forEach((item) => {
+      item.hidden = this.mode !== "html";
+    });
+    const toggle = this.root.querySelector("[data-compose='mode']");
+    toggle.textContent = this.mode === "html" ? "Text" : "HTML";
+    toggle.setAttribute("aria-pressed", this.mode === "html" ? "true" : "false");
+  }
+  paintRecipients(field2) {
+    const chips = field2.box.querySelector(".recipient-chips");
+    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc3(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${esc3(value)}<button type="button" data-chip="${index}" aria-label="${esc3(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.querySelectorAll("button").forEach((button3) => button3.addEventListener("click", () => {
+      field2.values.splice(Number(button3.dataset.chip), 1);
+      this.paintRecipients(field2);
+      this.changed();
+      field2.input.focus({ preventScroll: true });
+    }));
+  }
+  commitInput(field2) {
+    const value = field2.input.value.trim().replace(/[,;]$/, "");
+    if (!value) return false;
+    addresses(value).forEach((item) => field2.values.push(item));
+    field2.input.value = "";
+    field2.list.hidden = true;
+    this.paintRecipients(field2);
+    this.changed();
+    return true;
+  }
+  suggestions(field2) {
+    const query = field2.input.value.trim();
+    window.clearTimeout(field2.timer);
+    if (!query) {
+      field2.list.hidden = true;
+      return;
+    }
+    const request = ++field2.request;
+    field2.timer = window.setTimeout(async () => {
+      try {
+        const result = await call("Suggestions", { Query: query });
+        if (request !== field2.request) return;
+        field2.suggestions = (result || []).filter((row2) => row2?.[0]).map((row2) => row2[1] ? `${row2[1]} <${row2[0]}>` : row2[0]);
+        field2.active = -1;
+        field2.list.innerHTML = field2.suggestions.map((value, index) => `<button type="button" role="option" aria-selected="false" data-suggestion="${index}">${esc3(value)}</button>`).join("");
+        field2.list.hidden = !field2.suggestions.length;
+        field2.list.querySelectorAll("button").forEach((button3) => button3.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          field2.input.value = field2.suggestions[Number(button3.dataset.suggestion)];
+          this.commitInput(field2);
+        }));
+      } catch {
+        field2.list.hidden = true;
+      }
+    }, 200);
+  }
+  fieldKey(event, field2) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (field2.list.hidden) return;
+      event.preventDefault();
+      field2.active = (field2.active + (event.key === "ArrowDown" ? 1 : -1) + field2.suggestions.length) % field2.suggestions.length;
+      field2.list.querySelectorAll("button").forEach((button3, index) => button3.setAttribute("aria-selected", index === field2.active ? "true" : "false"));
+    } else if (event.key === "Enter" || event.key === "," || event.key === ";") {
+      event.preventDefault();
+      if (event.key === "Enter" && field2.active >= 0) field2.input.value = field2.suggestions[field2.active];
+      this.commitInput(field2);
+    } else if (event.key === "Backspace" && !field2.input.value && field2.values.length) {
+      field2.values.pop();
+      this.paintRecipients(field2);
+      this.changed();
+    } else if (event.key === "Escape") field2.list.hidden = true;
+  }
+  addFiles(list) {
+    list.forEach((file) => {
+      const item = { name: file.name, size: sizeLabel(file.size), bytes: file.size, state: "busy", progress: 0, tempName: "", type: file.type };
+      this.files.push(item);
+      if (this.prefs.attachmentLimit > 0 && file.size > this.prefs.attachmentLimit) {
+        item.state = "error";
+        item.error = t("COMPOSE.ATTACHMENT_TOO_LARGE", "Die Datei \xFCberschreitet die Grenze von %SIZE%.").replace("%SIZE%", sizeLabel(this.prefs.attachmentLimit));
+      } else {
+        item.task = upload(file, (percent) => {
+          item.progress = percent;
+          this.paintFiles();
+        });
+        void item.task.promise.then((result) => {
+          item.name = result.name;
+          item.bytes = result.size;
+          item.size = sizeLabel(result.size);
+          item.tempName = result.tempName;
+          item.type = result.mimeType;
+          item.state = "";
+        }).catch((error) => {
+          item.state = "error";
+          item.error = explain(error);
+        }).finally(() => {
+          item.task = void 0;
+          this.paintFiles();
+        });
+      }
+      this.paintFiles();
+    });
+    this.changed();
+  }
+  async attachFrom(items) {
+    if (!items.length) return;
+    const added = items.map((item) => ({ name: item.name, size: sizeLabel(item.size), bytes: item.size, state: "busy", tempName: "", type: "" }));
+    this.files.push(...added);
+    this.paintFiles();
+    try {
+      const result = await call("MessageUploadAttachments", { attachments: items.map((item) => item.key) });
+      added.forEach((file, index) => {
+        const row2 = Array.isArray(result) ? result[index] : null;
+        if (row2 && row2.tempName) {
+          file.tempName = row2.tempName;
+          file.type = String(row2.mimeType || "");
+          file.state = "";
+        } else {
+          file.state = "error";
+          file.error = t("COMPOSE.ORIGINAL_ATTACHMENT_ERROR", "Der Original-Anhang konnte nicht \xFCbernommen werden.");
+        }
+      });
+    } catch (error) {
+      added.forEach((file) => {
+        file.state = "error";
+        file.error = explain(error);
+      });
+    }
+    this.paintFiles();
+  }
+  paintFiles() {
+    const box = this.root.querySelector("#compose-files");
+    box.hidden = !this.files.length;
+    box.innerHTML = this.files.map((file, index) => {
+      const action = file.state === "busy" ? t("COMPOSE.CANCEL_UPLOAD", "Upload von %NAME% abbrechen").replace("%NAME%", file.name) : t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", file.name);
+      return `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc3(file.error || file.name)}">${esc3(file.name)}</span><span class="quiet">${esc3(file.state === "error" ? file.error || t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Fehler") : file.size)}</span>${file.state === "busy" ? `<progress max="100" value="${file.progress || 0}" aria-label="${esc3(t("COMPOSE.UPLOAD_PROGRESS", "Upload-Fortschritt"))}"></progress>` : ""}<button type="button" class="icon-btn" data-file="${index}" aria-label="${esc3(action)}" title="${esc3(action)}">${icon("close")}</button></li>`;
+    }).join("");
+    box.querySelectorAll("[data-file]").forEach((button3) => button3.addEventListener("click", () => {
+      const index = Number(button3.dataset.file);
+      this.files[index]?.task?.abort();
+      this.files.splice(index, 1);
+      this.paintFiles();
+      this.changed();
+    }));
+  }
+  values(saveFolder) {
+    this.fields.forEach((field2) => this.commitInput(field2));
+    const identity = this.identity();
+    if (!identity) throw new ApiError(0, t("COMPOSE.NO_IDENTITY", "Keine Absender-Identit\xE4t vorhanden."));
+    const invalid = [...this.fields.values()].flatMap((field2) => field2.values).filter((value) => !validAddress(value));
+    if (invalid.length) throw new ApiError(303, `${t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse")}: ${invalid[0]}`);
+    const html = this.mode === "html" ? sanitizeHtml(this.editor.innerHTML) : this.prefs.markdown ? markdownToHtml(this.plain.value) : "";
+    const plain = this.mode === "html" ? htmlToPlain(html) : this.plain.value;
+    const attachments = {};
+    this.files.filter((file) => file.tempName && file.state !== "error").forEach((file) => {
+      attachments[file.tempName] = { name: file.name, inline: false, cId: "", location: "", type: file.type || "application/octet-stream" };
+    });
+    return {
+      ...this.seed,
+      to: this.fields.get("to")?.values.join(", ") || "",
+      cc: this.fields.get("cc")?.values.join(", ") || "",
+      bcc: this.fields.get("bcc")?.values.join(", ") || "",
+      replyTo: String(this.form.elements.namedItem("replyTo").value || ""),
+      subject: String(this.form.elements.namedItem("subject").value || ""),
+      body: plain,
+      plain,
+      html,
+      identityID: identity.id,
+      from: `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`,
+      saveFolder,
+      attachments,
+      markAsImportant: this.form.elements.namedItem("important").checked ? 1 : 0,
+      readReceiptRequest: this.form.elements.namedItem("receipt").checked ? 1 : 0,
+      dsn: this.form.elements.namedItem("dsn").checked ? 1 : 0,
+      requireTLS: this.form.elements.namedItem("tls").checked ? 1 : 0,
+      pgpSign: this.root.dataset.pgpSign === "true" ? 1 : 0,
+      pgpEncrypt: this.root.dataset.pgpEncrypt === "true" ? 1 : 0,
+      messageFolder: this.draftRef?.folder || "",
+      messageUid: this.draftRef?.uid || 0
+    };
+  }
+  send() {
+    if (this.sending || this.saving) return;
+    try {
+      const values2 = this.values(this.saveFolder());
+      if (!values2.to && !values2.cc && !values2.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empf\xE4nger an."));
+      if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anh\xE4nge werden noch hochgeladen."));
+      if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anh\xE4nge vor dem Senden."));
+      this.sending = true;
+      this.setBusy(true, t("COMPOSE.SENDING", "Wird gesendet \u2026"));
+      this.callbacks.send(values2);
+    } catch (error) {
+      this.setError(explain(error));
+    }
+  }
+  saveFolder() {
+    const identity = this.identity();
+    if (identity?.sentFolder && identity.sentFolder !== "-") return identity.sentFolder;
+    if (this.prefs.replySameFolder && this.seed?.mode && ["reply", "forward"].includes(this.seed.mode) && this.seed.sourceFolder) return this.seed.sourceFolder;
+    return this.prefs.sentFolder;
+  }
+  async save(closeAfter) {
+    if (this.saving || this.sending) return;
+    if (!this.prefs.draftsFolder) {
+      this.setError(t("COMPOSE.NO_DRAFTS_FOLDER", "Kein Entw\xFCrfe-Ordner eingerichtet."));
+      return;
+    }
+    let status = "";
+    try {
+      if (this.empty()) {
+        if (closeAfter) this.finishClose(false);
+        return;
+      }
+      if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anh\xE4nge werden noch hochgeladen."));
+      this.setError("");
+      this.saving = true;
+      this.setBusy(true, t("COMPOSE.SAVING", "Wird gespeichert \u2026"));
+      const values2 = this.values(this.prefs.draftsFolder);
+      const saved = await this.callbacks.save(values2);
+      this.draftRef = saved;
+      this.baseline = this.fingerprint();
+      status = t("COMPOSE.SAVED_TIME", "Gespeichert um %TIME%").replace("%TIME%", (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      if (closeAfter) this.finishClose(false);
+    } catch (error) {
+      this.setError(explain(error));
+    } finally {
+      this.saving = false;
+      this.setBusy(false, status);
+      this.scheduleAutosave();
+    }
+  }
+  empty() {
+    const content = this.mode === "html" ? htmlToPlain(this.editor.innerHTML) : this.plain.value;
+    const subject = this.form.elements.namedItem("subject").value.trim();
+    return ![...this.fields.values()].some((field2) => field2.values.length || field2.input.value.trim()) && !subject && !content.trim() && !this.files.length;
+  }
+  fingerprint() {
+    return JSON.stringify({
+      to: [...this.fields.values()].map((field2) => field2.values),
+      subject: this.form.elements.namedItem("subject").value,
+      replyTo: this.form.elements.namedItem("replyTo").value,
+      identity: this.identity()?.id,
+      body: this.mode === "html" ? this.editor.innerHTML : this.plain.value,
+      files: this.files.map((file) => file.tempName || file.name),
+      options: ["important", "receipt", "dsn", "tls"].map((name) => this.form.elements.namedItem(name).checked)
+    });
+  }
+  changed() {
+    this.scheduleAutosave();
+  }
+  scheduleAutosave() {
+    window.clearTimeout(this.autosaveTimer);
+    if (!this.prefs.autosave || this.root.hidden) return;
+    this.autosaveTimer = window.setTimeout(() => {
+      if (!this.root.hidden && !this.minimized && !this.empty() && this.fingerprint() !== this.baseline) void this.save(false);
+      else this.scheduleAutosave();
+    }, 6e4);
+  }
+  async requestClose() {
+    if (this.empty() && !this.draftRef) {
+      this.finishClose(false);
+      return;
+    }
+    if (this.fingerprint() === this.baseline) {
+      this.finishClose(false);
+      return;
+    }
+    this.closeDialog.showModal();
+  }
+  minimize() {
+    this.minimized = true;
+    this.root.hidden = true;
+    (this.root.parentElement?.querySelector(".compose-dock")).hidden = false;
+    this.callbacks.mobile(false);
+    this.opener?.focus({ preventScroll: true });
+  }
+  restore() {
+    this.minimized = false;
+    this.root.hidden = false;
+    (this.root.parentElement?.querySelector(".compose-dock")).hidden = true;
+    this.callbacks.mobile(true);
+    (this.mode === "html" ? this.editor : this.plain).focus({ preventScroll: true });
+  }
+  finishClose(discard) {
+    window.clearTimeout(this.autosaveTimer);
+    this.files.forEach((file) => file.task?.abort());
+    this.root.hidden = true;
+    this.root.dataset.open = "false";
+    (this.root.parentElement?.querySelector(".compose-dock")).hidden = true;
+    this.minimized = false;
+    this.callbacks.mobile(false);
+    this.callbacks.close(discard);
+    this.opener?.focus({ preventScroll: true });
+  }
+  sent() {
+    this.sending = false;
+    this.setBusy(false, "");
+    this.finishClose(false);
+  }
+  setError(error) {
+    this.sending = false;
+    this.setBusy(false, "");
+    const slot = this.root.querySelector("#send-error");
+    slot.hidden = !error;
+    slot.textContent = error;
+  }
+  setBusy(busy, status) {
+    const submit = this.form.querySelector("button[type='submit']");
+    submit.disabled = busy;
+    submit.innerHTML = `${icon(busy ? "loading" : "send")}<span>${esc3(busy && this.sending ? t("COMPOSE.SENDING", "Wird gesendet \u2026") : t("COMPOSE.BUTTON_SEND", "Senden"))}</span>`;
+    this.setStatus(status);
+  }
+  setStatus(text2) {
+    this.root.querySelector("#compose-status").textContent = text2;
+  }
+  setBody(text2) {
+    if (this.mode === "html") this.editor.innerHTML = plainToHtml2(text2);
+    else this.plain.value = text2;
+    this.changed();
+  }
+  body() {
+    return this.mode === "html" ? htmlToPlain(this.editor.innerHTML) : this.plain.value;
+  }
+  subject() {
+    return this.form.elements.namedItem("subject").value;
+  }
+  isOpen() {
+    return !this.root.hidden;
+  }
+};
+function hostSave(root3) {
+  return root3.querySelector("[data-compose='save']");
+}
+
+// src/reader.ts
+function esc4(value) {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 function person(item) {
   const text2 = item.name ? `${item.name} <${item.email}>` : item.email;
-  return `<button type="button" class="addr" data-action="m-address" data-email="${esc3(item.email)}" data-name="${esc3(item.name)}" title="${esc3(item.email)}">${esc3(item.name || item.email)}</button><span class="sr">${esc3(text2)}</span>`;
+  return `<button type="button" class="addr" data-action="m-address" data-email="${esc4(item.email)}" data-name="${esc4(item.name)}" title="${esc4(item.email)}">${esc4(item.name || item.email)}</button><span class="sr">${esc4(text2)}</span>`;
 }
 function people(list) {
   return list.map(person).join('<span class="sep">, </span>');
 }
 function line(label2, list) {
   if (!list.length) return "";
-  return `<div class="head-line"><span class="head-key mono">${esc3(label2)}</span><span class="head-val">${people(list)}</span></div>`;
+  return `<div class="head-line"><span class="head-key mono">${esc4(label2)}</span><span class="head-val">${people(list)}</span></div>`;
 }
 var FILE_ICON = {
   image: "image",
@@ -1400,21 +2188,21 @@ var FILE_ICON = {
   other: "attachment"
 };
 function bar(kind, iconName, text2, actions) {
-  return `<div class="note-bar" data-kind="${kind}" role="status">${icon(iconName)}<span class="grow">${esc3(text2)}</span>${actions}</div>`;
+  return `<div class="note-bar" data-kind="${kind}" role="status">${icon(iconName)}<span class="grow">${esc4(text2)}</span>${actions}</div>`;
 }
 function textButton(action, label2, extra = "") {
-  return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc3(label2)}</button>`;
+  return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc4(label2)}</button>`;
 }
 function renderReader(body, data, expanded) {
   const tags = data.keywords.map(
-    (tag) => `<span class="tag">${icon("tag")}<span>${esc3(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc3(tag)}" aria-label="Schlagwort ${esc3(tag)} entfernen">${icon("close")}</button></span>`
+    (tag) => `<span class="tag">${icon("tag")}<span>${esc4(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc4(tag)}" aria-label="Schlagwort ${esc4(tag)} entfernen">${icon("close")}</button></span>`
   ).join("");
   const from = data.from[0];
   const summary = `
     <div class="head-line head-main">
       <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
       <span class="spacer"></span>
-      <time class="quiet" title="${esc3(data.whenFull)}">${esc3(data.when)}</time>
+      <time class="quiet" title="${esc4(data.whenFull)}">${esc4(data.when)}</time>
       <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
   const details = expanded ? `
@@ -1424,8 +2212,8 @@ function renderReader(body, data, expanded) {
       ${line("Cc", data.cc)}
       ${line("Bcc", data.bcc)}
       ${line("Antwort an", data.replyTo)}
-      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc3(data.whenFull)}</span></div>
-      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc3(data.size)}</span></div>` : ""}
+      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc4(data.whenFull)}</span></div>
+      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc4(data.size)}</span></div>` : ""}
     </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
   const bars = [];
   if (data.deleted) bars.push(bar("deleted", "trash", "Als gel\xF6scht markiert.", textButton("m-restore", "Wiederherstellen")));
@@ -1466,10 +2254,10 @@ function renderReader(body, data, expanded) {
     <section class="cal-card" aria-label="Termin">
       ${icon("calendar", "Termin")}
       <div class="grow">
-        <p class="cal-title">${esc3(data.calendar.summary || "Termin")}</p>
-        <p class="quiet">${esc3([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
-        ${data.calendar.location ? `<p class="quiet">${esc3(data.calendar.location)}</p>` : ""}
-        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc3(data.calendar.organizer)}</p>` : ""}
+        <p class="cal-title">${esc4(data.calendar.summary || "Termin")}</p>
+        <p class="quiet">${esc4([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
+        ${data.calendar.location ? `<p class="quiet">${esc4(data.calendar.location)}</p>` : ""}
+        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc4(data.calendar.organizer)}</p>` : ""}
       </div>
     </section>` : "";
   const files = data.files.length ? `
@@ -1480,18 +2268,18 @@ function renderReader(body, data, expanded) {
       <ul class="file-list">
         ${data.files.map((file) => `
           <li class="file">
-            ${file.thumb ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc3(file.name)} ansehen"><img src="${esc3(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
+            ${file.thumb ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc4(file.name)} ansehen"><img src="${esc4(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">
-              ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc3(file.name)}">${esc3(file.name)}</button>` : `<span class="file-name" title="${esc3(file.name)}">${esc3(file.name)}</span>`}
-              <span class="quiet">${esc3(file.size)}</span>
+              ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc4(file.name)}">${esc4(file.name)}</button>` : `<span class="file-name" title="${esc4(file.name)}">${esc4(file.name)}</span>`}
+              <span class="quiet">${esc4(file.size)}</span>
             </span>
-            <a class="icon-btn" href="${esc3(file.href)}" download="${esc3(file.name)}" aria-label="${esc3(file.name)} laden" title="Laden">${icon("download")}</a>
+            <a class="icon-btn" href="${esc4(file.href)}" download="${esc4(file.name)}" aria-label="${esc4(file.name)} laden" title="Laden">${icon("download")}</a>
           </li>`).join("")}
       </ul>
     </section>` : "";
   body.innerHTML = `
     <header class="letter-head">
-      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc3(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc4(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
       <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
@@ -1508,7 +2296,7 @@ function renderReader(body, data, expanded) {
   body.append(frame);
 }
 function renderBulk(body, data) {
-  const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc3(label2)}</span></button>`;
+  const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc4(label2)}</span></button>`;
   body.innerHTML = `
     <div class="bulk">
       <p class="title title-md">${data.count} Mails ausgew\xE4hlt</p>
@@ -1541,7 +2329,7 @@ var CATEGORY = {
 function categoryMark(category) {
   if (!category || !CATEGORY[category]) return "";
   const mark = category === "needs_reply" ? `<i class="wait" aria-hidden="true"></i>` : "";
-  return `<span class="cat">${mark}${esc4(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
+  return `<span class="cat">${mark}${esc5(t("AI_COPILOT.CAT_" + category.toUpperCase(), CATEGORY[category]))}</span>`;
 }
 function rowMarks(row2) {
   const marks = [
@@ -1553,7 +2341,7 @@ function rowMarks(row2) {
   const html = marks.filter(([on2]) => on2).map(([, name, label2]) => icon(name, label2)).join("");
   return html ? `<span class="marks">${html}</span>` : "";
 }
-function esc4(value) {
+function esc5(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -1563,7 +2351,7 @@ function esc4(value) {
   })[char] ?? char);
 }
 function withIcon(name, label2) {
-  return `${icon(name)}<span class="btn-label">${esc4(label2)}</span>`;
+  return `${icon(name)}<span class="btn-label">${esc5(label2)}</span>`;
 }
 var ROLE_ICON = {
   inbox: "inbox",
@@ -1580,6 +2368,23 @@ function createView(root3, actions) {
   let section = "look";
   let edit = null;
   let snap = null;
+  let composer = null;
+  let composePrefs = {
+    editor: "Plain",
+    markdown: false,
+    spellcheck: false,
+    autosave: true,
+    draftsFolder: "",
+    sentFolder: "",
+    replySameFolder: false,
+    attachmentLimit: 0,
+    readReceipt: false,
+    dsn: false,
+    requireTLS: false,
+    pgpSign: false,
+    pgpEncrypt: false
+  };
+  let composeIdentities = [];
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
   const showLogin = (title) => {
@@ -1587,18 +2392,18 @@ function createView(root3, actions) {
     root3.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
-          <h1 class="title">${esc4(title)}</h1>
-          <label class="field"><span>${esc4(t("GLOBAL.EMAIL", "E-Mail"))}</span>
+          <h1 class="title">${esc5(title)}</h1>
+          <label class="field"><span>${esc5(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
           <p class="error" data-for="email" hidden></p>
-          <label class="field"><span>${esc4(t("GLOBAL.PASSWORD", "Passwort"))}</span>
+          <label class="field"><span>${esc5(t("GLOBAL.PASSWORD", "Passwort"))}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
-          <label class="stay"><input name="stay" type="checkbox"> ${esc4(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
+          <label class="stay"><input name="stay" type="checkbox"> ${esc5(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
-          <button type="submit" class="ink-btn">${esc4(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
+          <button type="submit" class="ink-btn">${esc5(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
         </form>
       </main>`;
     const form2 = root3.querySelector("form");
@@ -1609,8 +2414,8 @@ function createView(root3, actions) {
     });
   };
   const setLoginBusy = (busy) => {
-    const button2 = root3.querySelector(".login-card button");
-    if (button2) button2.disabled = busy;
+    const button3 = root3.querySelector(".login-card button");
+    if (button3) button3.disabled = busy;
   };
   const setLoginError = (text2) => {
     const slot = root3.querySelector("[data-for='form']");
@@ -1627,11 +2432,11 @@ function createView(root3, actions) {
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
               <div id="account-list"></div>
-              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
-              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc4(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span>${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}</span></button>
+              <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc5(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
-          <p class="group-label mono">${esc4(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
+          <p class="group-label mono">${esc5(t("FOLDER_LIST.INBOX_NAME", "Posteingang"))}</p>
           <div id="folder-inbox"></div>
           <p class="group-label mono">Ordner</p>
           <div id="folder-rest"></div>
@@ -1659,15 +2464,15 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
-            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc4(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc5(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc4(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc4(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc4(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc4(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc5(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc5(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc5(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc5(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc4(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc5(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
@@ -1675,7 +2480,7 @@ function createView(root3, actions) {
             <div class="bar-more">
               <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
               <div class="menu menu-right" id="more-menu" role="menu" hidden>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc4(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc5(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
                 <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben \u2026</span></button>
@@ -1705,25 +2510,7 @@ function createView(root3, actions) {
             <p class="empty" id="reader-empty">W\xE4hlen Sie eine Mail.</p>
           </div>
         </section>
-        <section class="composer" hidden aria-label="Neue Mail">
-          <form class="composer-form">
-            <div class="composer-bar">
-              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
-              <span class="title title-md" id="compose-title">Neue Mail</span>
-              <span class="spacer"></span>
-              <button type="submit" class="ink-btn">${withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
-            </div>
-            <div class="fields">
-              <p class="quiet" id="compose-from"></p>
-              <label class="field"><span>${esc4(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc4(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc4(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
-              <ul class="compose-files" id="compose-files" aria-label="Anh\xE4nge" hidden></ul>
-              <label class="field"><span>Text</span><textarea name="body"></textarea></label>
-              <p class="error" id="send-error" hidden></p>
-            </div>
-          </form>
-        </section>
+        <div id="compose-host"></div>
         <nav class="tabbar" aria-label="Navigation">
           <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
           <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", "Suche")}</button>
@@ -1733,11 +2520,11 @@ function createView(root3, actions) {
           <div class="dialog-body">
             <div class="settings-sticky">
               <div class="sheet-head" style="padding:0;border:0;min-height:0">
-                <h2 id="settings-title" class="title title-md">${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+                <h2 id="settings-title" class="title title-md">${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
                 <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
               </div>
-              <nav class="settings-nav" aria-label="${esc4(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+              <nav class="settings-nav" aria-label="${esc5(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identit\xE4ten"))}</button>
@@ -1754,7 +2541,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="keys-title" class="title title-md">Tasten</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
               <li><span>N\xE4chste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
@@ -1773,6 +2560,8 @@ function createView(root3, actions) {
               <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
               <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
               <li><span>Seitenleiste</span><kbd>\\</kbd></li>
+              <li><span>Senden im Editor</span><kbd>Strg</kbd> <kbd>Enter</kbd></li>
+              <li><span>Entwurf speichern</span><kbd>Strg</kbd> <kbd>S</kbd></li>
               <li><span>Schlie\xDFen</span><kbd>Esc</kbd></li>
               <li><span>Diese Liste</span><kbd>?</kbd></li>
             </ul>
@@ -1783,7 +2572,7 @@ function createView(root3, actions) {
             <h2 id="confirm-title" class="title title-md">Wirklich l\xF6schen?</h2>
             <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" value="cancel">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" value="cancel">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="button" class="danger" value="ok" id="confirm-ok">${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             </div>
           </div>
@@ -1793,7 +2582,7 @@ function createView(root3, actions) {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
               <span class="spacer"></span>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <label class="sr" for="picker-q">Ordner suchen</label>
             <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
@@ -1805,7 +2594,7 @@ function createView(root3, actions) {
             <h2 id="prompt-title" class="title title-md"></h2>
             <label class="field"><span id="prompt-label"></span><input id="prompt-input" type="text" autocomplete="off"></label>
             <div class="dialog-actions">
-              <button type="button" class="text-btn" data-action="close-dialog">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+              <button type="button" class="text-btn" data-action="close-dialog">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
               <button type="submit" class="ink-btn">${withIcon("check", "\xDCbernehmen")}</button>
             </div>
           </form>
@@ -1816,7 +2605,7 @@ function createView(root3, actions) {
               <h2 id="lightbox-title" class="title title-md"></h2>
               <span class="spacer"></span>
               <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab \xF6ffnen" title="In neuem Tab \xF6ffnen">${icon("external")}</a>
-              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
             </div>
             <div class="lightbox-body" id="lightbox-body"></div>
           </div>
@@ -1832,7 +2621,19 @@ function createView(root3, actions) {
     shell = next;
     const account = next.querySelector(".account-btn");
     account.textContent = email;
-    next.querySelector("#compose-from").textContent = `${t("GLOBAL.FROM", "Von")} ${email}`;
+    composer = new Composer(next.querySelector("#compose-host"), composePrefs, {
+      send: (values2) => actions.send(values2),
+      save: (values2) => actions.saveCompose(values2),
+      close: (discard) => actions.closeCompose(discard),
+      mobile: (open) => {
+        if (!wide()) pane(open ? "compose" : "list");
+      },
+      notice: (text2) => {
+        const slot = shell?.querySelector("#notice");
+        if (slot) slot.textContent = text2;
+      }
+    });
+    composer.configure(composePrefs, composeIdentities);
     next.querySelector("#folder-title").textContent = folderName;
     next.querySelector("#reader-place").textContent = folderName;
     const search = next.querySelector("#search");
@@ -1853,8 +2654,8 @@ function createView(root3, actions) {
     lastReader = data;
     if (!shell) return;
     const show = (name, on2) => {
-      shell?.querySelectorAll(`.reader-bar > [data-action='${name}'], .reader-bar > .bar-more > [data-action='${name}']`).forEach((button2) => {
-        button2.hidden = !on2;
+      shell?.querySelectorAll(`.reader-bar > [data-action='${name}'], .reader-bar > .bar-more > [data-action='${name}']`).forEach((button3) => {
+        button3.hidden = !on2;
       });
     };
     const one = Boolean(data);
@@ -1901,8 +2702,8 @@ function createView(root3, actions) {
     shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu").forEach((menu) => {
       menu.hidden = true;
     });
-    shell?.querySelectorAll("[data-action='account'], [data-action='m-more']").forEach((button2) => {
-      button2.setAttribute("aria-expanded", "false");
+    shell?.querySelectorAll("[data-action='account'], [data-action='m-more']").forEach((button3) => {
+      button3.setAttribute("aria-expanded", "false");
     });
   }
   function anyMenuOpen() {
@@ -1943,8 +2744,8 @@ function createView(root3, actions) {
     if (!shell) return;
     const on2 = force ?? shell.dataset.full !== "true";
     shell.dataset.full = on2 ? "true" : "false";
-    const button2 = shell.querySelector("[data-action='m-fullscreen']");
-    if (button2) button2.innerHTML = `${icon(on2 ? "fullscreen-exit" : "fullscreen")}<span>${on2 ? "Vollbild beenden" : "Vollbild"}</span>`;
+    const button3 = shell.querySelector("[data-action='m-fullscreen']");
+    if (button3) button3.innerHTML = `${icon(on2 ? "fullscreen-exit" : "fullscreen")}<span>${on2 ? "Vollbild beenden" : "Vollbild"}</span>`;
     if (on2 && !wide()) pane("reader");
   }
   function wireShell() {
@@ -1953,7 +2754,6 @@ function createView(root3, actions) {
     const accountBtn = shell.querySelector("[data-action='account']");
     const list = shell.querySelector(".list-pane");
     const separator = shell.querySelector(".splitter");
-    const composer = shell.querySelector(".composer");
     const setListWidth = (px2) => {
       const next = Math.min(640, Math.max(288, Math.round(px2)));
       shell?.style.setProperty("--list-w", `${next}px`);
@@ -2031,6 +2831,24 @@ function createView(root3, actions) {
         paintSettings();
         (shell?.querySelector("#settings")).showModal();
         void actions.settings?.("open", {});
+      } else if (action === "mailto-register") {
+        try {
+          const url = `${location.origin}${location.pathname.replace(/\/+$/, "")}/?/Mailto/&q[]=/0/?to=%s`;
+          navigator.registerProtocolHandler("mailto", url);
+          const slot = shell?.querySelector("#settings-error");
+          if (slot) {
+            slot.className = "quiet";
+            slot.hidden = false;
+            slot.textContent = "Die Registrierung wurde im Browser angefragt.";
+          }
+        } catch {
+          const slot = shell?.querySelector("#settings-error");
+          if (slot) {
+            slot.className = "error";
+            slot.hidden = false;
+            slot.textContent = "Der Browser erlaubt diese Registrierung nicht.";
+          }
+        }
       } else if (action === "settings-section") {
         section = target.dataset.section || "look";
         edit = null;
@@ -2083,11 +2901,7 @@ function createView(root3, actions) {
       else if (action === "archive") actions.archive();
       else if (action === "unread") actions.unread();
       else if (action === "delete") actions.askDelete();
-      else if (action === "close-compose") {
-        closeLayer(composer);
-        if (!wide()) pane("list");
-        actions.closeCompose();
-      } else if (action === "close-sheet") {
+      else if (action === "close-sheet") {
         const sheet = shell?.querySelector(".sheet");
         if (sheet) closeLayer(sheet);
       } else if (action === "open-sheet") {
@@ -2095,13 +2909,13 @@ function createView(root3, actions) {
         const sheet = shell?.querySelector(".sheet");
         if (sheet) openLayer(sheet, target);
       } else if (action === "cat") {
-        shell?.querySelectorAll(".filter").forEach((button2) => {
-          button2.setAttribute("aria-pressed", button2.dataset.cat === target.dataset.cat ? "true" : "false");
+        shell?.querySelectorAll(".filter").forEach((button3) => {
+          button3.setAttribute("aria-pressed", button3.dataset.cat === target.dataset.cat ? "true" : "false");
         });
         actions.assist?.("cat", target.dataset);
       } else if (action === "mode" || action === "tone") {
-        target.parentElement?.querySelectorAll("button").forEach((button2) => {
-          button2.setAttribute("aria-pressed", button2 === target ? "true" : "false");
+        target.parentElement?.querySelectorAll("button").forEach((button3) => {
+          button3.setAttribute("aria-pressed", button3 === target ? "true" : "false");
         });
       } else if (action === "prompt") {
         const area = shell?.querySelector("#ask");
@@ -2111,17 +2925,8 @@ function createView(root3, actions) {
     });
     shell.addEventListener("submit", (event) => {
       const form2 = event.target;
-      if (form2.classList.contains("composer-form")) {
-        event.preventDefault();
-        const data = new FormData(form2);
-        actions.send({
-          title: "",
-          to: String(data.get("to") || ""),
-          cc: String(data.get("cc") || ""),
-          subject: String(data.get("subject") || ""),
-          body: String(data.get("body") || "")
-        });
-      } else if (form2.dataset.action === "search") {
+      if (form2.classList.contains("composer-form")) return;
+      if (form2.dataset.action === "search") {
         event.preventDefault();
         actions.search(form2.querySelector("#search").value.trim());
       } else if (form2.dataset.action === "ask") {
@@ -2157,12 +2962,6 @@ function createView(root3, actions) {
         }
         if (shell?.dataset.full === "true") {
           toggleFullscreen(false);
-          return;
-        }
-        if (!composer.hidden) {
-          closeLayer(composer);
-          if (!wide()) pane("list");
-          actions.closeCompose();
           return;
         }
         if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
@@ -2270,8 +3069,8 @@ function createView(root3, actions) {
     });
     const confirm = shell.querySelector("#confirm");
     confirm.addEventListener("click", (event) => {
-      const button2 = event.target.closest("button");
-      if (button2) confirm.close(button2.value);
+      const button3 = event.target.closest("button");
+      if (button3) confirm.close(button3.value);
     });
   }
   function moveSelection(delta) {
@@ -2306,18 +3105,18 @@ function createView(root3, actions) {
       filters.setAttribute("aria-label", "Filter");
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)];
       filters.innerHTML = cats.map(
-        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc4(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc4(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+        ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc5(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn" data-action="triage">${esc5(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
-      const button2 = document.createElement("button");
-      button2.type = "button";
-      button2.className = "text-btn";
-      button2.dataset.action = "lang-search";
-      button2.hidden = true;
-      button2.textContent = "Als Sprache verstehen";
-      searchForm.append(button2);
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "text-btn";
+      button3.dataset.action = "lang-search";
+      button3.hidden = true;
+      button3.textContent = "Als Sprache verstehen";
+      searchForm.append(button3);
       const hint = document.createElement("div");
       hint.id = "translated";
       hint.hidden = true;
@@ -2326,7 +3125,7 @@ function createView(root3, actions) {
       searchForm.after(hint);
       const input = shell.querySelector("#search");
       input.addEventListener("input", () => {
-        button2.hidden = !input.value.trim();
+        button3.hidden = !input.value.trim();
       });
     }
     if (flags.summarize || flags.replies) {
@@ -2348,13 +3147,13 @@ function createView(root3, actions) {
       sheet.hidden = true;
       sheet.innerHTML = `
         <div class="sheet-head">
-          <span class="title title-md">${esc4(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
-          <span class="mono quiet">${esc4(flags.provider)}</span>
+          <span class="title title-md">${esc5(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</span>
+          <span class="mono quiet">${esc5(flags.provider)}</span>
           <span class="spacer"></span>
-          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc4(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
+          <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc5(t("GLOBAL.CLOSE", "Schlie\xDFen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc4(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc5(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
           <div class="prompts">
             <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
             <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
@@ -2363,8 +3162,8 @@ function createView(root3, actions) {
         </div>
         <button type="button" class="text-btn" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <textarea id="ask" rows="2" placeholder="${esc4(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
-          <button type="submit" class="ink-btn">${esc4(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <textarea id="ask" rows="2" placeholder="${esc5(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot \u2026"))}"></textarea>
+          <button type="submit" class="ink-btn">${esc5(t("AI_COPILOT.SEND", "Senden"))}</button>
         </form>
         <p class="error" id="chat-error" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -2380,16 +3179,16 @@ function createView(root3, actions) {
           <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
           <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc4(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc5(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
         <div class="tones" role="toolbar" aria-label="Ton">
-          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc4(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
+          ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc5(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
           <button type="button" class="text-btn" data-action="generate">${withIcon("assist", t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>Zur\xFCck</button>
         </div>
-        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc4(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
+        <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc5(t("AI_COPILOT.APPLY_SUBJECT", "\xDCbernehmen"))}</button></p>
         <p class="quiet" id="draft-status"></p>`;
       shell.querySelector(".fields")?.prepend(tools);
     }
@@ -2400,24 +3199,24 @@ function createView(root3, actions) {
         <h2 class="title title-md">Assistent</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
-          <button type="button" class="text-btn" value="cancel">${esc4(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
+          <button type="button" class="text-btn" value="cancel">${esc5(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
           <button type="button" class="ink-btn" value="ok">Fortfahren</button>
         </div>
       </div>`;
     consent.addEventListener("click", (event) => {
-      const button2 = event.target.closest("button");
-      if (button2) consent.close(button2.value);
+      const button3 = event.target.closest("button");
+      if (button3) consent.close(button3.value);
     });
     shell.append(consent);
   }
   function paintSettings() {
     const panel = shell?.querySelector("#settings-panel");
     if (!panel) return;
-    shell?.querySelectorAll("[data-section]").forEach((button2) => {
-      const id = button2.dataset.section || "";
-      button2.setAttribute("aria-pressed", id === section ? "true" : "false");
-      if (id === "contacts") button2.hidden = !snap?.caps.contacts;
-      if (id === "filters") button2.hidden = !snap?.caps.sieve;
+    shell?.querySelectorAll("[data-section]").forEach((button3) => {
+      const id = button3.dataset.section || "";
+      button3.setAttribute("aria-pressed", id === section ? "true" : "false");
+      if (id === "contacts") button3.hidden = !snap?.caps.contacts;
+      if (id === "filters") button3.hidden = !snap?.caps.sieve;
     });
     panel.innerHTML = renderDesk(section, snap, edit);
     if (edit) {
@@ -2427,7 +3226,7 @@ function createView(root3, actions) {
   }
   function folderButton(row2) {
     const count = row2.unread > 0 ? `<span class="count">${row2.unread}</span>` : "";
-    return `<button type="button" class="folder" data-folder="${esc4(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px">${icon(ROLE_ICON[row2.role] || (row2.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc4(row2.name)}</span>${count}</button>`;
+    return `<button type="button" class="folder" data-folder="${esc5(row2.fullName)}" aria-current="${row2.current ? "page" : "false"}" style="padding-left:${8 + row2.depth * 12}px">${icon(ROLE_ICON[row2.role] || (row2.inbox ? "inbox" : "folder"))}<span class="folder-name">${esc5(row2.name)}</span>${count}</button>`;
   }
   return {
     showLogin,
@@ -2460,14 +3259,14 @@ function createView(root3, actions) {
           const subject = row2.subject || "(ohne Betreff)";
           return `
           <div class="msg-row${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
-            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc4(subject)}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc5(subject)}">
             <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
-              <span class="who">${esc4(row2.who)}</span>
-              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc4(row2.when)}</span>
-              <span class="subj">${esc4(subject)}${categoryMark(row2.category)}</span>
-              <span class="peek">${esc4(row2.preview)}</span>
+              <span class="who">${esc5(row2.who)}</span>
+              <span class="when">${rowMarks({ ...row2, flagged: false })}${esc5(row2.when)}</span>
+              <span class="subj">${esc5(subject)}${categoryMark(row2.category)}</span>
+              <span class="peek">${esc5(row2.preview)}</span>
             </button>
-            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc4(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc5(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
           </div>`;
         }).join("");
       }
@@ -2509,17 +3308,17 @@ function createView(root3, actions) {
       shell?.classList.toggle("with-checks", visible);
     },
     setRefreshing(busy) {
-      const button2 = shell?.querySelector("[data-action='m-refresh']");
-      if (!button2) return;
-      button2.disabled = busy;
-      button2.innerHTML = icon(busy ? "loading" : "refresh");
+      const button3 = shell?.querySelector("[data-action='m-refresh']");
+      if (!button3) return;
+      button3.disabled = busy;
+      button3.innerHTML = icon(busy ? "loading" : "refresh");
     },
     setAccounts(items) {
       const box = shell?.querySelector("#account-list");
       if (!box) return;
       const others = items.filter((item) => !item.current);
       box.innerHTML = others.length ? `<p class="menu-label mono">Konten</p>` + others.map(
-        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc4(item.email)}">${icon("user")}<span class="grow">${esc4(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
+        (item) => `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc5(item.email)}">${icon("user")}<span class="grow">${esc5(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
       ).join("") + `<hr class="menu-sep">` : "";
     },
     pickFolder(title, folders, exclude) {
@@ -2532,7 +3331,7 @@ function createView(root3, actions) {
         const q = query.value.trim().toLowerCase();
         const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
         list.innerHTML = rows.map(
-          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc4(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc4(q ? folder.fullName : folder.name)}</span></button>`
+          (folder) => `<button type="button" class="folder" role="option" data-pick="${esc5(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc5(q ? folder.fullName : folder.name)}</span></button>`
         ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
       };
       query.value = "";
@@ -2543,8 +3342,8 @@ function createView(root3, actions) {
       return new Promise((resolve) => {
         const onInput = () => paint();
         const onClick = (event) => {
-          const button2 = event.target.closest("[data-pick]");
-          if (button2) dialog.close(button2.dataset.pick || "");
+          const button3 = event.target.closest("[data-pick]");
+          if (button3) dialog.close(button3.dataset.pick || "");
         };
         const onKey = (event) => {
           if (event.key === "Enter" && event.target === query) {
@@ -2599,9 +3398,9 @@ function createView(root3, actions) {
       const p = dialog.querySelector("#confirm-text");
       p.hidden = !text2;
       p.textContent = text2;
-      const button2 = dialog.querySelector("#confirm-ok");
-      button2.className = danger ? "danger" : "ink-btn";
-      button2.innerHTML = withIcon(danger ? "delete" : "check", ok);
+      const button3 = dialog.querySelector("#confirm-ok");
+      button3.className = danger ? "danger" : "ink-btn";
+      button3.innerHTML = withIcon(danger ? "delete" : "check", ok);
       dialog.returnValue = "";
       dialog.showModal();
       return new Promise((resolve) => {
@@ -2629,47 +3428,22 @@ function createView(root3, actions) {
       }
       dialog.showModal();
     },
+    configureCompose(prefs, identities) {
+      composePrefs = prefs;
+      composeIdentities = identities;
+      composer?.configure(prefs, identities);
+    },
     openCompose(seed) {
-      if (!shell) return;
-      const composer = shell.querySelector(".composer");
-      shell.querySelector("#compose-title").textContent = seed.title;
-      const form2 = shell.querySelector(".composer-form");
-      form2.elements.namedItem("to").value = seed.to;
-      form2.elements.namedItem("cc").value = seed.cc;
-      form2.elements.namedItem("subject").value = seed.subject;
-      form2.elements.namedItem("body").value = seed.body;
-      this.setComposeFiles(seed.files || []);
-      shell.querySelectorAll("[data-mode]").forEach((button2) => {
-        button2.setAttribute("aria-pressed", button2.dataset.mode === (seed.mode || "new") ? "true" : "false");
-      });
-      this.setSendState(false, "");
-      if (!wide()) pane("compose");
-      openLayer(composer, document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      form2.elements.namedItem("to").focus({ preventScroll: true });
+      composer?.open(seed);
     },
     closeCompose() {
-      const composer = shell?.querySelector(".composer");
-      if (composer && !composer.hidden) closeLayer(composer);
+      composer?.sent();
     },
-    setComposeFiles(files) {
-      const box = shell?.querySelector("#compose-files");
-      if (!box) return;
-      box.hidden = !files.length;
-      box.innerHTML = files.map(
-        (file, index) => `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc4(file.name)}">${esc4(file.name)}</span><span class="quiet">${esc4(file.state === "error" ? "Fehler" : file.size)}</span><button type="button" class="icon-btn" data-action="m-compose-drop" data-index="${index}" aria-label="${esc4(file.name)} entfernen" title="Entfernen">${icon("close")}</button></li>`
-      ).join("");
+    attachCompose(items) {
+      return composer?.attachFrom(items) || Promise.resolve();
     },
     setSendState(busy, error) {
-      const button2 = shell?.querySelector(".composer-form button[type='submit']");
-      const slot = shell?.querySelector("#send-error");
-      if (button2) {
-        button2.disabled = busy;
-        button2.innerHTML = busy ? withIcon("loading", "Wird gesendet \u2026") : withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"));
-      }
-      if (slot) {
-        slot.hidden = !error;
-        slot.textContent = error;
-      }
+      if (!busy || error) composer?.setError(error);
     },
     notice(text2) {
       const slot = shell?.querySelector("#notice");
@@ -2689,8 +3463,8 @@ function createView(root3, actions) {
       });
     },
     pressCategory(id) {
-      shell?.querySelectorAll(".filter").forEach((button2) => {
-        button2.setAttribute("aria-pressed", button2.dataset.cat === id ? "true" : "false");
+      shell?.querySelectorAll(".filter").forEach((button3) => {
+        button3.setAttribute("aria-pressed", button3.dataset.cat === id ? "true" : "false");
       });
     },
     setAlerts(reply, follow, invoice, dues) {
@@ -2725,12 +3499,12 @@ function createView(root3, actions) {
       const row2 = document.createElement("div");
       row2.className = "strip-row";
       if (!state.tldr && state.showSummarize) {
-        const button2 = document.createElement("button");
-        button2.type = "button";
-        button2.className = "text-btn";
-        button2.dataset.action = "summarize";
-        button2.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
-        row2.append(button2);
+        const button3 = document.createElement("button");
+        button3.type = "button";
+        button3.className = "text-btn";
+        button3.dataset.action = "summarize";
+        button3.textContent = t("AI_COPILOT.SUMMARIZE", "Zusammenfassen");
+        row2.append(button3);
       } else if (state.tldr) {
         const label2 = document.createElement("span");
         label2.className = "mono";
@@ -2764,13 +3538,13 @@ function createView(root3, actions) {
         row2.append(replies);
       }
       state.replies.forEach((reply, index) => {
-        const button2 = document.createElement("button");
-        button2.type = "button";
-        button2.className = "prompt";
-        button2.dataset.action = "use-reply";
-        button2.dataset.index = String(index);
-        button2.textContent = reply.label;
-        row2.append(button2);
+        const button3 = document.createElement("button");
+        button3.type = "button";
+        button3.className = "prompt";
+        button3.dataset.action = "use-reply";
+        button3.dataset.index = String(index);
+        button3.textContent = reply.label;
+        row2.append(button3);
       });
       if (state.model) {
         const model = document.createElement("p");
@@ -2801,12 +3575,12 @@ function createView(root3, actions) {
         const prompts = document.createElement("div");
         prompts.className = "prompts";
         ["Welche Mails warten auf meine Antwort?", "Zeig mir Rechnungen vom letzten Monat", "Fasse die ge\xF6ffnete Mail zusammen"].forEach((text2) => {
-          const button2 = document.createElement("button");
-          button2.type = "button";
-          button2.className = "prompt";
-          button2.dataset.action = "prompt";
-          button2.textContent = text2;
-          prompts.append(button2);
+          const button3 = document.createElement("button");
+          button3.type = "button";
+          button3.className = "prompt";
+          button3.dataset.action = "prompt";
+          button3.textContent = text2;
+          prompts.append(button3);
         });
         log.append(p, prompts);
       }
@@ -2877,13 +3651,12 @@ function createView(root3, actions) {
         mode: pressed("[data-mode]")?.mode || "new",
         tone: pressed("[data-tone]")?.tone || "professional",
         instruction: shell?.querySelector("#instruction")?.value || "",
-        body: shell?.querySelector("textarea[name='body']")?.value || "",
-        subject: shell?.querySelector("input[name='subject']")?.value || ""
+        body: composer?.body() || "",
+        subject: composer?.subject() || ""
       };
     },
     setDraftBody(text2) {
-      const area = shell?.querySelector("textarea[name='body']");
-      if (area) area.value = text2;
+      composer?.setBody(text2);
     },
     setDraftBusy(busy, status) {
       const generate = shell?.querySelector("[data-action='generate']");
@@ -2976,7 +3749,7 @@ function plainFromHtml(html) {
 function quote(body) {
   return body.replace(/\r\n/g, "\n").split("\n").map((line2) => `> ${line2}`).join("\n");
 }
-function sizeLabel(bytes) {
+function sizeLabel2(bytes) {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -3080,8 +3853,9 @@ var Session = class {
   inlineCache = /* @__PURE__ */ new Map();
   calendarCache = /* @__PURE__ */ new Map();
   receiptSkipped = /* @__PURE__ */ new Set();
-  composeFiles = [];
   draftRef = null;
+  composeData = {};
+  identities = [];
   renderToken = 0;
   constructor(root3) {
     window.addEventListener("sm-appearance", () => {
@@ -3105,8 +3879,9 @@ var Session = class {
       unread: () => void this.markUnread(),
       askDelete: () => void this.remove(),
       send: (values2) => void this.send(values2),
-      closeCompose: () => {
-        this.replyKind = "";
+      saveCompose: (values2) => this.saveDraft(values2),
+      closeCompose: (discard) => {
+        void this.closeCompose(discard);
       },
       back: () => void 0,
       assist: (name, data) => void this.assist(name, data),
@@ -3219,6 +3994,7 @@ var Session = class {
     this.trashFolder = String(data.TrashFolder || "");
     this.junkFolder = String(data.JunkFolder || "");
     this.readPrefs(data);
+    this.composeData = data;
     this.checked.clear();
     this.inboxUid = 0;
     this.inboxUnread = -1;
@@ -3234,6 +4010,13 @@ var Session = class {
     this.view.setChecks(this.prefs.useChecks);
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
+    await this.loadComposeIdentities();
+    this.configureComposer();
+    const mailto = String(data.mailToEmail || "");
+    if (mailto) {
+      const seed = parseMailto(mailto);
+      this.view.openCompose({ title: "Neue Nachricht", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
+    }
     window.clearInterval(this.pollTimer);
     this.pollTimer = window.setInterval(() => {
       if (!document.hidden) void this.poll(false);
@@ -3585,7 +4368,7 @@ var Session = class {
       return {
         index,
         name: file.name,
-        size: sizeLabel(file.size),
+        size: sizeLabel2(file.size),
         href: file.href,
         view: rawUrl(kind === "text" || kind === "calendar" ? "ViewAsPlain" : "View", file.hash),
         thumb: kind === "image" && this.prefs.thumbs ? rawUrl("ViewThumbnail", file.hash) : "",
@@ -3618,7 +4401,7 @@ var Session = class {
       replyTo: message.replyTo.filter((person2) => !message.from.some((sender) => sender.email === person2.email)),
       when: when(message.date),
       whenFull: whenFull(message.date),
-      size: sizeLabel(message.size),
+      size: sizeLabel2(message.size),
       flagged: hasFlag(message.flags, "\\flagged"),
       seen: seen(message.flags),
       deleted: hasFlag(message.flags, "\\deleted"),
@@ -3646,10 +4429,59 @@ var Session = class {
     };
     this.view.setReader(data, "", "");
   }
+  async loadComposeIdentities() {
+    try {
+      const result = await call("AccountsAndIdentities");
+      const rows = Array.isArray(result.Identities) ? result.Identities : Object.values(result.Identities || {});
+      this.identities = rows.map((value) => {
+        const item = value;
+        return {
+          id: String(item.id || ""),
+          label: String(item.label || ""),
+          email: String(item.email || ""),
+          name: String(item.name || ""),
+          replyTo: String(item.replyTo || ""),
+          bcc: String(item.bcc || ""),
+          signature: String(item.signature || ""),
+          signatureInsertBefore: Boolean(item.signatureInsertBefore),
+          sentFolder: String(item.sentFolder || ""),
+          pgpEncrypt: Boolean(item.pgpEncrypt),
+          pgpSign: Boolean(item.pgpSign),
+          smimeKey: String(item.smimeKey || ""),
+          smimeCertificate: String(item.smimeCertificate || ""),
+          smimeCertificateChain: String(item.smimeCertificateChain || "")
+        };
+      }).filter((item) => item.email);
+    } catch {
+      this.identities = [];
+    }
+    if (!this.identities.length) this.identities = [{ id: "", label: "", email: this.email, name: "", replyTo: "", bcc: "", signature: "", signatureInsertBefore: false, sentFolder: "", pgpEncrypt: false, pgpSign: false, smimeKey: "", smimeCertificate: "", smimeCertificateChain: "" }];
+  }
+  configureComposer() {
+    const data = this.composeData;
+    this.view.configureCompose({
+      editor: String(data.EditorDefaultType || "Plain") === "Html" ? "Html" : "Plain",
+      markdown: Boolean(data.markdown),
+      spellcheck: Boolean(data.allowSpellcheck),
+      autosave: Boolean(data.AllowDraftAutosave ?? true),
+      draftsFolder: this.draftsFolder,
+      sentFolder: this.sentFolder,
+      replySameFolder: Boolean(data.ReplySameFolder),
+      attachmentLimit: Number(data.attachmentLimit || 0),
+      readReceipt: Boolean(data.requestReadReceipt),
+      dsn: Boolean(data.requestDsn),
+      requireTLS: Boolean(data.requireTLS),
+      pgpSign: Boolean(data.pgpSign),
+      pgpEncrypt: Boolean(data.pgpEncrypt)
+    }, this.identities);
+  }
+  replyIdentity(message) {
+    const recipients = [...message.to, ...message.cc, ...message.bcc];
+    return this.identities.find((identity) => recipients.some((person2) => person2.email.toLowerCase() === identity.email.toLowerCase()))?.id || this.identities[0]?.id || "";
+  }
   openNew() {
     this.replyKind = "";
     this.draftRef = null;
-    this.composeFiles = [];
     this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
   }
   openReply(all) {
@@ -3657,7 +4489,6 @@ var Session = class {
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
     this.draftRef = null;
-    this.composeFiles = [];
     const author = message.replyTo[0] || message.from[0];
     const others = [...message.to, ...message.cc].filter((person2) => person2.email.toLowerCase() !== this.email.toLowerCase());
     const body = message.plain || plainFromHtml(message.html);
@@ -3665,6 +4496,8 @@ var Session = class {
     this.view.openCompose({
       title: all ? "Allen antworten" : "Antworten",
       mode: "reply",
+      identityId: this.replyIdentity(message),
+      sourceFolder: message.folder,
       to: author ? address(author) : "",
       cc: all ? others.map(address).join(", ") : "",
       subject,
@@ -3681,12 +4514,13 @@ ${quote(body)}`
     this.draftRef = null;
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
-    this.composeFiles = [];
     this.view.openCompose({
       title: "Weiterleiten",
       to: "",
       cc: "",
       subject,
+      identityId: this.replyIdentity(message),
+      sourceFolder: message.folder,
       body: `
 
 -------- Weitergeleitete Nachricht --------
@@ -3695,63 +4529,33 @@ Betreff: ${message.subject}
 
 ${body}`
     });
-    void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+    void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
   }
-  /** Dateien vom Server als Anhänge in den Editor holen (Original-Anhänge oder ganze Mails als .eml). */
-  async attachFrom(items) {
-    if (!items.length) return;
-    const added = items.map((item) => ({ name: item.name, size: sizeLabel(item.size), state: "busy", tempName: "", type: "" }));
-    this.composeFiles = this.composeFiles.concat(added);
-    this.view.setComposeFiles(this.composeFiles);
-    try {
-      const result = await call("MessageUploadAttachments", {
-        attachments: items.map((item) => item.key)
-      });
-      added.forEach((file, index) => {
-        const row2 = Array.isArray(result) ? result[index] : null;
-        if (row2 && row2.tempName) {
-          file.tempName = row2.tempName;
-          file.type = String(row2.mimeType || "");
-          file.state = "";
-        } else file.state = "error";
-      });
-    } catch {
-      added.forEach((file) => {
-        file.state = "error";
-      });
+  async saveDraft(values2) {
+    const result = await call("SaveMessage", { ...values2 });
+    if (result === true || !result.folder || !result.uid) throw new ApiError(0, "Der Entwurf konnte nicht gespeichert werden.");
+    this.draftRef = { folder: result.folder, uid: result.uid };
+    return this.draftRef;
+  }
+  async closeCompose(discard) {
+    if (discard && this.draftRef) {
+      try {
+        await call("MessageDelete", { folder: this.draftRef.folder, uids: String(this.draftRef.uid) });
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
     }
-    this.view.setComposeFiles(this.composeFiles);
+    this.replyKind = "";
+    this.draftRef = null;
+    await this.loadList(false, true);
   }
   async send(values2) {
-    if (!values2.to.trim()) {
-      this.view.setSendState(false, "Geben Sie bitte mindestens einen Empf\xE4nger an.");
-      return;
-    }
-    if (this.composeFiles.some((file) => file.state === "busy")) {
-      this.view.setSendState(false, "Anh\xE4nge werden noch vorbereitet.");
-      return;
-    }
-    this.view.setSendState(true, "");
     const message = this.current;
-    const attachments = {};
-    this.composeFiles.filter((file) => file.tempName && file.state !== "error").forEach((file) => {
-      attachments[file.tempName] = { name: file.name, inline: false, cId: "", location: "", type: file.type };
-    });
-    const params = {
-      from: this.email,
-      to: values2.to,
-      cc: values2.cc,
-      bcc: "",
-      subject: values2.subject,
-      plain: values2.body,
-      html: "",
-      saveFolder: this.sentFolder,
-      attachments
-    };
+    const params = { ...values2 };
     if (message && this.replyKind) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
-      params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, this.folder];
+      params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, message.folder];
     }
     if (this.draftRef) {
       params.messageFolder = this.draftRef.folder;
@@ -3760,10 +4564,8 @@ ${body}`
     try {
       await call("SendMessage", params);
       this.view.closeCompose();
-      this.view.setSendState(false, "");
       this.view.notice("Gesendet.");
       this.replyKind = "";
-      this.composeFiles = [];
       const wasDraft = Boolean(this.draftRef);
       this.draftRef = null;
       this.offset = 0;
@@ -4198,8 +5000,7 @@ ${body}`
           const seed = parseMailto(info.mailto);
           this.replyKind = "";
           this.draftRef = null;
-          this.composeFiles = [];
-          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: "", subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
+          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
           return;
         }
         const host = (() => {
@@ -4237,17 +5038,21 @@ ${body}`
       case "edit-new": {
         if (!message) return;
         this.replyKind = "";
-        this.composeFiles = [];
         this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
         this.view.openCompose({
           title: name === "edit-draft" ? "Entwurf" : "Neue Nachricht",
           to: message.to.map(address).join(", "),
           cc: message.cc.map(address).join(", "),
+          bcc: message.bcc.map(address).join(", "),
+          replyTo: message.replyTo.map(address).join(", "),
           subject: message.subject,
           body: message.plain || plainFromHtml(message.html),
-          mode: "new"
+          html: message.html,
+          mode: name === "edit-draft" ? "draft" : "new",
+          draftRef: this.draftRef,
+          identityId: this.identities.find((identity) => message.from.some((person2) => person2.email.toLowerCase() === identity.email.toLowerCase()))?.id
         });
-        void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+        void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
         return;
       }
       case "forward-att": {
@@ -4256,16 +5061,9 @@ ${body}`
         if (!list.length) return;
         this.replyKind = "";
         this.draftRef = null;
-        this.composeFiles = [];
         const subject = list.length === 1 ? /^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}` : "Weitergeleitete Nachrichten";
         this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
-        void this.attachFrom(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
-        return;
-      }
-      case "compose-drop": {
-        const index = Number(data.index || -1);
-        if (index >= 0) this.composeFiles.splice(index, 1);
-        this.view.setComposeFiles(this.composeFiles);
+        void this.view.attachCompose(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
         return;
       }
       case "preview": {
@@ -4318,7 +5116,6 @@ ${body}`
       case "addr-write":
         this.replyKind = "";
         this.draftRef = null;
-        this.composeFiles = [];
         this.view.openCompose({ title: "Neue Nachricht", to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
         return;
       case "addr-copy":

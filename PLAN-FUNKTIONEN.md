@@ -209,7 +209,13 @@ Alt: `dev/View/User/MailBox/MessageView.js`, Einstellungen `ViewImages`, `ViewIm
 
 ---
 
-## 4. Phase 2: Schreiben
+## 4. Phase 2: Schreiben – ERLEDIGT
+
+> **Status: abgeschlossen am 2026-11-07.** Alle Punkte 4.1 bis 4.6 sind im neuen Modul `ui/src/compose.ts` umgesetzt. Die Oberfläche nutzt Identitäten mit Bcc und Signaturwechsel, Empfänger-Chips mit Kontaktvorschlägen, HTML- und Texteditor mit Markdown-Umwandlung, Uploads mit Fortschritt und Größenprüfung, Original-Anhänge, Entwürfe mit Autosave und Schließen-Nachfrage, Minimieren, Sendeoptionen sowie die Client-Verarbeitung von `mailto:`. Uploads laufen über `upload()` in `api.ts`; die Einstellungen enthalten die Registrierung als `mailto:`-Handler.
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`, beide Sprachdateien als JSON und Token-Prüfung mit 0 Fehlern; die fünf Roh-Hex-Warnungen in `letter.ts` waren bereits vorhanden. Im Browser hell/dunkel und bei 375/800/832/1280 px geprüft: Composer, Identitäten, Empfänger-Chips, ungültige Adressen, HTML-Inhalt, Upload und Entfernen, Minimieren und Wiederherstellen, Schließen-Dialog sowie reales Speichern, erneutes Öffnen und Verwerfen eines Entwurfs. `Suggestions` wurde korrekt aufgerufen, lieferte im Testkonto aber eine leere Liste.
+>
+> **Ungetestet bzw. in der Vorschau nicht bestätigbar:** der komplette `mailto:`-Weg über `ServiceMailto` (die Vorschau lieferte kein `mailToEmail` in den AppData), Upload-Abbruch mitten im Transfer, der tatsächliche 60-s-Autosave und sichtbare Kontaktvorschläge. Kein echter Versand nach den letzten Änderungen; Speichern und Löschen von Entwürfen wurden dagegen mit dem Server bestätigt.
 
 Alt: `dev/View/Popup/Compose.js`, `Views/User/PopupsCompose.html`, `dev/Model/ComposeAttachment.js`.
 Neues Modul `ui/src/compose.ts`.
@@ -433,7 +439,7 @@ Vorgehen:
 |---|---|---|
 | 0 | Symbolsystem | Erledigt |
 | 1 | Liste und Brief (3.1–3.11) | Erledigt |
-| 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Hoch |
+| 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Erledigt |
 | 3 | Ordner, Suche, Sortierung, Threads | Hoch |
 | 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Mittel bis hoch |
 | 5 | Kontakte | Mittel |

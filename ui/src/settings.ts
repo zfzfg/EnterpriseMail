@@ -425,7 +425,10 @@ function lookSection(): string {
       ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
       ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
       ${choice("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
-    </fieldset>`;
+    </fieldset>
+    <p class="mono">${esc(t("SETTINGS_GENERAL.MAILTO_LINKS", "E-Mail-Adressen"))}</p>
+    <p class="quiet">${esc(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links können direkt hier eine neue Nachricht öffnen."))}</p>
+    <button type="button" class="text-btn" data-action="mailto-register">${icon("external")}<span>${esc(t("SETTINGS_GENERAL.MAILTO", "Als Programm für mailto:-Links registrieren"))}</span></button>`;
 }
 
 export function renderDesk(section: string, snap: SettingsSnapshot | null, edit: DeskEdit | null): string {

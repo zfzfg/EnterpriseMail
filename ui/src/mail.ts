@@ -5,9 +5,10 @@ import {
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
 import type { ReaderFile, ReaderPlace } from "./reader";
-import { applyDesk, loadDesk, readCaps, type Caps, type SettingsSnapshot } from "./settings";
+import { applyDesk, loadDesk, readCaps, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
+import type { ComposeValues } from "./compose";
 import {
-  createView, type ChatTurn, type ComposeFile, type ComposeSeed, type FolderRow, type MailView, type MessageRow,
+  createView, type ChatTurn, type ComposeSeed, type FolderRow, type MailView, type MessageRow,
   type PickerFolder, type ReaderData, type StripState
 } from "./view";
 
@@ -94,11 +95,6 @@ interface Prefs {
   zip: boolean;
   thumbs: boolean;
   webPath: string;
-}
-
-interface ComposeAttachment extends ComposeFile {
-  tempName: string;
-  type: string;
 }
 
 const PAGE_FALLBACK = 20;
@@ -252,8 +248,9 @@ class Session {
   private inlineCache = new Map<string, string>();
   private calendarCache = new Map<string, CalendarEvent | null>();
   private receiptSkipped = new Set<string>();
-  private composeFiles: ComposeAttachment[] = [];
   private draftRef: { folder: string; uid: number } | null = null;
+  private composeData: Record<string, unknown> = {};
+  private identities: IdentityRow[] = [];
   private renderToken = 0;
 
   constructor(root: HTMLElement) {
@@ -276,7 +273,8 @@ class Session {
       unread: () => void this.markUnread(),
       askDelete: () => void this.remove(),
       send: (values) => void this.send(values),
-      closeCompose: () => { this.replyKind = ""; },
+      saveCompose: (values) => this.saveDraft(values),
+      closeCompose: (discard) => { void this.closeCompose(discard); },
       back: () => undefined,
       assist: (name, data) => void this.assist(name, data),
       settings: (name, data) => this.settings(name, data),
@@ -392,6 +390,7 @@ class Session {
     this.trashFolder = String(data.TrashFolder || "");
     this.junkFolder = String(data.JunkFolder || "");
     this.readPrefs(data);
+    this.composeData = data;
     this.checked.clear();
     this.inboxUid = 0;
     this.inboxUnread = -1;
@@ -407,6 +406,13 @@ class Session {
     this.view.setChecks(this.prefs.useChecks);
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
+    await this.loadComposeIdentities();
+    this.configureComposer();
+    const mailto = String(data.mailToEmail || "");
+    if (mailto) {
+      const seed = parseMailto(mailto);
+      this.view.openCompose({ title: "Neue Nachricht", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
+    }
     window.clearInterval(this.pollTimer);
     this.pollTimer = window.setInterval(() => { if (!document.hidden) void this.poll(false); }, this.prefs.checkInterval * 60_000);
   }
@@ -840,10 +846,43 @@ class Session {
     this.view.setReader(data, "", "");
   }
 
+  private async loadComposeIdentities(): Promise<void> {
+    try {
+      const result = await call<{ Identities?: unknown }>("AccountsAndIdentities");
+      const rows = Array.isArray(result.Identities) ? result.Identities : Object.values((result.Identities || {}) as object);
+      this.identities = rows.map((value) => {
+        const item = value as Record<string, unknown>;
+        return {
+          id: String(item.id || ""), label: String(item.label || ""), email: String(item.email || ""), name: String(item.name || ""),
+          replyTo: String(item.replyTo || ""), bcc: String(item.bcc || ""), signature: String(item.signature || ""),
+          signatureInsertBefore: Boolean(item.signatureInsertBefore), sentFolder: String(item.sentFolder || ""),
+          pgpEncrypt: Boolean(item.pgpEncrypt), pgpSign: Boolean(item.pgpSign), smimeKey: String(item.smimeKey || ""),
+          smimeCertificate: String(item.smimeCertificate || ""), smimeCertificateChain: String(item.smimeCertificateChain || "")
+        };
+      }).filter((item) => item.email);
+    } catch { this.identities = []; }
+    if (!this.identities.length) this.identities = [{ id: "", label: "", email: this.email, name: "", replyTo: "", bcc: "", signature: "", signatureInsertBefore: false, sentFolder: "", pgpEncrypt: false, pgpSign: false, smimeKey: "", smimeCertificate: "", smimeCertificateChain: "" }];
+  }
+
+  private configureComposer(): void {
+    const data = this.composeData;
+    this.view.configureCompose({
+      editor: String(data.EditorDefaultType || "Plain") === "Html" ? "Html" : "Plain",
+      markdown: Boolean(data.markdown), spellcheck: Boolean(data.allowSpellcheck), autosave: Boolean(data.AllowDraftAutosave ?? true),
+      draftsFolder: this.draftsFolder, sentFolder: this.sentFolder, replySameFolder: Boolean(data.ReplySameFolder),
+      attachmentLimit: Number(data.attachmentLimit || 0), readReceipt: Boolean(data.requestReadReceipt), dsn: Boolean(data.requestDsn),
+      requireTLS: Boolean(data.requireTLS), pgpSign: Boolean(data.pgpSign), pgpEncrypt: Boolean(data.pgpEncrypt)
+    }, this.identities);
+  }
+
+  private replyIdentity(message: Msg): string {
+    const recipients = [...message.to, ...message.cc, ...message.bcc];
+    return this.identities.find((identity) => recipients.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id || this.identities[0]?.id || "";
+  }
+
   private openNew(): void {
     this.replyKind = "";
     this.draftRef = null;
-    this.composeFiles = [];
     this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
   }
 
@@ -852,17 +891,13 @@ class Session {
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
     this.draftRef = null;
-    this.composeFiles = [];
     const author = message.replyTo[0] || message.from[0];
     const others = [...message.to, ...message.cc].filter((person) => person.email.toLowerCase() !== this.email.toLowerCase());
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
-      title: all ? "Allen antworten" : "Antworten",
-      mode: "reply",
-      to: author ? address(author) : "",
-      cc: all ? others.map(address).join(", ") : "",
-      subject,
+      title: all ? "Allen antworten" : "Antworten", mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      to: author ? address(author) : "", cc: all ? others.map(address).join(", ") : "", subject,
       body: `\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
     });
   }
@@ -874,95 +909,50 @@ class Session {
     this.draftRef = null;
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
-    this.composeFiles = [];
     this.view.openCompose({
-      title: "Weiterleiten",
-      to: "",
-      cc: "",
-      subject,
+      title: "Weiterleiten", to: "", cc: "", subject, identityId: this.replyIdentity(message), sourceFolder: message.folder,
       body: `\n\n-------- Weitergeleitete Nachricht --------\nVon: ${message.from.map(label).join(", ")}\nBetreff: ${message.subject}\n\n${body}`
     });
-    void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+    void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
   }
 
-  /** Dateien vom Server als Anhänge in den Editor holen (Original-Anhänge oder ganze Mails als .eml). */
-  private async attachFrom(items: { key: string; name: string; size: number }[]): Promise<void> {
-    if (!items.length) return;
-    const added: ComposeAttachment[] = items.map((item) => ({ name: item.name, size: sizeLabel(item.size), state: "busy", tempName: "", type: "" }));
-    this.composeFiles = this.composeFiles.concat(added);
-    this.view.setComposeFiles(this.composeFiles);
-    try {
-      const result = await call<({ tempName?: string; mimeType?: string } | false)[]>("MessageUploadAttachments", {
-        attachments: items.map((item) => item.key)
-      });
-      added.forEach((file, index) => {
-        const row = Array.isArray(result) ? result[index] : null;
-        if (row && row.tempName) {
-          file.tempName = row.tempName;
-          file.type = String(row.mimeType || "");
-          file.state = "";
-        } else file.state = "error";
-      });
-    } catch {
-      added.forEach((file) => { file.state = "error"; });
-    }
-    this.view.setComposeFiles(this.composeFiles);
+  private async saveDraft(values: ComposeValues): Promise<{ folder: string; uid: number }> {
+    const result = await call<{ folder?: string; uid?: number } | true>("SaveMessage", { ...values });
+    if (result === true || !result.folder || !result.uid) throw new ApiError(0, "Der Entwurf konnte nicht gespeichert werden.");
+    this.draftRef = { folder: result.folder, uid: result.uid };
+    return this.draftRef;
   }
 
-  private async send(values: ComposeSeed): Promise<void> {
-    if (!values.to.trim()) {
-      this.view.setSendState(false, "Geben Sie bitte mindestens einen Empfänger an.");
-      return;
+  private async closeCompose(discard: boolean): Promise<void> {
+    if (discard && this.draftRef) {
+      try { await call("MessageDelete", { folder: this.draftRef.folder, uids: String(this.draftRef.uid) }); }
+      catch (error) { this.view.notice(explain(error)); }
     }
-    if (this.composeFiles.some((file) => file.state === "busy")) {
-      this.view.setSendState(false, "Anhänge werden noch vorbereitet.");
-      return;
-    }
-    this.view.setSendState(true, "");
+    this.replyKind = "";
+    this.draftRef = null;
+    await this.loadList(false, true);
+  }
+
+  private async send(values: ComposeValues): Promise<void> {
     const message = this.current;
-    const attachments: Record<string, unknown> = {};
-    this.composeFiles.filter((file) => file.tempName && file.state !== "error").forEach((file) => {
-      attachments[file.tempName] = { name: file.name, inline: false, cId: "", location: "", type: file.type };
-    });
-    const params: Record<string, unknown> = {
-      from: this.email,
-      to: values.to,
-      cc: values.cc,
-      bcc: "",
-      subject: values.subject,
-      plain: values.body,
-      html: "",
-      saveFolder: this.sentFolder,
-      attachments
-    };
+    const params: Record<string, unknown> = { ...values };
     if (message && this.replyKind) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
-      params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, this.folder];
+      params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, message.folder];
     }
-    if (this.draftRef) {
-      params.messageFolder = this.draftRef.folder;
-      params.messageUid = this.draftRef.uid;
-    }
+    if (this.draftRef) { params.messageFolder = this.draftRef.folder; params.messageUid = this.draftRef.uid; }
     try {
       await call("SendMessage", params);
       this.view.closeCompose();
-      this.view.setSendState(false, "");
       this.view.notice("Gesendet.");
       this.replyKind = "";
-      this.composeFiles = [];
       const wasDraft = Boolean(this.draftRef);
       this.draftRef = null;
       this.offset = 0;
-      if (wasDraft && this.current) {
-        this.current = null;
-        this.selected = 0;
-        this.view.setReader(null, "", "");
-      }
+      if (wasDraft && this.current) { this.current = null; this.selected = 0; this.view.setReader(null, "", ""); }
       await this.loadList(false, true);
-    } catch (error) {
-      this.view.setSendState(false, explain(error));
-    }
+    } catch (error) { this.view.setSendState(false, explain(error)); }
   }
 
   /** Ziel der Aktion: die angehakten Mails, sonst die offene. */
@@ -1392,8 +1382,7 @@ class Session {
           const seed = parseMailto(info.mailto);
           this.replyKind = "";
           this.draftRef = null;
-          this.composeFiles = [];
-          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: "", subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
+          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
           return;
         }
         const host = (() => { try { return new URL(info.http).host; } catch { return info.http; } })();
@@ -1425,17 +1414,15 @@ class Session {
       case "edit-new": {
         if (!message) return;
         this.replyKind = "";
-        this.composeFiles = [];
         this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
         this.view.openCompose({
           title: name === "edit-draft" ? "Entwurf" : "Neue Nachricht",
-          to: message.to.map(address).join(", "),
-          cc: message.cc.map(address).join(", "),
-          subject: message.subject,
-          body: message.plain || plainFromHtml(message.html),
-          mode: "new"
+          to: message.to.map(address).join(", "), cc: message.cc.map(address).join(", "), bcc: message.bcc.map(address).join(", "),
+          replyTo: message.replyTo.map(address).join(", "), subject: message.subject, body: message.plain || plainFromHtml(message.html),
+          html: message.html, mode: name === "edit-draft" ? "draft" : "new", draftRef: this.draftRef,
+          identityId: this.identities.find((identity) => message.from.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id
         });
-        void this.attachFrom(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+        void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
         return;
       }
       case "forward-att": {
@@ -1444,16 +1431,9 @@ class Session {
         if (!list.length) return;
         this.replyKind = "";
         this.draftRef = null;
-        this.composeFiles = [];
         const subject = list.length === 1 ? (/^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}`) : "Weitergeleitete Nachrichten";
         this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
-        void this.attachFrom(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
-        return;
-      }
-      case "compose-drop": {
-        const index = Number(data.index || -1);
-        if (index >= 0) this.composeFiles.splice(index, 1);
-        this.view.setComposeFiles(this.composeFiles);
+        void this.view.attachCompose(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
         return;
       }
       case "preview": {
@@ -1508,7 +1488,6 @@ class Session {
       case "addr-write":
         this.replyKind = "";
         this.draftRef = null;
-        this.composeFiles = [];
         this.view.openCompose({ title: "Neue Nachricht", to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
         return;
       case "addr-copy":

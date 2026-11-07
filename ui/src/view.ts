@@ -1,9 +1,12 @@
 import type { AssistFlags } from "./assistant";
+import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferences, type ComposeSeed, type ComposeValues } from "./compose";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import { renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
 import { applyAppearance, type Appearance } from "./theme";
+
+export type { ComposeFile, ComposeSeed } from "./compose";
 
 export interface FolderRow {
   fullName: string;
@@ -76,22 +79,6 @@ export interface DraftOptions {
   subject: string;
 }
 
-export interface ComposeSeed {
-  title: string;
-  to: string;
-  cc: string;
-  subject: string;
-  body: string;
-  mode?: string;
-  files?: ComposeFile[];
-}
-
-export interface ComposeFile {
-  name: string;
-  size: string;
-  state?: "busy" | "error" | "";
-}
-
 export interface MailActions {
   login(email: string, password: string, stay: boolean): void;
   logout(): void;
@@ -106,8 +93,9 @@ export interface MailActions {
   archive(): void;
   unread(): void;
   askDelete(): void;
-  send(values: ComposeSeed): void;
-  closeCompose(): void;
+  send(values: ComposeValues): void;
+  saveCompose(values: ComposeValues): Promise<{ folder: string; uid: number }>;
+  closeCompose(discard: boolean): void;
   back(): void;
   assist?(name: string, data: Record<string, string | undefined>): void;
   settings?(name: string, data: Record<string, string>): void | Promise<void>;
@@ -171,9 +159,10 @@ export interface MailView {
   ask(title: string, label: string, value?: string): Promise<string | null>;
   confirm(title: string, text: string, ok: string, danger?: boolean): Promise<boolean>;
   preview(name: string, url: string, kind: "image" | "pdf" | "text"): void;
+  configureCompose(prefs: ComposePreferences, identities: ComposeIdentity[]): void;
   openCompose(seed: ComposeSeed): void;
   closeCompose(): void;
-  setComposeFiles(files: ComposeFile[]): void;
+  attachCompose(items: { key: string; name: string; size: number }[]): Promise<void>;
   setSendState(busy: boolean, error: string): void;
   notice(text: string): void;
   confirmDelete(): Promise<boolean>;
@@ -199,6 +188,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   let section = "look";
   let edit: DeskEdit | null = null;
   let snap: SettingsSnapshot | null = null;
+  let composer: Composer | null = null;
+  let composePrefs: ComposePreferences = {
+    editor: "Plain", markdown: false, spellcheck: false, autosave: true, draftsFolder: "", sentFolder: "",
+    replySameFolder: false, attachmentLimit: 0, readReceipt: false, dsn: false, requireTLS: false, pgpSign: false, pgpEncrypt: false
+  };
+  let composeIdentities: ComposeIdentity[] = [];
 
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
@@ -329,25 +324,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <p class="empty" id="reader-empty">Wählen Sie eine Mail.</p>
           </div>
         </section>
-        <section class="composer" hidden aria-label="Neue Mail">
-          <form class="composer-form">
-            <div class="composer-bar">
-              <button type="button" class="icon-btn" data-action="close-compose" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
-              <span class="title title-md" id="compose-title">Neue Mail</span>
-              <span class="spacer"></span>
-              <button type="submit" class="ink-btn">${withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"))}</button>
-            </div>
-            <div class="fields">
-              <p class="quiet" id="compose-from"></p>
-              <label class="field"><span>${esc(t("GLOBAL.TO", "An"))}</span><input name="to" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc(t("GLOBAL.CC", "Cc"))}</span><input name="cc" type="text" autocomplete="email"></label>
-              <label class="field"><span>${esc(t("GLOBAL.SUBJECT", "Betreff"))}</span><input name="subject" type="text"></label>
-              <ul class="compose-files" id="compose-files" aria-label="Anhänge" hidden></ul>
-              <label class="field"><span>Text</span><textarea name="body"></textarea></label>
-              <p class="error" id="send-error" hidden></p>
-            </div>
-          </form>
-        </section>
+        <div id="compose-host"></div>
         <nav class="tabbar" aria-label="Navigation">
           <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
           <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", "Suche")}</button>
@@ -397,6 +374,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
               <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
               <li><span>Seitenleiste</span><kbd>\\</kbd></li>
+              <li><span>Senden im Editor</span><kbd>Strg</kbd> <kbd>Enter</kbd></li>
+              <li><span>Entwurf speichern</span><kbd>Strg</kbd> <kbd>S</kbd></li>
               <li><span>Schließen</span><kbd>Esc</kbd></li>
               <li><span>Diese Liste</span><kbd>?</kbd></li>
             </ul>
@@ -456,7 +435,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     shell = next;
     const account = next.querySelector(".account-btn") as HTMLButtonElement;
     account.textContent = email;
-    (next.querySelector("#compose-from") as HTMLElement).textContent = `${t("GLOBAL.FROM", "Von")} ${email}`;
+    composer = new Composer(next.querySelector("#compose-host") as HTMLElement, composePrefs, {
+      send: (values) => actions.send(values),
+      save: (values) => actions.saveCompose(values),
+      close: (discard) => actions.closeCompose(discard),
+      mobile: (open) => { if (!wide()) pane(open ? "compose" : "list"); },
+      notice: (text) => { const slot = shell?.querySelector("#notice"); if (slot) slot.textContent = text; }
+    });
+    composer.configure(composePrefs, composeIdentities);
     (next.querySelector("#folder-title") as HTMLElement).textContent = folderName;
     (next.querySelector("#reader-place") as HTMLElement).textContent = folderName;
     const search = next.querySelector("#search") as HTMLInputElement;
@@ -578,7 +564,6 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     const accountBtn = shell.querySelector("[data-action='account']") as HTMLButtonElement;
     const list = shell.querySelector(".list-pane") as HTMLElement;
     const separator = shell.querySelector(".splitter") as HTMLElement;
-    const composer = shell.querySelector(".composer") as HTMLElement;
 
     const setListWidth = (px: number) => {
       const next = Math.min(640, Math.max(288, Math.round(px)));
@@ -656,6 +641,16 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         paintSettings();
         (shell?.querySelector("#settings") as HTMLDialogElement).showModal();
         void actions.settings?.("open", {});
+      } else if (action === "mailto-register") {
+        try {
+          const url = `${location.origin}${location.pathname.replace(/\/+$/, "")}/?/Mailto/&q[]=/0/?to=%s`;
+          navigator.registerProtocolHandler("mailto", url);
+          const slot = shell?.querySelector<HTMLElement>("#settings-error");
+          if (slot) { slot.className = "quiet"; slot.hidden = false; slot.textContent = "Die Registrierung wurde im Browser angefragt."; }
+        } catch {
+          const slot = shell?.querySelector<HTMLElement>("#settings-error");
+          if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = "Der Browser erlaubt diese Registrierung nicht."; }
+        }
       } else if (action === "settings-section") {
         section = target.dataset.section || "look";
         edit = null;
@@ -710,11 +705,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (action === "archive") actions.archive();
       else if (action === "unread") actions.unread();
       else if (action === "delete") actions.askDelete();
-      else if (action === "close-compose") {
-        closeLayer(composer);
-        if (!wide()) pane("list");
-        actions.closeCompose();
-      } else if (action === "close-sheet") {
+      else if (action === "close-sheet") {
         const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
         if (sheet) closeLayer(sheet);
       } else if (action === "open-sheet") {
@@ -739,17 +730,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
     shell.addEventListener("submit", (event) => {
       const form = event.target as HTMLFormElement;
-      if (form.classList.contains("composer-form")) {
-        event.preventDefault();
-        const data = new FormData(form);
-        actions.send({
-          title: "",
-          to: String(data.get("to") || ""),
-          cc: String(data.get("cc") || ""),
-          subject: String(data.get("subject") || ""),
-          body: String(data.get("body") || "")
-        });
-      } else if (form.dataset.action === "search") {
+      if (form.classList.contains("composer-form")) return;
+      if (form.dataset.action === "search") {
         event.preventDefault();
         actions.search((form.querySelector("#search") as HTMLInputElement).value.trim());
       } else if (form.dataset.action === "ask") {
@@ -784,12 +766,6 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         if (shell?.querySelector("dialog[open]")) return;
         if (anyMenuOpen()) { closeMenu(); return; }
         if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
-        if (!composer.hidden) {
-          closeLayer(composer);
-          if (!wide()) pane("list");
-          actions.closeCompose();
-          return;
-        }
         if (!docked() && shell?.dataset.sidebar === "open") setSidebar(false);
         return;
       }
@@ -1253,48 +1229,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       }
       dialog.showModal();
     },
-    openCompose(seed) {
-      if (!shell) return;
-      const composer = shell.querySelector(".composer") as HTMLElement;
-      (shell.querySelector("#compose-title") as HTMLElement).textContent = seed.title;
-      const form = shell.querySelector(".composer-form") as HTMLFormElement;
-      (form.elements.namedItem("to") as HTMLInputElement).value = seed.to;
-      (form.elements.namedItem("cc") as HTMLInputElement).value = seed.cc;
-      (form.elements.namedItem("subject") as HTMLInputElement).value = seed.subject;
-      (form.elements.namedItem("body") as HTMLTextAreaElement).value = seed.body;
-      this.setComposeFiles(seed.files || []);
-      shell.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
-        button.setAttribute("aria-pressed", button.dataset.mode === (seed.mode || "new") ? "true" : "false");
-      });
-      this.setSendState(false, "");
-      if (!wide()) pane("compose");
-      openLayer(composer, document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      (form.elements.namedItem("to") as HTMLInputElement).focus({ preventScroll: true });
+    configureCompose(prefs, identities) {
+      composePrefs = prefs;
+      composeIdentities = identities;
+      composer?.configure(prefs, identities);
     },
-    closeCompose() {
-      const composer = shell?.querySelector(".composer") as HTMLElement | null;
-      if (composer && !composer.hidden) closeLayer(composer);
-    },
-    setComposeFiles(files) {
-      const box = shell?.querySelector("#compose-files") as HTMLElement | null;
-      if (!box) return;
-      box.hidden = !files.length;
-      box.innerHTML = files.map((file, index) =>
-        `<li class="compose-file">${icon(file.state === "busy" ? "loading" : file.state === "error" ? "error" : "attachment")}<span class="grow" title="${esc(file.name)}">${esc(file.name)}</span><span class="quiet">${esc(file.state === "error" ? "Fehler" : file.size)}</span><button type="button" class="icon-btn" data-action="m-compose-drop" data-index="${index}" aria-label="${esc(file.name)} entfernen" title="Entfernen">${icon("close")}</button></li>`
-      ).join("");
-    },
-    setSendState(busy, error) {
-      const button = shell?.querySelector(".composer-form button[type='submit']") as HTMLButtonElement | null;
-      const slot = shell?.querySelector("#send-error") as HTMLElement | null;
-      if (button) {
-        button.disabled = busy;
-        button.innerHTML = busy ? withIcon("loading", "Wird gesendet …") : withIcon("send", t("COMPOSE.BUTTON_SEND", "Senden"));
-      }
-      if (slot) {
-        slot.hidden = !error;
-        slot.textContent = error;
-      }
-    },
+    openCompose(seed) { composer?.open(seed); },
+    closeCompose() { composer?.sent(); },
+    attachCompose(items) { return composer?.attachFrom(items) || Promise.resolve(); },
+    setSendState(busy, error) { if (!busy || error) composer?.setError(error); },
     notice(text) {
       const slot = shell?.querySelector("#notice") as HTMLElement | null;
       if (slot) slot.textContent = text;
@@ -1501,14 +1444,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         mode: pressed("[data-mode]")?.mode || "new",
         tone: pressed("[data-tone]")?.tone || "professional",
         instruction: (shell?.querySelector("#instruction") as HTMLInputElement | null)?.value || "",
-        body: (shell?.querySelector("textarea[name='body']") as HTMLTextAreaElement | null)?.value || "",
-        subject: (shell?.querySelector("input[name='subject']") as HTMLInputElement | null)?.value || ""
+        body: composer?.body() || "",
+        subject: composer?.subject() || ""
       };
     },
-    setDraftBody(text) {
-      const area = shell?.querySelector("textarea[name='body']") as HTMLTextAreaElement | null;
-      if (area) area.value = text;
-    },
+    setDraftBody(text) { composer?.setBody(text); },
     setDraftBusy(busy, status) {
       const generate = shell?.querySelector("[data-action='generate']") as HTMLButtonElement | null;
       const stop = shell?.querySelector("[data-action='stop-generate']") as HTMLButtonElement | null;

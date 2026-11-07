@@ -100,6 +100,50 @@ export function adminCall<T>(adminKey: string, action: string, params: Record<st
   return postJson<T>(`${root()}?/${key}/Json/&q[]=/0/`, action, params);
 }
 
+export interface UploadedFile {
+  name: string;
+  size: number;
+  tempName: string;
+  mimeType: string;
+}
+
+export interface UploadTask {
+  promise: Promise<UploadedFile>;
+  abort(): void;
+}
+
+/** Einziger Upload-Weg: ServiceUpload mit Fortschritt und Abbruch. */
+export function upload(file: File, onProgress: (percent: number) => void): UploadTask {
+  const request = new XMLHttpRequest();
+  const promise = new Promise<UploadedFile>((resolve, reject) => {
+    request.open("POST", `${root()}?/Upload/&q[]=/0/`);
+    request.setRequestHeader("Accept", "application/json");
+    request.setRequestHeader("X-SM-Token", token);
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
+    });
+    request.addEventListener("error", () => reject(new ApiError(1, "Der Upload ist fehlgeschlagen.")));
+    request.addEventListener("abort", () => reject(new ApiError(0, "Der Upload wurde abgebrochen.")));
+    request.addEventListener("load", () => {
+      try {
+        const data = JSON.parse(request.responseText) as Envelope & { Result?: { Attachment?: UploadedFile; code?: number; message?: string } };
+        const attachment = data.Result?.Attachment;
+        if (request.status < 200 || request.status >= 300 || !attachment?.tempName) {
+          reject(new ApiError(Number(data.Result?.code || data.code || 999), String(data.Result?.message || data.message || "Der Upload ist fehlgeschlagen.")));
+          return;
+        }
+        resolve(attachment);
+      } catch {
+        reject(new ApiError(1, "Der Server hat den Upload nicht bestätigt."));
+      }
+    });
+    const body = new FormData();
+    body.append("uploader", file, file.name);
+    request.send(body);
+  });
+  return { promise, abort: () => request.abort() };
+}
+
 export async function plugin<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
   const result = await call<T & { error?: string; status?: number }>("Plugin" + action, params);
   if (result && typeof result === "object" && "error" in result && result.error) {
