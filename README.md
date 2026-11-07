@@ -61,7 +61,7 @@ Die Plugin-Beschreibung steht in `plugins/ai-copilot/README`. Die ältere Schild
 
 ## Einstellungen und Admin
 
-Einstellungen hängen am Konto-Menü: Erscheinungsbild, Konten, Identitäten, Kontakte, Filter, Schlüssel. Ein Abschnitt bleibt zu, wenn der Server die Fähigkeit nicht hat. OpenPGP und S/MIME sind Liste, Import und die Felder an der Identität.
+Einstellungen hängen am Konto-Menü: Erscheinungsbild, Allgemein, Sicherheit, Konten, Identitäten, Kontakte, Filter, Schlüssel und, wenn das Plugin aktiv ist, der Assistent. Allgemein und Sicherheit speichern jedes Feld sofort. Ein Abschnitt bleibt zu, wenn der Server die Fähigkeit nicht hat. OpenPGP und S/MIME sind Liste, Import und die Felder an der Identität. Eine abgelaufene Sitzung öffnet den Anmelde-Dialog über dem Postfach.
 
 Der Admin ist dieselbe Token-Datei, dicht, unter `/?admin`. Anmeldung, Domainliste, Aktivieren, Deaktivieren, Löschen, Abmelden.
 

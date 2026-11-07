@@ -1,6 +1,6 @@
 import { readAssist, type AssistFlags } from "./assistant";
 import {
-  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, messageHash, plugin, proxyUrl, rawUrl, streamEvents
+  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, watchSession
 } from "./api";
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
@@ -139,12 +139,15 @@ function address(person: Person): string {
   return person.name ? `${person.name} <${person.email}>` : person.email;
 }
 
+let hourCycle: "h12" | "h23" | undefined;
+
 function when(stamp: number): string {
   if (!stamp) return "";
   const date = new Date(stamp * 1000);
   const now = new Date();
+  const clock = hourCycle ? { hourCycle } : {};
   if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...clock });
   }
   return date.toLocaleDateString([], { day: "numeric", month: "short" });
 }
@@ -262,6 +265,7 @@ class Session {
   private anchor = 0;
   private readTimer = 0;
   private pollTimer = 0;
+  private logoutTimer = 0;
   private lastPoll = 0;
   private inboxUid = 0;
   private inboxUnread = -1;
@@ -271,6 +275,7 @@ class Session {
   private receiptSkipped = new Set<string>();
   private draftRef: { folder: string; uid: number } | null = null;
   private composeData: Record<string, unknown> = {};
+  private boot: Record<string, unknown> = {};
   private identities: IdentityRow[] = [];
   private renderToken = 0;
 
@@ -279,8 +284,9 @@ class Session {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden && this.email && Date.now() - this.lastPoll > 60_000) void this.poll(false);
     });
+    watchSession(() => { if (this.email) this.view.showReauth(); });
     this.view = createView(root, {
-      login: (email, password, stay) => void this.login(email, password, stay),
+      login: (email, password, stay, totp) => void this.login(email, password, stay, totp),
       logout: () => void this.logout(),
       selectFolder: (fullName) => void this.selectFolder(fullName),
       selectMessage: (uid) => void this.selectMessage(uid),
@@ -292,6 +298,9 @@ class Session {
       forward: () => this.openForward(),
       archive: () => void this.archive(),
       unread: () => void this.markUnread(),
+      markUnread: () => void this.forceSeen(false),
+      markRead: () => void this.forceSeen(true),
+      quotes: () => void this.toggleQuotes(),
       askDelete: () => void this.remove(),
       send: (values) => void this.send(values),
       saveCompose: (values) => this.saveDraft(values),
@@ -304,12 +313,20 @@ class Session {
   }
 
   async start(data: Record<string, unknown>): Promise<void> {
+    this.boot = data;
     const title = String(data.title || "SnappyMail");
     if (data.Auth) await this.enter(data);
-    else this.view.showLogin(title);
+    else {
+      const system = (data.System || {}) as { languages?: Record<string, string> };
+      this.view.showLogin(title, {
+        languages: data.allowLanguagesOnLogin ? system.languages : undefined,
+        language: String(data.language || ""),
+        twoFactor: "RequireTwoFactor" in data
+      });
+    }
   }
 
-  private async login(email: string, password: string, stay: boolean): Promise<void> {
+  private async login(email: string, password: string, stay: boolean, totp = ""): Promise<void> {
     if (!email.trim() || !password) {
       this.view.setLoginError("Adresse und Passwort eintragen.");
       return;
@@ -321,9 +338,10 @@ class Session {
         Email: email.trim(),
         Password: password,
         language: document.documentElement.lang || "",
-        signMe: stay ? 1 : 0
+        signMe: stay ? 1 : 0,
+        totp_code: totp
       });
-      await this.enter(result);
+      await this.enter(result, this.view.hasMail());
     } catch (error) {
       this.view.setLoginError(explain(error));
     } finally {
@@ -412,7 +430,14 @@ class Session {
     };
   }
 
-  private async enter(data: Record<string, unknown>): Promise<void> {
+  private async enter(data: Record<string, unknown>, keep = false): Promise<void> {
+    if (keep && this.view.hasMail()) {
+      this.email = String(data.Email || this.email);
+      this.composeData = { ...this.composeData, ...data };
+      this.view.hideReauth();
+      this.armLogout();
+      return;
+    }
     this.email = String(data.Email || "");
     this.mainEmail = String(data.mainEmail || data.Email || "");
     this.caps = readCaps(data);
@@ -432,15 +457,19 @@ class Session {
     this.folderFilter = "";
     this.collapsed = this.readCollapsed();
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
-    this.pageSize = Math.min(50, Math.max(10, page || PAGE_FALLBACK));
+    this.pageSize = Math.min(100, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
     this.assistFlags = await readAssist(data, async () => {
       const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
       return result.settings;
     });
     this.noticeAck = Boolean(this.assistFlags?.noticeAck);
+    const cycle = String(data.hourCycle || "");
+    hourCycle = cycle === "h12" || cycle === "h23" ? cycle : undefined;
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    this.view.setLayout(Number(data.Layout ?? 1));
     this.view.setChecks(this.prefs.useChecks);
+    this.armLogout();
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
     await this.loadComposeIdentities();
@@ -463,17 +492,28 @@ class Session {
       if (name === "open") this.contactSearch = "";
       if (name === "search-contacts") this.contactSearch = data.search || "";
       if (name === "open" || name === "search-contacts") {
-        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+        this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
         this.view.showSettings(this.desk);
+        return;
+      }
+      if (name === "pref") {
+        await this.savePref(data.key || "", data.value || "");
         return;
       }
       if (!this.desk) return;
       const next = await applyDesk(name, data, this.desk);
+      if (name === "assist-save") {
+        this.assistFlags = await readAssist(this.composeData, async () => {
+          const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
+          return result.settings;
+        });
+        this.view.setAssist(this.assistFlags);
+      }
       if (next === "session") {
         await this.enter(await loadApp());
         return;
       }
-      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch);
+      this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.contactSearch, this.composeData);
       this.view.showSettings(this.desk);
     } catch (error) {
       this.view.settingsNotice(explain(error));
@@ -1528,6 +1568,82 @@ class Session {
     }
   }
 
+  private async forceSeen(value: boolean): Promise<void> {
+    const uids = this.targets();
+    if (!uids.length) return;
+    window.clearTimeout(this.readTimer);
+    await this.setSeen(uids, value);
+  }
+
+  private async toggleQuotes(): Promise<void> {
+    this.prefs.collapseBlockquotes = !this.prefs.collapseBlockquotes;
+    this.composeData.CollapseBlockquotes = this.prefs.collapseBlockquotes;
+    if (this.current) await this.paintLetter();
+    try {
+      await call("SettingsUpdate", { CollapseBlockquotes: this.prefs.collapseBlockquotes ? 1 : 0 });
+    } catch (error) {
+      this.view.notice(explain(error));
+    }
+  }
+
+  private logoutWatch = false;
+
+  private armLogout(): void {
+    window.clearTimeout(this.logoutTimer);
+    const minutes = Number(this.composeData.AutoLogout ?? 0);
+    if (!this.logoutWatch) {
+      this.logoutWatch = true;
+      const reset = () => this.armLogout();
+      window.addEventListener("pointerdown", reset);
+      window.addEventListener("keydown", reset);
+    }
+    if (!minutes || !this.email) return;
+    this.logoutTimer = window.setTimeout(() => { void this.logout(); }, minutes * 60_000);
+  }
+
+  private async savePref(key: string, raw: string): Promise<void> {
+    const numeric = ["MessagesPerPage", "CheckMailInterval", "MessageReadDelay", "MsgDefaultAction", "minFontSize", "MaxBlockquotesLevel", "Layout", "AutoLogout", "keyPassForget"];
+    const bools = ["UseThreads", "UseCheckboxesInList", "listGrouped", "HideDeleted", "HideUnsubscribed", "ShowUnreadCount", "messageReadAuto", "showNextMessage", "messageNewWindow", "ViewHTML", "RemoveColors", "AllowStyles", "CollapseBlockquotes", "ListInlineAttachments", "simpleAttachmentsList", "markdown", "allowSpellcheck", "AllowDraftAutosave", "ReplySameFolder", "ContactsAutosave", "requestReadReceipt", "requestDsn", "requireTLS", "pgpSign", "pgpEncrypt", "DesktopNotifications", "SoundNotification"];
+    const value: unknown = numeric.includes(key) ? Number(raw) : bools.includes(key) ? (raw === "1" ? 1 : 0) : raw;
+    await call("SettingsUpdate", { [key]: value });
+    this.composeData[key] = numeric.includes(key) ? Number(raw) : bools.includes(key) ? raw === "1" : raw;
+    if (key === "UseThreads") this.composeData.useThreads = raw === "1";
+    if (key === "hourCycle") hourCycle = raw === "h12" || raw === "h23" ? raw : undefined;
+    if (key === "Layout") this.view.setLayout(Number(raw));
+    if (key === "UseCheckboxesInList") this.view.setChecks(raw === "1");
+    if (key === "MessagesPerPage") this.pageSize = Math.min(100, Math.max(10, Number(raw) || 25));
+    if (key === "defaultSort") this.sort = raw;
+    if (key === "ShowUnreadCount" || key === "HideDeleted" || key === "HideUnsubscribed") await this.loadFolders();
+    if (["MessagesPerPage", "defaultSort", "UseThreads", "threadAlgorithm", "listGrouped", "HideDeleted"].includes(key)) await this.loadList(false, true);
+    if (key === "CheckMailInterval") {
+      this.prefs.checkInterval = Math.max(1, Number(raw) || 15);
+      window.clearInterval(this.pollTimer);
+      this.pollTimer = window.setInterval(() => { if (!document.hidden) void this.poll(false); }, this.prefs.checkInterval * 60_000);
+    }
+    if (key === "AutoLogout") this.armLogout();
+    if (key === "language") {
+      await loadLanguage(raw);
+      document.documentElement.lang = raw;
+      if (!this.view.composerOpen()) location.reload();
+      else this.view.notice("Die Sprache gilt vollständig nach dem nächsten Laden.");
+    }
+    const readKeys = ["RemoveColors", "AllowStyles", "minFontSize", "MaxBlockquotesLevel", "CollapseBlockquotes", "ViewHTML", "ViewImages", "ViewImagesWhitelist", "ListInlineAttachments", "simpleAttachmentsList"];
+    if (readKeys.includes(key)) {
+      this.readPrefs(this.composeData);
+      if (this.current) await this.paintLetter();
+    }
+    const writeKeys = ["EditorDefaultType", "markdown", "allowSpellcheck", "AllowDraftAutosave", "ReplySameFolder", "requestReadReceipt", "requestDsn", "requireTLS", "pgpSign", "pgpEncrypt"];
+    if (writeKeys.includes(key)) this.configureComposer();
+    if (key === "NotificationSound") this.prefs.soundName = raw;
+    if (key === "SoundNotification") this.prefs.sound = raw === "1";
+    if (key === "DesktopNotifications") this.prefs.desktop = raw === "1";
+    if (key === "messageReadAuto") this.prefs.readAuto = raw === "1";
+    if (key === "MessageReadDelay") this.prefs.readDelay = Number(raw) || 0;
+    if (key === "showNextMessage") this.prefs.showNext = raw === "1";
+    if (key === "messageNewWindow") this.prefs.newWindow = raw === "1";
+    this.view.settingsSaved();
+  }
+
   private async markUnread(): Promise<void> {
     const uids = this.targets();
     if (!uids.length) return;
@@ -1687,6 +1803,24 @@ class Session {
     const message = this.current;
     const ref = Number(data.ref || data.uid || 0);
     switch (name) {
+      case "login-lang": {
+        if (!data.language) return;
+        try {
+          await loadLanguage(data.language);
+          document.documentElement.lang = data.language;
+          if (!this.view.hasMail()) {
+            const system = (this.boot.System || {}) as { languages?: Record<string, string> };
+            this.view.showLogin(String(this.boot.title || "SnappyMail"), {
+              languages: this.boot.allowLanguagesOnLogin ? system.languages : undefined,
+              language: data.language,
+              twoFactor: "RequireTwoFactor" in this.boot
+            });
+          }
+        } catch (error) {
+          this.view.setLoginError(explain(error));
+        }
+        return;
+      }
       case "select": {
         const uid = Number(data.uid || 0);
         if (!uid) return;

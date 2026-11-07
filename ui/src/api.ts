@@ -24,6 +24,19 @@ interface Envelope {
 }
 
 let token = "";
+let onExpired: (() => void) | null = null;
+
+/** Sitzung abgelaufen (Fehler 101): einmal melden, der Aufrufer zeigt den Anmelde-Dialog. */
+export function watchSession(handler: () => void): void {
+  onExpired = handler;
+}
+
+export async function loadLanguage(code: string): Promise<void> {
+  const response = await fetch(`${root()}?/Lang/App/${encodeURIComponent(code)}/`, { credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(1, "Die Sprache konnte nicht geladen werden.");
+  const script = await response.text();
+  new Function(script)();
+}
 
 function root(): string {
   return location.pathname.replace(/\/+$/, "") + "/";
@@ -86,7 +99,9 @@ async function postJson<T>(url: string, action: string, params: Record<string, u
   const result = data.Result as { System?: { token?: string } } | null;
   if (result && typeof result === "object" && result.System?.token) token = result.System.token;
   if (data.Result === false || data.Result == null) {
-    throw new ApiError(data.code || 999, data.message || "", data.messageAdditional || "");
+    const code = data.code || 999;
+    if (code === 101) onExpired?.();
+    throw new ApiError(code, data.message || "", data.messageAdditional || "");
   }
   return data.Result as T;
 }

@@ -9,6 +9,7 @@ var ApiError = class extends Error {
   }
 };
 var token = "";
+var onExpired = null;
 function root() {
   return location.pathname.replace(/\/+$/, "") + "/";
 }
@@ -62,7 +63,9 @@ async function postJson(url, action, params) {
   const result = data.Result;
   if (result && typeof result === "object" && result.System?.token) token = result.System.token;
   if (data.Result === false || data.Result == null) {
-    throw new ApiError(data.code || 999, data.message || "", data.messageAdditional || "");
+    const code = data.code || 999;
+    if (code === 101) onExpired?.();
+    throw new ApiError(code, data.message || "", data.messageAdditional || "");
   }
   return data.Result;
 }

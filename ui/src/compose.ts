@@ -732,7 +732,7 @@ export class Composer {
     this.closeDialog.showModal();
   }
 
-  private minimize(): void {
+  minimize(): void {
     this.minimized = true;
     this.root.hidden = true;
     (this.root.parentElement?.querySelector(".compose-dock") as HTMLElement).hidden = false;

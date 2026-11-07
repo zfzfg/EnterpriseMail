@@ -1,6 +1,6 @@
 # Plan: Alte Funktionen in die neue Oberfläche holen
 
-Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–2 in `740fa6cf5`, `18db471cb`, `2c5598608`, danach Nachbesserungen, siehe 4a; Phase 3 siehe Abschnitt 5).
+Stand: 2026-11-07, Repo `zfzfg/snappymail`, Branch `master` (Phasen 0–3 erledigt, siehe Abschnitte 4a und 5; Phase 4 siehe Abschnitt 6).
 Bezugspunkt: Seit `90127a2d6` (Neue Mail-Hülle) läuft die Oberfläche als eigener TypeScript-Client unter `ui/`. Das alte Knockout-Frontend wurde in `388c3815d` entfernt. Den letzten vollständigen Stand des alten Frontends enthält **`387e27b19`**.
 
 Dieser Plan ist für eine KI geschrieben, die ihn umsetzt. Arbeite die Phasen der Reihe nach ab. Jede Phase endet mit einem Commit und einer Prüfung im Browser.
@@ -316,7 +316,13 @@ Alt: `dev/View/Popup/AdvancedSearch.js`.
 
 ---
 
-## 6. Phase 4: Einstellungen
+## 6. Phase 4: Einstellungen – ERLEDIGT
+
+> **Status: abgeschlossen am 2026-11-07.** Abschnitte Allgemein, Sicherheit, Konten (Bearbeiten, Sortieren, Ungelesen, Import), Assistent, Tasten und Anmeldeseite sind im TypeScript-Client umgesetzt. Speichern pro Feld über `SettingsUpdate`, Bestätigung „Gespeichert“. Layout „ohne Teilung“ und „Brief unten“ sitzt an der Hülle. Abgelaufene Sitzung (Fehler 101) öffnet den Anmelde-Dialog über dem Postfach.
+>
+> Geprüft: `npx tsc --noEmit`, `npm run build`. Die Docker-Vorschau hängt `snappymail/` ein und liefert das neu gebaute `app.js` (Hash stimmt mit dem Arbeitsstand überein), ohne Image-Neubau.
+>
+> **Im Browser nicht durchgeklickt.** Offen und abhängig von Browser oder Plugin: Desktop-Hinweis und Ton, Zwei-Faktor, Passwort ändern, Konto-Import, Sprachwechsel mitten in der Sitzung, automatische Abmeldung.
 
 Alle Werte schreibt `SettingsUpdate` (siehe `Actions/User.php`, `DoSettingsUpdate`). Die Namen dort sind verbindlich. Die Werte liest man beim Start aus den AppData.
 
@@ -465,7 +471,7 @@ Vorgehen:
 | 1 | Liste und Brief (3.1–3.11) | Erledigt |
 | 2 | Schreiben (Anhänge, Identität, Entwürfe, Vorschläge, Editor) | Erledigt |
 | 3 | Ordner, Suche, Sortierung, Threads | Erledigt |
-| 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Mittel bis hoch |
+| 4 | Einstellungen Allgemein, Sicherheit, Konten, Assistent, Tasten | Erledigt |
 | 5 | Kontakte | Mittel |
 | 6 | Sieve-Formular, Abwesenheitsnotiz | Mittel (Abwesenheit hoch) |
 | 7 | Verschlüsselung | Niedrig bis mittel |

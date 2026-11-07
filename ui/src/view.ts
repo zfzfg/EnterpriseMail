@@ -102,7 +102,7 @@ export interface DraftOptions {
 }
 
 export interface MailActions {
-  login(email: string, password: string, stay: boolean): void;
+  login(email: string, password: string, stay: boolean, totp?: string): void;
   logout(): void;
   selectFolder(fullName: string): void;
   selectMessage(uid: number): void;
@@ -114,6 +114,9 @@ export interface MailActions {
   forward(): void;
   archive(): void;
   unread(): void;
+  markUnread(): void;
+  markRead(): void;
+  quotes(): void;
   askDelete(): void;
   send(values: ComposeValues): void;
   saveCompose(values: ComposeValues): Promise<{ folder: string; uid: number }>;
@@ -166,9 +169,18 @@ const ROLE_ICON: Record<string, IconName> = {
 };
 
 export interface MailView {
-  showLogin(title: string): void;
+  showLogin(title: string, options?: { languages?: Record<string, string>; language?: string; twoFactor?: boolean }): void;
   setLoginBusy(busy: boolean): void;
   setLoginError(text: string): void;
+  showReauth(): void;
+  hideReauth(): void;
+  hasMail(): boolean;
+  setLayout(mode: number): void;
+  composerOpen(): boolean;
+  minimizeCompose(): void;
+  focusPane(pane: "folders" | "list" | "reader"): void;
+  settingsSaved(): void;
+  setAssist(flags: AssistFlags | null): void;
   showMail(email: string, folderName: string, assist?: AssistFlags | null): void;
   setFolders(data: SidebarData): void;
   setFolderDesk(desk: FolderDesk | null): void;
@@ -227,12 +239,17 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
 
-  const showLogin: MailView["showLogin"] = (title) => {
+  const showLogin: MailView["showLogin"] = (title, options) => {
     document.title = title;
+    const languages = options?.languages || {};
+    const codes = Object.keys(languages);
+    const langField = options && codes.length ? `<label class="field"><span>${esc(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc(code)}"${code === options.language ? " selected" : ""}>${esc(languages[code] || code)}</option>`).join("")}</select></label>` : "";
+    const codeField = options?.twoFactor ? `<label class="field"><span>${esc(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>` : "";
     root.innerHTML = `
       <main class="login">
         <form class="login-card" novalidate>
           <h1 class="title">${esc(title)}</h1>
+          ${langField}
           <label class="field"><span>${esc(t("GLOBAL.EMAIL", "E-Mail"))}</span>
             <input name="email" type="email" autocomplete="email" inputmode="email" required>
           </label>
@@ -241,6 +258,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <p class="error" data-for="password" hidden></p>
+          ${codeField}
           <label class="stay"><input name="stay" type="checkbox"> ${esc(t("LOGIN.LABEL_SIGN_ME", "Anmeldung merken"))}</label>
           <p class="error" data-for="form" hidden></p>
           <button type="submit" class="ink-btn">${esc(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button>
@@ -250,7 +268,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const data = new FormData(form);
-      actions.login(String(data.get("email") || ""), String(data.get("password") || ""), data.get("stay") === "on");
+      actions.login(String(data.get("email") || ""), String(data.get("password") || ""), data.get("stay") === "on", String(data.get("totp") || ""));
+    });
+    form.querySelector("select[name='language']")?.addEventListener("change", (event) => {
+      actions.act("login-lang", { language: (event.target as HTMLSelectElement).value });
     });
   };
 
@@ -268,7 +289,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
   const showMail: MailView["showMail"] = (email, folderName, assist) => {
     root.innerHTML = `
-      <div class="shell" data-pane="list" data-sidebar="${docked() ? "open" : "closed"}">
+      <div class="shell" data-pane="list" data-layout="1" data-sidebar="${docked() ? "open" : "closed"}">
         <button type="button" class="scrim" data-action="close-sidebar" aria-label="Ordner schließen"></button>
         <aside class="sidebar" aria-label="Ordner">
           <div class="account">
@@ -390,6 +411,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               </div>
               <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
                 <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="general">${withIcon("settings", t("SETTINGS_LABELS.GENERAL", "Allgemein"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="security">${withIcon("key", t("SETTINGS_LABELS.SECURITY", "Sicherheit"))}</button>
+                <button type="button" class="text-btn" data-action="settings-section" data-section="assistant" hidden>${withIcon("assist", t("AI_COPILOT.TITLE", "Assistent"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                 <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
@@ -398,6 +422,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
                 <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${withIcon("key", t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
               </nav>
             </div>
+            <p class="quiet live" id="settings-live" aria-live="polite"></p>
             <div id="settings-panel"></div>
           </div>
         </dialog>
@@ -429,8 +454,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
               <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
               <li><span>Seitenleiste</span><kbd>\\</kbd></li>
+              <li><span>Gelesen</span><kbd>Umschalt</kbd> <kbd>U</kbd></li>
+              <li><span>Ordner, Liste, Brief</span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></li>
+              <li><span>Vollbild</span><kbd>V</kbd></li>
+              <li><span>Zitate ein oder aus</span><kbd>Q</kbd></li>
               <li><span>Senden im Editor</span><kbd>Strg</kbd> <kbd>Enter</kbd></li>
               <li><span>Entwurf speichern</span><kbd>Strg</kbd> <kbd>S</kbd></li>
+              <li><span>Editor minimieren</span><kbd>,</kbd></li>
               <li><span>Schließen</span><kbd>Esc</kbd></li>
               <li><span>Diese Liste</span><kbd>?</kbd></li>
             </ul>
@@ -823,6 +853,29 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         paintSettings();
         (shell?.querySelector("#settings") as HTMLDialogElement).showModal();
         void actions.settings?.("open", {});
+      } else if (action === "preview-sound") {
+        const name = (shell?.querySelector("[data-pref='NotificationSound']") as HTMLSelectElement | null)?.value || "new-mail";
+        const audio = new Audio(`${location.pathname.replace(/\/+$/, "")}/snappymail/v/0.0.0/static/sounds/${encodeURIComponent(name)}.mp3`);
+        void audio.play().catch(() => undefined);
+      } else if (action === "assist-revoke") {
+        const box = shell?.querySelector<HTMLInputElement>("input[name='notice_ack']");
+        if (box) box.checked = false;
+        void actions.settings?.("assist-save", { notice_ack: "" });
+      } else if (action === "settings-move") {
+        const list = target.dataset.list || "";
+        const dir = target.dataset.dir === "down" ? 1 : -1;
+        const rows = [...(shell?.querySelectorAll<HTMLElement>(list === "accounts" ? "[data-sort='account']" : "[data-sort='identity']") || [])];
+        const key = list === "accounts" ? "email" : "id";
+        const order = rows.map((row) => row.dataset[key] || "").filter(Boolean);
+        const index = order.indexOf(target.dataset[key] || "");
+        const next = index + dir;
+        if (index < 0 || next < 0 || next >= order.length) return;
+        const swap = order[index];
+        order[index] = order[next];
+        order[next] = swap;
+        void actions.settings?.(list === "accounts" ? "sort-accounts" : "sort-identities", { order: order.join(",") });
+      } else if (action === "settings-import") {
+        void actions.settings?.("import-account", { email: target.dataset.email || "" });
       } else if (action === "mailto-register") {
         try {
           const url = `${location.origin}${location.pathname.replace(/\/+$/, "")}/?/Mailto/&q[]=/0/?to=%s`;
@@ -1001,6 +1054,49 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     shell.addEventListener("change", (event) => {
       const input = event.target as HTMLInputElement;
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
+      const pref = input.dataset.pref || (event.target as HTMLSelectElement).dataset?.pref;
+      if (!pref) return;
+      const control = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+      let value = "value" in control ? control.value : "";
+      if (control instanceof HTMLInputElement && control.type === "checkbox") value = control.checked ? "1" : "0";
+      if (pref === "DesktopNotifications" && value === "1" && "Notification" in window && Notification.permission !== "granted") {
+        void Notification.requestPermission().then((state) => {
+          const slot = shell?.querySelector<HTMLElement>("#settings-error");
+          if (state === "denied" && slot) {
+            slot.className = "quiet";
+            slot.hidden = false;
+            slot.textContent = t("SETTINGS_GENERAL.CHROME_NOTIFICATION_DESC_DENIED", "Der Browser hat Hinweise abgelehnt. Die Freigabe liegt in den Browser-Einstellungen.");
+          }
+        });
+      }
+      void actions.settings?.("pref", { key: pref, value });
+    });
+    shell.addEventListener("dragstart", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-sort]");
+      if (!row || !event.dataTransfer) return;
+      event.dataTransfer.setData("application/x-sm-sort", `${row.dataset.sort}:${row.dataset.email || row.dataset.id || ""}`);
+      event.dataTransfer.effectAllowed = "move";
+    });
+    shell.addEventListener("dragover", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-sort]");
+      if (!row || !event.dataTransfer?.types.includes("application/x-sm-sort")) return;
+      event.preventDefault();
+    });
+    shell.addEventListener("drop", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-sort]");
+      const raw = event.dataTransfer?.getData("application/x-sm-sort") || "";
+      if (!row || !raw) return;
+      event.preventDefault();
+      const [kind, id] = raw.split(":");
+      if (row.dataset.sort !== kind || !id) return;
+      const rows = [...(shell?.querySelectorAll<HTMLElement>(`[data-sort='${kind}']`) || [])];
+      const order = rows.map((item) => (kind === "account" ? item.dataset.email : item.dataset.id) || "").filter(Boolean);
+      const from = order.indexOf(id);
+      const to = order.indexOf((kind === "account" ? row.dataset.email : row.dataset.id) || "");
+      if (from < 0 || to < 0 || from === to) return;
+      order.splice(from, 1);
+      order.splice(to, 0, id);
+      void actions.settings?.(kind === "account" ? "sort-accounts" : "sort-identities", { order: order.join(",") });
     });
 
     if (keyHandler) document.removeEventListener("keydown", keyHandler);
@@ -1054,7 +1150,18 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (key === "f") { event.preventDefault(); actions.forward(); }
       else if (key === "e") actions.archive();
       else if (key === "i") actions.act("flag", {});
-      else if (key === "u") actions.unread();
+      else if (key === "u" && event.shiftKey) actions.markRead();
+      else if (key === "u") actions.markUnread();
+      else if (key === "v") { event.preventDefault(); toggleFullscreen(); }
+      else if (key === "q") { event.preventDefault(); actions.quotes(); }
+      else if (event.key === "," && shell.querySelector(".composer:not([hidden])")) { event.preventDefault(); composer?.minimize(); }
+      else if (key === "1" || key === "2" || key === "3") {
+        event.preventDefault();
+        const target = key === "1" ? "folders" : key === "2" ? "list" : "reader";
+        if (!wide() || key === "1") pane(target === "folders" ? "folders" : target === "reader" ? "reader" : "list");
+        const focus = shell.querySelector<HTMLElement>(key === "1" ? ".sidebar button" : key === "2" ? "[data-uid]" : ".reader button");
+        focus?.focus({ preventScroll: true });
+      }
       else if (key === "m") { event.preventDefault(); actions.act("move", {}); }
       else if (key === "t") { event.preventDefault(); actions.act("thread", {}); }
       else if (key === "j" || key === "k" || event.key === "Enter") {
@@ -1137,6 +1244,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   }
 
   function installAssist(flags: AssistFlags): void {
+    shell?.querySelectorAll("[data-assist-node]").forEach((node) => node.remove());
     if (!shell) return;
     if (flags.alerts) {
       const block = document.createElement("div");
@@ -1258,6 +1366,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (button) consent.close(button.value);
     });
     shell.append(consent);
+    shell.querySelectorAll<HTMLElement>(".filters, #strip, .sheet, .draft-tools, #consent, [data-action='open-sheet'], [data-action='lang-search'], #translated").forEach((node) => {
+      node.dataset.assistNode = "1";
+    });
+    const alerts = shell.querySelector("[data-action='alert']")?.parentElement as HTMLElement | null;
+    if (alerts) alerts.dataset.assistNode = "1";
   }
 
   function paintSettings(): void {
@@ -1268,6 +1381,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       button.setAttribute("aria-pressed", id === section ? "true" : "false");
       if (id === "contacts") button.hidden = !snap?.caps.contacts;
       if (id === "filters") button.hidden = !snap?.caps.sieve;
+      if (id === "assistant") button.hidden = !((snap?.app.Plugins || {}) as Record<string, unknown>)["ai-copilot"];
     });
     panel.innerHTML = section === "folders" ? renderFolderDesk(folderDesk, edit) : renderDesk(section, snap, edit);
     if (edit) {
@@ -1446,6 +1560,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (clearBtn) clearBtn.hidden = !searching;
     },
     setReader(data, loading, error) {
+      if (shell) shell.dataset.reading = data ? "1" : "0";
       const body = shell?.querySelector("#reader-body") as HTMLElement | null;
       const addContact = shell?.querySelector("[data-action='m-addr-contact']") as HTMLElement | null;
       if (addContact) addContact.hidden = !data?.contacts;
@@ -1833,6 +1948,65 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const span = hint.querySelector("span");
       if (span) span.textContent = subject ? `Betreff: ${subject}` : "";
       hint.dataset.subject = subject;
+    },
+    showReauth() {
+      if (!shell) return;
+      let dialog = shell.querySelector("#reauth") as HTMLDialogElement | null;
+      if (!dialog) {
+        dialog = document.createElement("dialog");
+        dialog.id = "reauth";
+        dialog.innerHTML = `
+          <form class="dialog-body">
+            <h2 class="title title-md">${esc(t("LOGIN.SESSION", "Die Sitzung ist abgelaufen"))}</h2>
+            <p class="quiet">${esc(t("LOGIN.SESSION_HINT", "Melden Sie sich erneut an. Der offene Entwurf bleibt erhalten."))}</p>
+            <label class="field"><span>${esc(t("GLOBAL.EMAIL", "E-Mail"))}</span><input name="email" type="email" autocomplete="username" required></label>
+            <label class="field"><span>${esc(t("GLOBAL.PASSWORD", "Passwort"))}</span><input name="password" type="password" autocomplete="current-password" required></label>
+            <label class="field"><span>${esc(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>
+            <p class="error" data-for="reauth" hidden></p>
+            <div class="dialog-actions"><button type="submit" class="ink-btn">${esc(t("LOGIN.BUTTON_SIGN_IN", "Anmelden"))}</button></div>
+          </form>`;
+        dialog.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const form = event.target as HTMLFormElement;
+          const data = new FormData(form);
+          actions.login(String(data.get("email") || ""), String(data.get("password") || ""), false, String(data.get("totp") || ""));
+        });
+        dialog.addEventListener("cancel", (event) => event.preventDefault());
+        shell.append(dialog);
+      }
+      if (!dialog.open) dialog.showModal();
+    },
+    hideReauth() {
+      (shell?.querySelector("#reauth") as HTMLDialogElement | null)?.close();
+    },
+    hasMail() {
+      return Boolean(shell?.isConnected);
+    },
+    setLayout(mode) {
+      if (shell) shell.dataset.layout = String(mode);
+    },
+    composerOpen() {
+      return Boolean(shell?.querySelector(".composer:not([hidden])"));
+    },
+    minimizeCompose() {
+      composer?.minimize();
+    },
+    focusPane(name) {
+      const focus = shell?.querySelector<HTMLElement>(name === "folders" ? ".sidebar button" : name === "list" ? "[data-uid]" : ".reader button");
+      focus?.focus({ preventScroll: true });
+    },
+    setAssist(flags) {
+      if (!flags) {
+        shell?.querySelectorAll("[data-assist-node]").forEach((node) => node.remove());
+        return;
+      }
+      installAssist(flags);
+    },
+    settingsSaved() {
+      const slot = shell?.querySelector("#settings-live") as HTMLElement | null;
+      if (!slot) return;
+      slot.textContent = "";
+      slot.textContent = t("GLOBAL.SAVED", "Gespeichert");
     },
     showSettings(next) {
       snap = next;
