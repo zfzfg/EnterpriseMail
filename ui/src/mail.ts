@@ -337,7 +337,7 @@ class Session {
 
   private async login(email: string, password: string, stay: boolean, totp = ""): Promise<void> {
     if (!email.trim() || !password) {
-      this.view.setLoginError("Adresse und Passwort eintragen.");
+      this.view.setLoginError(t("LOGIN.ENTER_CREDENTIALS", "Adresse und Passwort eintragen."));
       return;
     }
     this.view.setLoginBusy(true);
@@ -488,7 +488,7 @@ class Session {
     const mailto = String(data.mailToEmail || "");
     if (mailto) {
       const seed = parseMailto(mailto);
-      this.view.openCompose({ title: "Neue Nachricht", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
+      this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
     }
     window.clearInterval(this.pollTimer);
     this.pollTimer = window.setInterval(() => { if (!document.hidden) void this.poll(false); }, this.prefs.checkInterval * 60_000);
@@ -738,7 +738,7 @@ class Session {
     }
     await call("FolderCreate", { folder: name.trim(), parent, subscribe: subscribe ? 1 : 0 });
     if (parent) { this.collapsed.delete(parent); this.writeCollapsed(); }
-    this.deskNotice = `Ordner „${name.trim()}“ angelegt.`;
+    this.deskNotice = t("FOLDERS_UI.FOLDER_CREATED", "Ordner «%NAME%» angelegt.").replace("%NAME%", name.trim());
     this.view.notice(this.deskNotice);
     await this.reloadFolders();
   }
@@ -769,7 +769,7 @@ class Session {
             oldName: old.fullName, newName: target, subscribe: data.subscribe ? 1 : 0, checkable: data.checkable ? 1 : 0,
             ...(kolab ? { kolab } : {})
           });
-          this.deskNotice = `„${folderPath(old)}“ heißt jetzt „${target}“.`;
+          this.deskNotice = t("FOLDERS_UI.FOLDER_RENAMED", "«%OLD%» heißt jetzt «%NEW%».").replace("%OLD%", folderPath(old)).replace("%NEW%", target);
         } else {
           if (Boolean(data.subscribe) !== old.subscribed && this.roleOf(old) !== "inbox") await call("FolderSubscribe", { folder: old.fullName, subscribe: data.subscribe ? 1 : 0 });
           if (old.selectable && Boolean(data.checkable) !== old.checkable) await call("FolderCheckable", { folder: old.fullName, checkable: data.checkable ? 1 : 0 });
@@ -788,7 +788,7 @@ class Session {
         this.resolveSystemFolders(app);
         this.composeData = app;
         this.configureComposer();
-        this.deskNotice = "Systemordner gespeichert.";
+        this.deskNotice = t("FOLDERS_UI.SYSTEM_FOLDERS_SAVED", "Systemordner gespeichert.");
         this.view.notice(this.deskNotice);
         this.paintFolders();
         return;
@@ -806,7 +806,7 @@ class Session {
       }
       if (name === "folder-acl-set") {
         const rights = ["l", "r", "s", "w", "i", "p", "k", "x", "t", "e", "a"].filter((letter) => data[`r_${letter}`]).join("");
-        if (!data.identifier?.trim()) throw new ApiError(0, "Benutzer oder Gruppe eintragen.");
+        if (!data.identifier?.trim()) throw new ApiError(0, t("FOLDERS_UI.ENTER_USER_OR_GROUP", "Benutzer oder Gruppe eintragen."));
         await call("FolderSetACL", { folder: data.folder, identifier: data.identifier.trim(), rights });
         await this.showAcl(data.folder || "", "");
         return;
@@ -853,7 +853,7 @@ class Session {
         case "f-create":
         case "f-create-sub": {
           const result = await this.view.folderDialog({
-            title: name === "f-create" ? "Ordner anlegen" : `Neuer Unterordner in „${this.folderName(folder)}“`,
+            title: name === "f-create" ? t("FOLDERS_UI.TITLE_CREATE", "Ordner anlegen") : t("FOLDERS_UI.TITLE_CREATE_SUB", "Neuer Unterordner in «%NAME%»").replace("%NAME%", this.folderName(folder)),
             parents: this.parentChoices(),
             parent: name === "f-create-sub" ? data.target || "" : ""
           });
@@ -862,7 +862,7 @@ class Session {
         }
         case "f-rename": {
           if (!folder) return;
-          const next = await this.view.ask("Ordner umbenennen", "Neuer Name", folder.name);
+          const next = await this.view.ask(t("FOLDERS_UI.TITLE_RENAME", "Ordner umbenennen"), t("FOLDERS_UI.LABEL_NEW_NAME", "Neuer Name"), folder.name);
           if (!next || next === folder.name) return;
           if (folder.delimiter && next.includes(folder.delimiter)) {
             this.view.notice(`Der Name darf das Trennzeichen „${folder.delimiter}“ nicht enthalten.`);
@@ -880,7 +880,7 @@ class Session {
           await call("MessageSetSeenToAll", { folder: folder.fullName, setAction: 1 });
           folder.unread = 0;
           if (folder.fullName === this.folder) this.messages.forEach((message) => { if (!seen(message.flags)) message.flags.push("\\Seen"); });
-          this.view.notice(`Alle Mails in „${this.folderName(folder)}“ sind gelesen.`);
+          this.view.notice(t("FOLDERS_UI.ALL_MARKED_READ", "Alle Mails in «%NAME%» sind gelesen.").replace("%NAME%", this.folderName(folder)));
           this.paintFolders();
           if (folder.fullName === this.folder) this.paintList();
           return;
@@ -888,9 +888,9 @@ class Session {
         case "f-clear": {
           if (!folder) return;
           const ok = await this.view.confirm(
-            `„${this.folderName(folder)}“ leeren?`,
-            `Alle ${folder.total} Mails in diesem Ordner werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.`,
-            "Endgültig leeren"
+            t("FOLDERS_UI.CONFIRM_CLEAR_TITLE", "Endgültig leeren"),
+            t("FOLDERS_UI.CONFIRM_CLEAR_DESC", "Alle %COUNT% Mails in diesem Ordner werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.").replace("%COUNT%", String(folder.total)),
+            t("FOLDERS_UI.CONFIRM_CLEAR_TITLE", "Endgültig leeren")
           );
           if (!ok) return;
           await call("FolderClear", { folder: folder.fullName });
@@ -907,12 +907,12 @@ class Session {
         }
         case "f-delete": {
           if (!folder || folder.total > 0 || this.isSystem(folder)) return;
-          const ok = await this.view.confirm(`Ordner „${folder.name}“ löschen?`, "Der leere Ordner wird auf dem Server gelöscht.", "Ordner löschen");
+          const ok = await this.view.confirm(t("FOLDERS_UI.CONFIRM_DELETE_TITLE", "Ordner «%NAME%» löschen?").replace("%NAME%", folder.name), t("FOLDERS_UI.CONFIRM_DELETE_DESC", "Der leere Ordner wird auf dem Server gelöscht."), t("FOLDERS_UI.ACL_DELETE", "Ordner löschen"));
           if (!ok) return;
           await call("FolderDelete", { folder: folder.fullName });
           this.collapsed.delete(folder.fullName);
           this.writeCollapsed();
-          this.deskNotice = `Ordner „${folder.name}“ gelöscht.`;
+          this.deskNotice = t("FOLDERS_UI.FOLDER_DELETED", "Ordner «%NAME%» gelöscht.").replace("%NAME%", folder.name);
           this.view.notice(this.deskNotice);
           await this.reloadFolders(this.folder === folder.fullName ? "INBOX" : "");
           return;
@@ -920,13 +920,13 @@ class Session {
         case "f-subscribe":
           if (!folder) return;
           await call("FolderSubscribe", { folder: folder.fullName, subscribe: folder.subscribed ? 0 : 1 });
-          this.deskNotice = folder.subscribed ? `„${folder.name}“ nicht mehr abonniert.` : `„${folder.name}“ abonniert.`;
+          this.deskNotice = folder.subscribed ? t("FOLDERS_UI.NOT_SUBSCRIBED", "nicht mehr abonniert") : t("FOLDERS_UI.CHECKED", "abonniert");
           await this.reloadFolders();
           return;
         case "f-checkable":
           if (!folder) return;
           await call("FolderCheckable", { folder: folder.fullName, checkable: folder.checkable ? 0 : 1 });
-          this.deskNotice = folder.checkable ? `„${folder.name}“ wird nicht mehr geprüft.` : `„${folder.name}“ wird auf neue Mail geprüft.`;
+          this.deskNotice = folder.checkable ? t("FOLDERS_UI.CHECK_OFF", "«%NAME%» wird nicht mehr geprüft.").replace("%NAME%", folder.name) : t("FOLDERS_UI.CHECK_ON", "«%NAME%» wird auf neue Mail geprüft.").replace("%NAME%", folder.name);
           await this.reloadFolders();
           return;
         case "f-acl":
@@ -934,7 +934,7 @@ class Session {
           return;
         case "f-acl-delete": {
           if (!data.target || !data.id) return;
-          const ok = await this.view.confirm(`Freigabe für „${data.id}“ entfernen?`, "Diese Person oder Gruppe verliert den Zugriff auf den Ordner.", "Entfernen");
+          const ok = await this.view.confirm(t("FOLDERS_UI.CONFIRM_REVOKE_TITLE", "Freigabe für «%ID%» entfernen?").replace("%ID%", data.id), t("FOLDERS_UI.CONFIRM_REVOKE_DESC", "Diese Person oder Gruppe verliert den Zugriff auf den Ordner."), t("GLOBAL.DELETE", "Entfernen"));
           if (!ok) return;
           await call("FolderDeleteACL", { folder: data.target, identifier: data.id });
           await this.showAcl(data.target, "");
@@ -1157,16 +1157,16 @@ class Session {
   }
 
   private groupOf(stamp: number): string {
-    if (!stamp) return "Ohne Datum";
+    if (!stamp) return t("MESSAGE_LIST.NO_DATE", "Ohne Datum");
     const date = new Date(stamp * 1000);
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     const day = 86_400_000;
-    if (date >= start) return "Heute";
-    if (date.getTime() >= start.getTime() - day) return "Gestern";
+    if (date >= start) return t("MESSAGE_LIST.TODAY", "Heute");
+    if (date.getTime() >= start.getTime() - day) return t("MESSAGE_LIST.YESTERDAY", "Gestern");
     const weekStart = new Date(start.getTime() - ((start.getDay() + 6) % 7) * day);
-    if (date >= weekStart) return "Diese Woche";
-    return date.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    if (date >= weekStart) return t("MESSAGE_LIST.THIS_WEEK", "Diese Woche");
+    return date.toLocaleDateString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { month: "long", year: "numeric" });
   }
 
   private rows(): MessageRow[] {
@@ -1182,7 +1182,7 @@ class Session {
       threadCount: threaded ? message.threads.length : 0,
       threadUnseen: threaded ? message.threadUnseen.length : 0,
       uid: message.uid,
-      who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
+      who: label(message.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
       subject: message.subject,
       preview: message.preview,
       when: when(message.date),
@@ -1203,7 +1203,7 @@ class Session {
     const empty = this.visible().length
       ? ""
       : this.category !== "all" ? "Keine Mails für diesen Filter."
-      : this.search ? "Keine Treffer. Suche anpassen oder Filter entfernen." : "Dieser Ordner ist leer.";
+      : this.search ? t("FOLDERS_UI.NO_MATCH", "Keine Treffer. Suche anpassen oder Filter entfernen.") : t("FOLDERS_UI.EMPTY_FOLDER", "Dieser Ordner ist leer.");
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
 
@@ -1462,7 +1462,7 @@ class Session {
   private openNew(): void {
     this.replyKind = "";
     this.draftRef = null;
-    this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
+    this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new" });
   }
 
   private openReply(all: boolean): void {
@@ -1475,7 +1475,7 @@ class Session {
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
-      title: all ? "Allen antworten" : "Antworten", mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      title: all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten"), mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
       to: author ? address(author) : "", cc: all ? others.map(address).join(", ") : "", subject,
       body: `\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
     });
@@ -1489,15 +1489,15 @@ class Session {
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
     this.view.openCompose({
-      title: "Weiterleiten", to: "", cc: "", subject, identityId: this.replyIdentity(message), sourceFolder: message.folder,
-      body: `\n\n-------- Weitergeleitete Nachricht --------\nVon: ${message.from.map(label).join(", ")}\nBetreff: ${message.subject}\n\n${body}`
+      title: t("COMPOSE.TITLE_FORWARD", "Weiterleiten"), to: "", cc: "", subject, identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      body: `\n\n${t("MESSAGE.FORWARD_HEADER", "-------- Weitergeleitete Nachricht --------")}\n${t("MESSAGE.FORWARD_FROM", "Von")}: ${message.from.map(label).join(", ")}\n${t("MESSAGE.FORWARD_SUBJECT", "Betreff")}: ${message.subject}\n\n${body}`
     });
     void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
   }
 
   private async saveDraft(values: ComposeValues): Promise<{ folder: string; uid: number }> {
     const result = await call<{ folder?: string; uid?: number } | true>("SaveMessage", { ...values });
-    if (result === true || !result.folder || !result.uid) throw new ApiError(0, "Der Entwurf konnte nicht gespeichert werden.");
+    if (result === true || !result.folder || !result.uid) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
     this.draftRef = { folder: result.folder, uid: result.uid };
     return this.draftRef;
   }
@@ -1544,7 +1544,7 @@ class Session {
     const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     if (!this.archiveFolder) {
-      this.view.notice("Kein Archiv-Ordner eingerichtet.");
+      this.view.notice(t("MESSAGE.NO_ARCHIVE", "Kein Archiv-Ordner eingerichtet."));
       return;
     }
     if (this.folder === this.archiveFolder) {
@@ -1560,12 +1560,11 @@ class Session {
     if (!uids.length) return;
     const permanent = forever || !this.trashFolder || this.folder === this.trashFolder;
     if (permanent) {
-      const what = uids.length === 1 ? "diese Mail" : `diese ${uids.length} Mails`;
-      const ok = await this.view.confirm("Endgültig löschen?", `Damit wird ${what} sofort entfernt. Das lässt sich nicht rückgängig machen.`, "Endgültig löschen");
+      const ok = await this.view.confirm(t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen?"), uids.length === 1 ? t("MESSAGE.CONFIRM_DELETE_DESC", "Damit wird die Mail sofort entfernt. Das lässt sich nicht rückgängig machen.") : t("MESSAGE.CONFIRM_DELETE_DESC_PLURAL", "Damit werden %COUNT% Mails sofort entfernt. Das lässt sich nicht rückgängig machen.").replace("%COUNT%", String(uids.length)), t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen"));
       if (!ok) return;
       try {
         await call("MessageDelete", { folder: this.folder, uids: uids.join(",") });
-        this.view.notice(uids.length === 1 ? "Endgültig gelöscht." : `${uids.length} Mails endgültig gelöscht.`);
+        this.view.notice(uids.length === 1 ? t("MESSAGE_LIST.DELETED_ONE", "Endgültig gelöscht.") : t("MESSAGE_LIST.DELETED_COUNT", "%COUNT% Mails endgültig gelöscht.").replace("%COUNT%", String(uids.length)));
         await this.afterRemoval(uids);
       } catch (error) {
         this.view.notice(explain(error));
@@ -1698,7 +1697,7 @@ class Session {
       await loadLanguage(raw);
       document.documentElement.lang = raw;
       if (!this.view.composerOpen()) location.reload();
-      else this.view.notice("Die Sprache gilt vollständig nach dem nächsten Laden.");
+      else this.view.notice(t("SETTINGS_GENERAL.NOTICE_RELOAD", "Die Sprache gilt vollständig nach dem nächsten Laden."));
     }
     const readKeys = ["RemoveColors", "AllowStyles", "minFontSize", "MaxBlockquotesLevel", "CollapseBlockquotes", "ViewHTML", "ViewImages", "ViewImagesWhitelist", "ListInlineAttachments", "simpleAttachmentsList"];
     if (readKeys.includes(key)) {
@@ -2037,10 +2036,10 @@ class Session {
         const uids = this.targets();
         if (!uids.length) return;
         const copy = name === "copy";
-        const target = await this.view.pickFolder(copy ? "Kopieren nach" : "Verschieben nach", this.pickerFolders(), copy ? "" : this.folder);
+        const target = await this.view.pickFolder(copy ? t("MESSAGE.ACTION_COPY_TO", "Kopieren nach") : t("MESSAGE.ACTION_MOVE_TO", "Verschieben nach"), this.pickerFolders(), copy ? "" : this.folder);
         if (!target) return;
-        const n = uids.length === 1 ? "Mail" : `${uids.length} Mails`;
-        await this.moveTo(uids, target, copy, `${n} ${copy ? "kopiert" : "verschoben"} nach ${target}.`);
+        const n = uids.length === 1 ? t("MESSAGE.ONE_MAIL", "Mail") : t("MESSAGE.PLURAL_MAILS", "%COUNT% Mails").replace("%COUNT%", String(uids.length));
+        await this.moveTo(uids, target, copy, (copy ? t("MESSAGE.COPIED_TO", "%N% kopiert nach %TARGET%.") : t("MESSAGE.MOVED_TO", "%N% verschoben nach %TARGET%.")).replace("%N%", n).replace("%TARGET%", target));
         return;
       }
       case "drop": {
@@ -2078,7 +2077,7 @@ class Session {
       }
       case "tag": {
         if (!message) return;
-        const value = await this.view.ask("Schlagwort hinzufügen", "Schlagwort");
+        const value = await this.view.ask(t("MESSAGE.ACTION_ADD_TAG", "Schlagwort hinzufügen"), t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"));
         const keyword = (value || "").replace(/[\s\\()"{}%*\]]+/g, "");
         if (!keyword) return;
         await this.setFlag([message.uid], keyword, true, "MessageSetKeyword");
@@ -2102,7 +2101,7 @@ class Session {
         await this.paintLetter();
         try {
           await call("SettingsUpdate", { ViewImagesWhitelist: this.prefs.whitelist, ViewImages: this.prefs.viewImages });
-          this.view.notice(`Bilder von ${sender} werden künftig angezeigt.`);
+          this.view.notice(t("MESSAGE.SHOW_IMAGES_ALWAYS", "Bilder von %SENDER% werden künftig angezeigt.").replace("%SENDER%", sender));
         } catch (error) {
           this.view.notice(explain(error));
         }
@@ -2142,11 +2141,11 @@ class Session {
               messageFolder: message.folder,
               messageUid: message.uid,
               readReceipt: message.readReceipt,
-              subject: `Gelesen: ${message.subject}`,
-              plain: `Ihre Nachricht an ${this.email} wurde gelesen.`
+              subject: t("MESSAGE.READ_RECEIPT_SUBJECT", "Gelesen: %SUBJECT%").replace("%SUBJECT%", message.subject),
+              plain: t("MESSAGE.READ_RECEIPT_BODY", "Ihre Nachricht an %EMAIL% wurde gelesen.").replace("%EMAIL%", this.email)
             });
             message.flags.push("$mdnsent");
-            this.view.notice("Lesebestätigung gesendet.");
+            this.view.notice(t("MESSAGE.READ_RECEIPT_SENT", "Lesebestätigung gesendet."));
           } catch (error) {
             this.receiptSkipped.delete(`${message.folder}:${message.uid}`);
             this.view.notice(explain(error));
@@ -2163,11 +2162,11 @@ class Session {
           const seed = parseMailto(info.mailto);
           this.replyKind = "";
           this.draftRef = null;
-          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
+          this.view.openCompose({ title: t("MESSAGE.UNSUBSCRIBE_TITLE", "Vom Verteiler abmelden"), to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
           return;
         }
         const host = (() => { try { return new URL(info.http).host; } catch { return info.http; } })();
-        const ok = await this.view.confirm("Vom Verteiler abmelden?", `Die Abmeldeseite von ${host} öffnet sich in einem neuen Tab.`, "Seite öffnen", false);
+        const ok = await this.view.confirm(t("MESSAGE.UNSUBSCRIBE_CONFIRM", "Vom Verteiler abmelden?"), t("MESSAGE.UNSUBSCRIBE_DESC", "Die Abmeldeseite von %HOST% öffnet sich in einem neuen Tab.").replace("%HOST%", host), t("MESSAGE.UNSUBSCRIBE_OPEN_BTN", "Seite öffnen"), false);
         if (ok) window.open(info.http, "_blank", "noopener,noreferrer");
         return;
       }
@@ -2197,7 +2196,7 @@ class Session {
         this.replyKind = "";
         this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
         this.view.openCompose({
-          title: name === "edit-draft" ? "Entwurf" : "Neue Nachricht",
+          title: name === "edit-draft" ? t("COMPOSE.TITLE_EDIT_DRAFT", "Entwurf") : t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
           to: message.to.map(address).join(", "), cc: message.cc.map(address).join(", "), bcc: message.bcc.map(address).join(", "),
           replyTo: message.replyTo.map(address).join(", "), subject: message.subject, body: message.plain || plainFromHtml(message.html),
           html: message.html, mode: name === "edit-draft" ? "draft" : "new", draftRef: this.draftRef,
@@ -2212,7 +2211,7 @@ class Session {
         if (!list.length) return;
         this.replyKind = "";
         this.draftRef = null;
-        const subject = list.length === 1 ? (/^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}`) : "Weitergeleitete Nachrichten";
+        const subject = list.length === 1 ? (/^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}`) : t("MESSAGE.FORWARDED_MESSAGES_SUBJECT", "Weitergeleitete Nachrichten");
         this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
         void this.view.attachCompose(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
         return;
@@ -2269,7 +2268,7 @@ class Session {
       case "addr-write":
         this.replyKind = "";
         this.draftRef = null;
-        this.view.openCompose({ title: "Neue Nachricht", to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
+        this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
         return;
       case "addr-copy":
         try {
@@ -2293,7 +2292,7 @@ class Session {
             let card = writeProp(undefined, "fn", (data.name || "").trim() || data.email);
             card = writeProp(card, "email", data.email);
             await call("ContactSave", { uid: "", jCard: card });
-            this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugefügt.`);
+            this.view.notice(t("CONTACTS.ADDED", "%NAME% wurde zu den Kontakten hinzugefügt.").replace("%NAME%", data.name || data.email));
             await this.view.reloadBook();
           } catch (error) {
             this.view.notice(explain(error));
@@ -2303,7 +2302,7 @@ class Session {
       case "compose-to":
         this.replyKind = "";
         this.draftRef = null;
-        this.view.openCompose({ title: "Neue Nachricht", to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
+        this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
         return;
       case "accounts":
         await this.loadAccounts();
@@ -2537,7 +2536,7 @@ class Session {
       return;
     }
     if (name === "replies" && this.current) {
-      this.view.setStrip({ ...this.strip(), loading: "Antwortvorschläge werden erstellt …" });
+      this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschläge werden erstellt …") });
       try {
         const result = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
           folder: this.folder,
@@ -2567,7 +2566,7 @@ class Session {
       return;
     }
     if (name === "triage") {
-      this.view.notice("Absender, Betreff und Vorschau dieser Seite gehen an das Modell.");
+      this.view.notice(t("AI_COPILOT.TRIAGE_DISCLOSURE", "Absender, Betreff und Vorschau dieser Seite gehen an das Modell."));
       try {
         const result = await plugin<{ stored?: number; warning?: string }>("AiTriageLlm", {
           folder: this.folder,
@@ -2578,7 +2577,7 @@ class Session {
             preview: message.preview
           }))
         });
-        this.view.notice(result.warning || `${result.stored || 0} Mails eingeordnet.`);
+        this.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
         await this.loadList(false);
       } catch (error) {
         this.view.notice(explain(error));
@@ -2588,7 +2587,7 @@ class Session {
     if (name === "deadlines") {
       const items = this.alertItems.filter((item) => item.type !== "followup").slice(0, 8);
       if (!items.length) {
-        this.view.notice("Keine Mails für eine Frist.");
+        this.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
         return;
       }
       try {
@@ -2668,14 +2667,14 @@ class Session {
 
   private contextLabel(): string {
     if (!this.useContext || !this.current) return "";
-    return this.current.subject || "(ohne Betreff)";
+    return this.current.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)");
   }
 
   private async generate(): Promise<void> {
     const options = this.view.draftOptions();
     this.draftBackup = options.body;
     this.draftAbort = new AbortController();
-    this.view.setDraftBusy(true, "Entwurf wird geschrieben …");
+    this.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben …"));
     let streamed = "";
     try {
       await streamEvents("AiStream", {
@@ -2697,12 +2696,12 @@ class Session {
           this.view.setSubjectHint(String(payload.subject || ""));
           this.summaryModel = String(payload.model || "");
         }
-        if (event === "error") throw new ApiError(1, String(payload.error || "Verbindung unterbrochen."));
+        if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")));
       }, this.draftAbort.signal);
-      this.view.setDraftBusy(false, `Entwurf eingefügt.${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
+      this.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingefügt.")}${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        this.view.setDraftBusy(false, "Abgebrochen.");
+        this.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."));
         return;
       }
       this.view.setDraftBusy(false, explain(error));
@@ -2737,7 +2736,7 @@ class Session {
       } else if (type === "compose") {
         this.openNew();
         this.view.openCompose({
-          title: "Neue Nachricht",
+          title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
           mode: "new",
           to: String(action.to || ""),
           cc: "",
@@ -2748,7 +2747,7 @@ class Session {
         if (folder) await this.selectFolder(folder);
         await this.setSearch(String(action.search || ""));
       }
-      turn.actions[index].state = "Erledigt";
+      turn.actions[index].state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
       this.view.setChat(this.turns, "", this.contextLabel());
       if (uids) await this.loadList(false);
     } catch (error) {

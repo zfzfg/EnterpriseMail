@@ -1,3 +1,17 @@
+// src/i18n.ts
+function dig(bag, path) {
+  let cur = bag;
+  for (const part of path.split(".")) {
+    if (!cur || typeof cur !== "object" || !(part in cur)) return void 0;
+    cur = cur[part];
+  }
+  return typeof cur === "string" ? cur : void 0;
+}
+function t(path, fallback) {
+  const bag = window.rl?.I18N;
+  return dig(bag, path) ?? fallback;
+}
+
 // src/api.ts
 var ApiError = class extends Error {
   code;
@@ -14,23 +28,24 @@ function root() {
   return location.pathname.replace(/\/+$/, "") + "/";
 }
 function explain(error) {
-  if (!(error instanceof ApiError)) return "Die Anfrage ist fehlgeschlagen.";
+  if (!(error instanceof ApiError)) return t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen.");
   const known = {
-    101: "Die Sitzung ist abgelaufen. Seite neu laden.",
-    102: "Anmeldung fehlgeschlagen. Adresse oder Passwort pr\xFCfen.",
-    104: "Der Mailserver ist nicht erreichbar.",
-    109: "Diese Domain ist nicht erlaubt.",
-    110: "Dieses Konto ist nicht erlaubt.",
-    201: "Die Liste konnte nicht geladen werden.",
-    202: "Der Brief konnte nicht geladen werden.",
-    203: "L\xF6schen ist fehlgeschlagen.",
-    204: "Verschieben ist fehlgeschlagen.",
-    302: "Senden ist fehlgeschlagen.",
-    303: "Empf\xE4nger pr\xFCfen.",
-    140: "Die Kontakte konnten nicht synchronisiert werden.",
-    901: "Der Mailserver hat die Anfrage abgelehnt."
+    101: ["NOTIFICATIONS.InvalidToken", "Die Sitzung ist abgelaufen. Seite neu laden."],
+    102: ["NOTIFICATIONS.AuthError", "Anmeldung fehlgeschlagen. Adresse oder Passwort pr\xFCfen."],
+    104: ["NOTIFICATIONS.ConnectionError", "Der Mailserver ist nicht erreichbar."],
+    109: ["NOTIFICATIONS.DomainNotAllowed", "Diese Domain ist nicht erlaubt."],
+    110: ["NOTIFICATIONS.AccountNotAllowed", "Dieses Konto ist nicht erlaubt."],
+    140: ["NOTIFICATIONS.ContactsSyncError", "Die Kontakte konnten nicht synchronisiert werden."],
+    201: ["NOTIFICATIONS.CantGetMessageList", "Die Liste konnte nicht geladen werden."],
+    202: ["NOTIFICATIONS.CantGetMessage", "Der Brief konnte nicht geladen werden."],
+    203: ["NOTIFICATIONS.CantDeleteMessage", "L\xF6schen ist fehlgeschlagen."],
+    204: ["NOTIFICATIONS.CantMoveMessage", "Verschieben ist fehlgeschlagen."],
+    302: ["NOTIFICATIONS.CantSendMessage", "Senden ist fehlgeschlagen."],
+    303: ["NOTIFICATIONS.InvalidRecipients", "Empf\xE4nger pr\xFCfen."],
+    901: ["NOTIFICATIONS.MailServerError", "Der Mailserver hat die Anfrage abgelehnt."]
   };
-  const text = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
+  const item = known[error.code];
+  const text = item ? t(item[0], item[1]) : error.message || t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen.");
   return error.detail ? `${text} ${error.detail}` : text;
 }
 async function readApp(url) {
@@ -38,7 +53,7 @@ async function readApp(url) {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
   });
-  if (!response.ok) throw new ApiError(1, "Die Anwendung konnte nicht geladen werden.");
+  if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_APP_LOAD", "Die Anwendung konnte nicht geladen werden."));
   const data = await response.json();
   const system = data.System;
   if (system?.token) token = system.token;
@@ -73,20 +88,6 @@ async function postJson(url, action, params) {
 function adminCall(adminKey2, action, params = {}) {
   const key = /^[a-z0-9._-]+$/i.test(adminKey2) && !adminKey2.includes("..") ? adminKey2 : "admin";
   return postJson(`${root()}?/${key}/Json/&q[]=/0/`, action, params);
-}
-
-// src/i18n.ts
-function dig(bag, path) {
-  let cur = bag;
-  for (const part of path.split(".")) {
-    if (!cur || typeof cur !== "object" || !(part in cur)) return void 0;
-    cur = cur[part];
-  }
-  return typeof cur === "string" ? cur : void 0;
-}
-function t(path, fallback) {
-  const bag = window.rl?.I18N;
-  return dig(bag, path) ?? fallback;
 }
 
 // src/admin/util.ts
@@ -146,7 +147,11 @@ function select(name, label, value, options) {
   return `<label class="field"><span>${esc(label)}</span><select name="${esc(name)}">${items}</select></label>`;
 }
 function langSelect(name, label, value, list) {
-  return select(name, label, value, list.map((id) => [id, id]));
+  const names = {
+    de: t("LANGS_NAMES.de", "Deutsch"),
+    en: t("LANGS_NAMES.en", "English")
+  };
+  return select(name, label, value, list.map((id) => [id, names[id] || id]));
 }
 
 // src/admin/about.ts
@@ -1131,7 +1136,7 @@ async function submitLogin(root3, form, login, password, totp) {
   const button = form.querySelector("button");
   if (!login.trim() || !password) {
     slot.hidden = false;
-    slot.textContent = "Benutzer und Passwort eintragen.";
+    slot.textContent = t("ADMIN.ENTER_CREDENTIALS", "Benutzer und Passwort eintragen.");
     return;
   }
   button.disabled = true;

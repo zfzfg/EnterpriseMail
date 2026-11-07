@@ -81,7 +81,7 @@
 		"MODE_REWRITE": "Rewrite",
 		"MODE_PROOFREAD": "Proofread",
 		"INSTRUCTION_PLACEHOLDER": "What should the email say? e.g. \"Confirm Thursday, ask about parking\"",
-		"TONE": "Tone",
+		"TONE": "Default tone",
 		"TONE_PROFESSIONAL": "Professional",
 		"TONE_FRIENDLY": "Friendly",
 		"TONE_CASUAL": "Casual",
@@ -130,7 +130,12 @@
 		"NO_ARCHIVE": "No archive folder configured.",
 		"OPENED": "Opened",
 		"SEARCHED": "Search applied",
-		"COMPOSE_OPENED": "Draft opened"
+		"COMPOSE_OPENED": "Draft opened",
+		"NAME": "Your name",
+		"NOTICE": "Keep consent saved",
+		"PRIVACY": "The assistant only sends email content to the provider after your consent.",
+		"REVOKE": "Revoke consent",
+		"TITLE": "Assistant"
 	},
 	"EDITOR": {
 		"AIWAND": "Draft with AI"

@@ -601,8 +601,12 @@ function group(title: string, body: string): string {
 }
 
 export function renderGeneral(app: Record<string, unknown>): string {
-  const languages = ((app.System as { languages?: Record<string, string> } | undefined)?.languages) || {};
-  const langOptions = Object.entries(languages).map(([code, label]) => [code, label] as [string, string]);
+  const rawLangs = (app.System as { languages?: string[] | Record<string, string> } | undefined)?.languages;
+  const codes = Array.isArray(rawLangs) ? rawLangs : Object.keys(rawLangs || { de: "Deutsch", en: "English" });
+  const langOptions = codes.map((code) => [
+    code,
+    code === "de" ? t("LANGS_NAMES.de", "Deutsch") : (code === "en" ? t("LANGS_NAMES.en", "English") : code)
+  ] as [string, string]);
   const language = String(app.language || "");
   const hour = String(app.hourCycle || "");
   const layout = String(num(app, "Layout", 1));
@@ -743,7 +747,7 @@ export function renderAssistant(snap: SettingsSnapshot): string {
       ${check("enabled", t("AI_COPILOT.ENABLED", "Assistent für dieses Konto"), settings.enabled !== false)}
       ${boxes.replace(/data-pref=/g, "name=").replace(/type="checkbox"/g, "type=\"checkbox\"")}
       <label class="field"><span>${esc(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc(value)}</option>`).join("")}</select></label>
-      ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", "Automatisch"], ["de", "Deutsch"], ["en", "Englisch"]]).replace("data-pref=\"language\"", "name=\"language\"")}
+      ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace("data-pref=\"language\"", "name=\"language\"")}
       ${field(t("AI_COPILOT.NAME", "Eigener Name"), "name", String(settings.name || ""))}
       ${field(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area")}
       ${field(t("AI_COPILOT.ADDRESSES", "Eigene Adressen"), "addresses", String(settings.addresses || ""), "area")}

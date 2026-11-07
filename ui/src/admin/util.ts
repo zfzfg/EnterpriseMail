@@ -94,5 +94,9 @@ export function select(name: string, label: string, value: string, options: Arra
 }
 
 export function langSelect(name: string, label: string, value: string, list: string[]): string {
-  return select(name, label, value, list.map((id) => [id, id]));
+  const names: Record<string, string> = {
+    de: t("LANGS_NAMES.de", "Deutsch"),
+    en: t("LANGS_NAMES.en", "English")
+  };
+  return select(name, label, value, list.map((id) => [id, names[id] || id]));
 }

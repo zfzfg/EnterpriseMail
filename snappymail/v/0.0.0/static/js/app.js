@@ -39,6 +39,20 @@ async function readAssist(app, load) {
   return flags;
 }
 
+// src/i18n.ts
+function dig(bag, path) {
+  let cur = bag;
+  for (const part2 of path.split(".")) {
+    if (!cur || typeof cur !== "object" || !(part2 in cur)) return void 0;
+    cur = cur[part2];
+  }
+  return typeof cur === "string" ? cur : void 0;
+}
+function t(path, fallback) {
+  const bag = window.rl?.I18N;
+  return dig(bag, path) ?? fallback;
+}
+
 // src/api.ts
 var ApiError = class extends Error {
   code;
@@ -56,7 +70,7 @@ function watchSession(handler) {
 }
 async function loadLanguage(code) {
   const response = await fetch(`${root()}?/Lang/App/${encodeURIComponent(code)}/`, { credentials: "same-origin" });
-  if (!response.ok) throw new ApiError(1, "Die Sprache konnte nicht geladen werden.");
+  if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_LANG_LOAD", "Die Sprache konnte nicht geladen werden."));
   const script = await response.text();
   new Function(script)();
 }
@@ -64,23 +78,24 @@ function root() {
   return location.pathname.replace(/\/+$/, "") + "/";
 }
 function explain(error) {
-  if (!(error instanceof ApiError)) return "Die Anfrage ist fehlgeschlagen.";
+  if (!(error instanceof ApiError)) return t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen.");
   const known = {
-    101: "Die Sitzung ist abgelaufen. Seite neu laden.",
-    102: "Anmeldung fehlgeschlagen. Adresse oder Passwort pr\xFCfen.",
-    104: "Der Mailserver ist nicht erreichbar.",
-    109: "Diese Domain ist nicht erlaubt.",
-    110: "Dieses Konto ist nicht erlaubt.",
-    201: "Die Liste konnte nicht geladen werden.",
-    202: "Der Brief konnte nicht geladen werden.",
-    203: "L\xF6schen ist fehlgeschlagen.",
-    204: "Verschieben ist fehlgeschlagen.",
-    302: "Senden ist fehlgeschlagen.",
-    303: "Empf\xE4nger pr\xFCfen.",
-    140: "Die Kontakte konnten nicht synchronisiert werden.",
-    901: "Der Mailserver hat die Anfrage abgelehnt."
+    101: ["NOTIFICATIONS.InvalidToken", "Die Sitzung ist abgelaufen. Seite neu laden."],
+    102: ["NOTIFICATIONS.AuthError", "Anmeldung fehlgeschlagen. Adresse oder Passwort pr\xFCfen."],
+    104: ["NOTIFICATIONS.ConnectionError", "Der Mailserver ist nicht erreichbar."],
+    109: ["NOTIFICATIONS.DomainNotAllowed", "Diese Domain ist nicht erlaubt."],
+    110: ["NOTIFICATIONS.AccountNotAllowed", "Dieses Konto ist nicht erlaubt."],
+    140: ["NOTIFICATIONS.ContactsSyncError", "Die Kontakte konnten nicht synchronisiert werden."],
+    201: ["NOTIFICATIONS.CantGetMessageList", "Die Liste konnte nicht geladen werden."],
+    202: ["NOTIFICATIONS.CantGetMessage", "Der Brief konnte nicht geladen werden."],
+    203: ["NOTIFICATIONS.CantDeleteMessage", "L\xF6schen ist fehlgeschlagen."],
+    204: ["NOTIFICATIONS.CantMoveMessage", "Verschieben ist fehlgeschlagen."],
+    302: ["NOTIFICATIONS.CantSendMessage", "Senden ist fehlgeschlagen."],
+    303: ["NOTIFICATIONS.InvalidRecipients", "Empf\xE4nger pr\xFCfen."],
+    901: ["NOTIFICATIONS.MailServerError", "Der Mailserver hat die Anfrage abgelehnt."]
   };
-  const text2 = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
+  const item = known[error.code];
+  const text2 = item ? t(item[0], item[1]) : error.message || t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen.");
   return error.detail ? `${text2} ${error.detail}` : text2;
 }
 async function readApp(url) {
@@ -88,7 +103,7 @@ async function readApp(url) {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
   });
-  if (!response.ok) throw new ApiError(1, "Die Anwendung konnte nicht geladen werden.");
+  if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_APP_LOAD", "Die Anwendung konnte nicht geladen werden."));
   const data = await response.json();
   const system = data.System;
   if (system?.token) token = system.token;
@@ -159,7 +174,7 @@ function readEnvelope(text2) {
   try {
     return JSON.parse(last);
   } catch {
-    throw new ApiError(1, "Der Server hat keine lesbare Antwort geschickt.");
+    throw new ApiError(1, t("NOTIFICATIONS.RequestError", "Der Server hat keine lesbare Antwort geschickt."));
   }
 }
 function takeToken(data) {
@@ -820,7 +835,7 @@ function openLetterWindow(data, print) {
   details.sm-bq{display:block}
   @media print{body{margin:0}a{color:inherit}}
 </style></head><body>
-<header><h1>${esc(data.subject || "(ohne Betreff)")}</h1>
+<header><h1>${esc(data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</h1>
 <p>Von: ${esc(data.from)}</p><p>An: ${esc(data.to)}</p>${data.cc ? `<p>Cc: ${esc(data.cc)}</p>` : ""}<p>${esc(data.when)}</p></header>
 ${content}${files}
 </body></html>`);
@@ -836,11 +851,11 @@ function icsDate(value) {
   const m = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/);
   if (!m) return value;
   if (!m[4]) {
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
   }
   const args = [Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)];
   const date = m[7] ? new Date(Date.UTC(...args)) : new Date(...args);
-  return date.toLocaleString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 function parseIcs(text2) {
   const lines = text2.replace(/\r\n[ \t]/g, "").replace(/\n[ \t]/g, "").split(/\r?\n/);
@@ -1008,20 +1023,6 @@ var iconNames = Object.keys(bodies);
 function icon(name, label2 = "") {
   const a11y = label2 ? ` role="img" aria-label="${label2.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c)}"` : ` aria-hidden="true"`;
   return `<svg class="icon icon-${name}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" fill="currentColor" shape-rendering="crispEdges" focusable="false"${a11y}>${bodies[name]}</svg>`;
-}
-
-// src/i18n.ts
-function dig(bag, path) {
-  let cur = bag;
-  for (const part2 of path.split(".")) {
-    if (!cur || typeof cur !== "object" || !(part2 in cur)) return void 0;
-    cur = cur[part2];
-  }
-  return typeof cur === "string" ? cur : void 0;
-}
-function t(path, fallback) {
-  const bag = window.rl?.I18N;
-  return dig(bag, path) ?? fallback;
 }
 
 // src/folders.ts
@@ -2809,8 +2810,12 @@ function group(title, body) {
   return `<p class="mono">${esc4(title)}</p><div class="fields">${body}</div>`;
 }
 function renderGeneral(app) {
-  const languages = app.System?.languages || {};
-  const langOptions = Object.entries(languages).map(([code, label2]) => [code, label2]);
+  const rawLangs = app.System?.languages;
+  const codes = Array.isArray(rawLangs) ? rawLangs : Object.keys(rawLangs || { de: "Deutsch", en: "English" });
+  const langOptions = codes.map((code) => [
+    code,
+    code === "de" ? t("LANGS_NAMES.de", "Deutsch") : code === "en" ? t("LANGS_NAMES.en", "English") : code
+  ]);
   const language = String(app.language || "");
   const hour = String(app.hourCycle || "");
   const layout = String(num(app, "Layout", 1));
@@ -2946,7 +2951,7 @@ function renderAssistant(snap) {
       ${check2("enabled", t("AI_COPILOT.ENABLED", "Assistent f\xFCr dieses Konto"), settings.enabled !== false)}
       ${boxes.replace(/data-pref=/g, "name=").replace(/type="checkbox"/g, 'type="checkbox"')}
       <label class="field"><span>${esc4(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc4(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc4(value)}</option>`).join("")}</select></label>
-      ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", "Automatisch"], ["de", "Deutsch"], ["en", "Englisch"]]).replace('data-pref="language"', 'name="language"')}
+      ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace('data-pref="language"', 'name="language"')}
       ${field(t("AI_COPILOT.NAME", "Eigener Name"), "name", String(settings.name || ""))}
       ${field(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area")}
       ${field(t("AI_COPILOT.ADDRESSES", "Eigene Adressen"), "addresses", String(settings.addresses || ""), "area")}
@@ -4506,9 +4511,9 @@ function textButton(action, label2, extra = "") {
 }
 function renderReader(body, data, expanded) {
   const tags = data.keywords.map(
-    (tag) => `<span class="tag">${icon("tag")}<span>${esc7(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc7(tag)}" aria-label="Schlagwort ${esc7(tag)} entfernen">${icon("close")}</button></span>`
+    (tag) => `<span class="tag">${icon("tag")}<span>${esc7(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc7(tag)}" aria-label="${esc7(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
   ).join("");
-  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted) ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc7(data.crypto.text || (data.crypto.state === "bad" ? "Signatur ung\xFCltig" : "Kryptografisch verifiziert"))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc7(data.crypto.state === "bad" ? "Ung\xFCltig" : "Verifiziert")}</span></span>` : "";
+  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted) ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc7(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ung\xFCltig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc7(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ung\xFCltig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>` : "";
   const from = data.from[0];
   const summary = `
     <div class="head-line head-main">
@@ -4516,21 +4521,21 @@ function renderReader(body, data, expanded) {
       <span class="spacer"></span>
       ${secBadge}
       <time class="quiet" title="${esc7(data.whenFull)}">${esc7(data.when)}</time>
-      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
+      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen")}" title="${esc7(t("MESSAGE.DETAILS_EXPAND", "Details anzeigen"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
   const details = expanded ? `
     <div class="head-details">
-      ${line("Von", data.from)}
-      ${line("An", data.to)}
+      ${line(t("MESSAGE.FORWARD_FROM", "Von"), data.from)}
+      ${line(t("MESSAGE.FORWARD_TO", "An"), data.to)}
       ${line("Cc", data.cc)}
       ${line("Bcc", data.bcc)}
-      ${line("Antwort an", data.replyTo)}
-      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc7(data.whenFull)}</span></div>
-      ${data.crypto ? `<div class="head-line"><span class="head-key mono">Sicherheit</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
-      ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc7(data.size)}</span></div>` : ""}
-    </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
+      ${line(t("MESSAGE.REPLY_TO", "Antwort an"), data.replyTo)}
+      <div class="head-line"><span class="head-key mono">${esc7(t("MESSAGE.FORWARD_DATE", "Datum"))}</span><span class="head-val">${esc7(data.whenFull)}</span></div>
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc7(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
+      ${data.size ? `<div class="head-line"><span class="head-key mono">${esc7(t("MESSAGE_LIST.SORT_SIZE", "Gr\xF6\xDFe"))}</span><span class="head-val">${esc7(data.size)}</span></div>` : ""}
+    </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">${esc7(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
   const bars = [];
-  if (data.deleted) bars.push(bar("deleted", "trash", "Als gel\xF6scht markiert.", textButton("m-restore", "Wiederherstellen")));
+  if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gel\xF6scht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
   if (data.blocked) {
     bars.push(bar(
@@ -4587,8 +4592,8 @@ function renderReader(body, data, expanded) {
     </section>` : "";
   const files = data.files.length ? `
     <section class="files" aria-label="Anh\xE4nge">
-      <div class="files-head"><span class="mono">${data.files.length === 1 ? "1 Anhang" : `${data.files.length} Anh\xE4nge`}</span><span class="spacer"></span>
-        ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">Alle als ZIP</span></button>` : ""}
+      <div class="files-head"><span class="mono">${data.files.length === 1 ? t("MESSAGE.ATTACHMENT_ONE", "1 Anhang") : t("MESSAGE.ATTACHMENTS_COUNT", "%COUNT% Anh\xE4nge").replace("%COUNT%", String(data.files.length))}</span><span class="spacer"></span>
+        ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">${esc7(t("MESSAGE.ALL_AS_ZIP", "Alle als ZIP"))}</span></button>` : ""}
       </div>
       <ul class="file-list${data.simpleFiles ? " simple" : ""}">
         ${data.files.map((file) => `
@@ -4598,7 +4603,7 @@ function renderReader(body, data, expanded) {
               ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc7(file.name)}">${esc7(file.name)}</button>` : `<span class="file-name" title="${esc7(file.name)}">${esc7(file.name)}</span>`}
               <span class="quiet">${esc7(file.size)}</span>
             </span>
-            <a class="icon-btn" href="${esc7(file.href)}" download="${esc7(file.name)}" aria-label="${esc7(file.name)} laden" title="Laden">${icon("download")}</a>
+            <a class="icon-btn" href="${esc7(file.href)}" download="${esc7(file.name)}" aria-label="${esc7(file.name)} ${esc7(t("GLOBAL.DOWNLOAD", "laden"))}" title="${esc7(t("GLOBAL.DOWNLOAD", "Laden"))}">${icon("download")}</a>
           </li>`).join("")}
       </ul>
     </section>` : "";
@@ -4608,7 +4613,7 @@ function renderReader(body, data, expanded) {
       <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc7(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
-      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
+      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">${esc7(t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"))}</span></button></div>
     </header>
     ${bars.join("")}
     ${cal}
@@ -4641,22 +4646,22 @@ function renderBulk(body, data) {
   const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc7(label2)}</span></button>`;
   body.innerHTML = `
     <div class="bulk">
-      <p class="title title-md">${data.count} Mails ausgew\xE4hlt</p>
+      <p class="title title-md">${data.count} ${esc7(t("MESSAGE_LIST.SELECTED_MAILS", "Mails ausgew\xE4hlt"))}</p>
       <div class="bulk-grid">
-        ${b("m-read", "mark-read", "Als gelesen markieren")}
-        ${b("m-unread-all", "mark-unread", "Als ungelesen markieren")}
-        ${b("m-flag-all", "flag-filled", "Markieren")}
-        ${b("m-unflag-all", "flag", "Markierung entfernen")}
-        ${b("m-move", "move", "Verschieben \u2026")}
-        ${b("m-copy", "copy", "Kopieren \u2026")}
-        ${data.place.archive ? b("m-archive", "archive", "Archivieren") : ""}
-        ${data.place.inSpam ? b("m-notspam", "not-spam", "Kein Spam") : data.place.spam ? b("m-spam", "spam", "Spam") : ""}
-        ${b("m-forward-att", "forward-attachment", "Als Anhang weiterleiten")}
-        ${data.zip ? b("m-zip-mails", "download-zip", "Als ZIP laden") : ""}
-        ${b("delete", "delete", data.place.inTrash ? "Endg\xFCltig l\xF6schen" : "L\xF6schen", true)}
-        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", "Endg\xFCltig l\xF6schen", true)}
+        ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
+        ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
+        ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
+        ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
+        ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben \u2026"))}
+        ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "Kopieren \u2026"))}
+        ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
+        ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
+        ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
+        ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
+        ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen") : t("GLOBAL.DELETE", "L\xF6schen"), true)}
+        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen"), true)}
       </div>
-      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">Auswahl aufheben</span></button>
+      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">${esc7(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
     </div>`;
 }
 
@@ -5524,9 +5529,13 @@ function createView(root3, actions) {
   }
   const showLogin = (title, options2) => {
     document.title = title;
-    const languages = options2?.languages || {};
-    const codes = Object.keys(languages);
-    const langField = options2 && codes.length ? `<label class="field"><span>${esc9(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc9(code)}"${code === options2.language ? " selected" : ""}>${esc9(languages[code] || code)}</option>`).join("")}</select></label>` : "";
+    const rawLanguages = options2?.languages;
+    const codes = Array.isArray(rawLanguages) ? rawLanguages : Object.keys(rawLanguages || {});
+    const langNames = {
+      de: t("LANGS_NAMES.de", "Deutsch"),
+      en: t("LANGS_NAMES.en", "English")
+    };
+    const langField = options2 && codes.length ? `<label class="field"><span>${esc9(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc9(code)}"${code === options2.language ? " selected" : ""}>${esc9(langNames[code] || (rawLanguages && typeof rawLanguages === "object" && !Array.isArray(rawLanguages) ? rawLanguages[code] : code))}</option>`).join("")}</select></label>` : "";
     const codeField = options2?.twoFactor ? `<label class="field"><span>${esc9(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>` : "";
     root3.innerHTML = `
       <main class="login">
@@ -5693,7 +5702,7 @@ function createView(root3, actions) {
             <div class="empty reader-empty" id="reader-empty">
               <span class="icon icon-lg">${icon("inbox")}</span>
               <p class="empty-title">${esc9(t("MESSAGE.SELECT_MESSAGE", "W\xE4hlen Sie eine Mail aus der Liste."))}</p>
-              <span class="empty-hint mono">J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel</span>
+              <span class="empty-hint mono">${esc9(t("MESSAGE.SHORTCUTS_HINT", "J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel"))}</span>
             </div>
           </div>
         </section>
@@ -7257,7 +7266,7 @@ function createView(root3, actions) {
             <div class="msg-actions">
               <button type="button" class="msg-action" data-action="m-delete" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
               <button type="button" class="msg-action" data-action="m-archive" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
-              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc9(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc9(subject)}" title="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
             </div>
           </div>`;
         }).join("");
@@ -7275,7 +7284,7 @@ function createView(root3, actions) {
       if (clearBtn) clearBtn.hidden = !searching;
       if (result) {
         result.hidden = !searching;
-        result.textContent = searching ? rows2.length ? `Ergebnisse \xB7 ${rows2.length}` : "Keine Treffer" : "";
+        result.textContent = searching ? rows2.length ? `${t("SEARCH_UI.RESULTS", "Ergebnisse")} \xB7 ${rows2.length}` : t("SEARCH_UI.NO_RESULTS", "Keine Treffer") : "";
       }
     },
     setReader(data, loading2, error) {
@@ -7299,7 +7308,7 @@ function createView(root3, actions) {
           <div class="empty reader-empty">
             <span class="icon icon-lg">${icon("inbox")}</span>
             <p class="empty-title">${esc9(t("MESSAGE.SELECT_MESSAGE", "W\xE4hlen Sie eine Mail aus der Liste."))}</p>
-            <span class="empty-hint mono">J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel</span>
+            <span class="empty-hint mono">${esc9(t("MESSAGE.SHORTCUTS_HINT", "J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel"))}</span>
           </div>`;
         return;
       }
@@ -8018,7 +8027,7 @@ var Session = class {
   }
   async login(email, password, stay, totp = "") {
     if (!email.trim() || !password) {
-      this.view.setLoginError("Adresse und Passwort eintragen.");
+      this.view.setLoginError(t("LOGIN.ENTER_CREDENTIALS", "Adresse und Passwort eintragen."));
       return;
     }
     this.view.setLoginBusy(true);
@@ -8170,7 +8179,7 @@ var Session = class {
     const mailto = String(data.mailToEmail || "");
     if (mailto) {
       const seed = parseMailto(mailto);
-      this.view.openCompose({ title: "Neue Nachricht", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
+      this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject, body: seed.body, mode: "new" });
     }
     window.clearInterval(this.pollTimer);
     this.pollTimer = window.setInterval(() => {
@@ -8417,7 +8426,7 @@ var Session = class {
       this.collapsed.delete(parent);
       this.writeCollapsed();
     }
-    this.deskNotice = `Ordner \u201E${name.trim()}\u201C angelegt.`;
+    this.deskNotice = t("FOLDERS_UI.FOLDER_CREATED", "Ordner \xAB%NAME%\xBB angelegt.").replace("%NAME%", name.trim());
     this.view.notice(this.deskNotice);
     await this.reloadFolders();
   }
@@ -8448,7 +8457,7 @@ var Session = class {
             checkable: data.checkable ? 1 : 0,
             ...kolab ? { kolab } : {}
           });
-          this.deskNotice = `\u201E${folderPath(old)}\u201C hei\xDFt jetzt \u201E${target}\u201C.`;
+          this.deskNotice = t("FOLDERS_UI.FOLDER_RENAMED", "\xAB%OLD%\xBB hei\xDFt jetzt \xAB%NEW%\xBB.").replace("%OLD%", folderPath(old)).replace("%NEW%", target);
         } else {
           if (Boolean(data.subscribe) !== old.subscribed && this.roleOf(old) !== "inbox") await call("FolderSubscribe", { folder: old.fullName, subscribe: data.subscribe ? 1 : 0 });
           if (old.selectable && Boolean(data.checkable) !== old.checkable) await call("FolderCheckable", { folder: old.fullName, checkable: data.checkable ? 1 : 0 });
@@ -8467,7 +8476,7 @@ var Session = class {
         this.resolveSystemFolders(app);
         this.composeData = app;
         this.configureComposer();
-        this.deskNotice = "Systemordner gespeichert.";
+        this.deskNotice = t("FOLDERS_UI.SYSTEM_FOLDERS_SAVED", "Systemordner gespeichert.");
         this.view.notice(this.deskNotice);
         this.paintFolders();
         return;
@@ -8485,7 +8494,7 @@ var Session = class {
       }
       if (name === "folder-acl-set") {
         const rights = ["l", "r", "s", "w", "i", "p", "k", "x", "t", "e", "a"].filter((letter) => data[`r_${letter}`]).join("");
-        if (!data.identifier?.trim()) throw new ApiError(0, "Benutzer oder Gruppe eintragen.");
+        if (!data.identifier?.trim()) throw new ApiError(0, t("FOLDERS_UI.ENTER_USER_OR_GROUP", "Benutzer oder Gruppe eintragen."));
         await call("FolderSetACL", { folder: data.folder, identifier: data.identifier.trim(), rights });
         await this.showAcl(data.folder || "", "");
         return;
@@ -8530,7 +8539,7 @@ var Session = class {
         case "f-create":
         case "f-create-sub": {
           const result = await this.view.folderDialog({
-            title: name === "f-create" ? "Ordner anlegen" : `Neuer Unterordner in \u201E${this.folderName(folder)}\u201C`,
+            title: name === "f-create" ? t("FOLDERS_UI.TITLE_CREATE", "Ordner anlegen") : t("FOLDERS_UI.TITLE_CREATE_SUB", "Neuer Unterordner in \xAB%NAME%\xBB").replace("%NAME%", this.folderName(folder)),
             parents: this.parentChoices(),
             parent: name === "f-create-sub" ? data.target || "" : ""
           });
@@ -8539,7 +8548,7 @@ var Session = class {
         }
         case "f-rename": {
           if (!folder) return;
-          const next = await this.view.ask("Ordner umbenennen", "Neuer Name", folder.name);
+          const next = await this.view.ask(t("FOLDERS_UI.TITLE_RENAME", "Ordner umbenennen"), t("FOLDERS_UI.LABEL_NEW_NAME", "Neuer Name"), folder.name);
           if (!next || next === folder.name) return;
           if (folder.delimiter && next.includes(folder.delimiter)) {
             this.view.notice(`Der Name darf das Trennzeichen \u201E${folder.delimiter}\u201C nicht enthalten.`);
@@ -8562,7 +8571,7 @@ var Session = class {
           if (folder.fullName === this.folder) this.messages.forEach((message) => {
             if (!seen(message.flags)) message.flags.push("\\Seen");
           });
-          this.view.notice(`Alle Mails in \u201E${this.folderName(folder)}\u201C sind gelesen.`);
+          this.view.notice(t("FOLDERS_UI.ALL_MARKED_READ", "Alle Mails in \xAB%NAME%\xBB sind gelesen.").replace("%NAME%", this.folderName(folder)));
           this.paintFolders();
           if (folder.fullName === this.folder) this.paintList();
           return;
@@ -8570,9 +8579,9 @@ var Session = class {
         case "f-clear": {
           if (!folder) return;
           const ok = await this.view.confirm(
-            `\u201E${this.folderName(folder)}\u201C leeren?`,
-            `Alle ${folder.total} Mails in diesem Ordner werden endg\xFCltig gel\xF6scht. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.`,
-            "Endg\xFCltig leeren"
+            t("FOLDERS_UI.CONFIRM_CLEAR_TITLE", "Endg\xFCltig leeren"),
+            t("FOLDERS_UI.CONFIRM_CLEAR_DESC", "Alle %COUNT% Mails in diesem Ordner werden endg\xFCltig gel\xF6scht. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.").replace("%COUNT%", String(folder.total)),
+            t("FOLDERS_UI.CONFIRM_CLEAR_TITLE", "Endg\xFCltig leeren")
           );
           if (!ok) return;
           await call("FolderClear", { folder: folder.fullName });
@@ -8589,12 +8598,12 @@ var Session = class {
         }
         case "f-delete": {
           if (!folder || folder.total > 0 || this.isSystem(folder)) return;
-          const ok = await this.view.confirm(`Ordner \u201E${folder.name}\u201C l\xF6schen?`, "Der leere Ordner wird auf dem Server gel\xF6scht.", "Ordner l\xF6schen");
+          const ok = await this.view.confirm(t("FOLDERS_UI.CONFIRM_DELETE_TITLE", "Ordner \xAB%NAME%\xBB l\xF6schen?").replace("%NAME%", folder.name), t("FOLDERS_UI.CONFIRM_DELETE_DESC", "Der leere Ordner wird auf dem Server gel\xF6scht."), t("FOLDERS_UI.ACL_DELETE", "Ordner l\xF6schen"));
           if (!ok) return;
           await call("FolderDelete", { folder: folder.fullName });
           this.collapsed.delete(folder.fullName);
           this.writeCollapsed();
-          this.deskNotice = `Ordner \u201E${folder.name}\u201C gel\xF6scht.`;
+          this.deskNotice = t("FOLDERS_UI.FOLDER_DELETED", "Ordner \xAB%NAME%\xBB gel\xF6scht.").replace("%NAME%", folder.name);
           this.view.notice(this.deskNotice);
           await this.reloadFolders(this.folder === folder.fullName ? "INBOX" : "");
           return;
@@ -8602,13 +8611,13 @@ var Session = class {
         case "f-subscribe":
           if (!folder) return;
           await call("FolderSubscribe", { folder: folder.fullName, subscribe: folder.subscribed ? 0 : 1 });
-          this.deskNotice = folder.subscribed ? `\u201E${folder.name}\u201C nicht mehr abonniert.` : `\u201E${folder.name}\u201C abonniert.`;
+          this.deskNotice = folder.subscribed ? t("FOLDERS_UI.NOT_SUBSCRIBED", "nicht mehr abonniert") : t("FOLDERS_UI.CHECKED", "abonniert");
           await this.reloadFolders();
           return;
         case "f-checkable":
           if (!folder) return;
           await call("FolderCheckable", { folder: folder.fullName, checkable: folder.checkable ? 0 : 1 });
-          this.deskNotice = folder.checkable ? `\u201E${folder.name}\u201C wird nicht mehr gepr\xFCft.` : `\u201E${folder.name}\u201C wird auf neue Mail gepr\xFCft.`;
+          this.deskNotice = folder.checkable ? t("FOLDERS_UI.CHECK_OFF", "\xAB%NAME%\xBB wird nicht mehr gepr\xFCft.").replace("%NAME%", folder.name) : t("FOLDERS_UI.CHECK_ON", "\xAB%NAME%\xBB wird auf neue Mail gepr\xFCft.").replace("%NAME%", folder.name);
           await this.reloadFolders();
           return;
         case "f-acl":
@@ -8616,7 +8625,7 @@ var Session = class {
           return;
         case "f-acl-delete": {
           if (!data.target || !data.id) return;
-          const ok = await this.view.confirm(`Freigabe f\xFCr \u201E${data.id}\u201C entfernen?`, "Diese Person oder Gruppe verliert den Zugriff auf den Ordner.", "Entfernen");
+          const ok = await this.view.confirm(t("FOLDERS_UI.CONFIRM_REVOKE_TITLE", "Freigabe f\xFCr \xAB%ID%\xBB entfernen?").replace("%ID%", data.id), t("FOLDERS_UI.CONFIRM_REVOKE_DESC", "Diese Person oder Gruppe verliert den Zugriff auf den Ordner."), t("GLOBAL.DELETE", "Entfernen"));
           if (!ok) return;
           await call("FolderDeleteACL", { folder: data.target, identifier: data.id });
           await this.showAcl(data.target, "");
@@ -8826,16 +8835,16 @@ var Session = class {
     return this.prefs.listGrouped && !this.threadUid && (this.sort === "" || this.sort === "DATE");
   }
   groupOf(stamp) {
-    if (!stamp) return "Ohne Datum";
+    if (!stamp) return t("MESSAGE_LIST.NO_DATE", "Ohne Datum");
     const date = new Date(stamp * 1e3);
     const start = /* @__PURE__ */ new Date();
     start.setHours(0, 0, 0, 0);
     const day = 864e5;
-    if (date >= start) return "Heute";
-    if (date.getTime() >= start.getTime() - day) return "Gestern";
+    if (date >= start) return t("MESSAGE_LIST.TODAY", "Heute");
+    if (date.getTime() >= start.getTime() - day) return t("MESSAGE_LIST.YESTERDAY", "Gestern");
     const weekStart = new Date(start.getTime() - (start.getDay() + 6) % 7 * day);
-    if (date >= weekStart) return "Diese Woche";
-    return date.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    if (date >= weekStart) return t("MESSAGE_LIST.THIS_WEEK", "Diese Woche");
+    return date.toLocaleDateString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { month: "long", year: "numeric" });
   }
   rows() {
     const grouped = this.grouping();
@@ -8850,7 +8859,7 @@ var Session = class {
         threadCount: threaded ? message.threads.length : 0,
         threadUnseen: threaded ? message.threadUnseen.length : 0,
         uid: message.uid,
-        who: label(message.from[0] || { name: "", email: "" }) || "(unbekannt)",
+        who: label(message.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
         subject: message.subject,
         preview: message.preview,
         when: when(message.date),
@@ -8867,7 +8876,7 @@ var Session = class {
     });
   }
   paintList() {
-    const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Treffer. Suche anpassen oder Filter entfernen." : "Dieser Ordner ist leer.";
+    const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? t("FOLDERS_UI.NO_MATCH", "Keine Treffer. Suche anpassen oder Filter entfernen.") : t("FOLDERS_UI.EMPTY_FOLDER", "Dieser Ordner ist leer.");
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
   async setSearch(query) {
@@ -9133,7 +9142,7 @@ var Session = class {
   openNew() {
     this.replyKind = "";
     this.draftRef = null;
-    this.view.openCompose({ title: "Neue Nachricht", to: "", cc: "", subject: "", body: "", mode: "new" });
+    this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new" });
   }
   openReply(all) {
     const message = this.current;
@@ -9145,7 +9154,7 @@ var Session = class {
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
-      title: all ? "Allen antworten" : "Antworten",
+      title: all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten"),
       mode: "reply",
       identityId: this.replyIdentity(message),
       sourceFolder: message.folder,
@@ -9166,7 +9175,7 @@ ${quote2(body)}`
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
     this.view.openCompose({
-      title: "Weiterleiten",
+      title: t("COMPOSE.TITLE_FORWARD", "Weiterleiten"),
       to: "",
       cc: "",
       subject,
@@ -9174,9 +9183,9 @@ ${quote2(body)}`
       sourceFolder: message.folder,
       body: `
 
--------- Weitergeleitete Nachricht --------
-Von: ${message.from.map(label).join(", ")}
-Betreff: ${message.subject}
+${t("MESSAGE.FORWARD_HEADER", "-------- Weitergeleitete Nachricht --------")}
+${t("MESSAGE.FORWARD_FROM", "Von")}: ${message.from.map(label).join(", ")}
+${t("MESSAGE.FORWARD_SUBJECT", "Betreff")}: ${message.subject}
 
 ${body}`
     });
@@ -9184,7 +9193,7 @@ ${body}`
   }
   async saveDraft(values2) {
     const result = await call("SaveMessage", { ...values2 });
-    if (result === true || !result.folder || !result.uid) throw new ApiError(0, "Der Entwurf konnte nicht gespeichert werden.");
+    if (result === true || !result.folder || !result.uid) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
     this.draftRef = { folder: result.folder, uid: result.uid };
     return this.draftRef;
   }
@@ -9239,7 +9248,7 @@ ${body}`
     const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     if (!this.archiveFolder) {
-      this.view.notice("Kein Archiv-Ordner eingerichtet.");
+      this.view.notice(t("MESSAGE.NO_ARCHIVE", "Kein Archiv-Ordner eingerichtet."));
       return;
     }
     if (this.folder === this.archiveFolder) {
@@ -9254,12 +9263,11 @@ ${body}`
     if (!uids.length) return;
     const permanent = forever || !this.trashFolder || this.folder === this.trashFolder;
     if (permanent) {
-      const what = uids.length === 1 ? "diese Mail" : `diese ${uids.length} Mails`;
-      const ok = await this.view.confirm("Endg\xFCltig l\xF6schen?", `Damit wird ${what} sofort entfernt. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.`, "Endg\xFCltig l\xF6schen");
+      const ok = await this.view.confirm(t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen?"), uids.length === 1 ? t("MESSAGE.CONFIRM_DELETE_DESC", "Damit wird die Mail sofort entfernt. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.") : t("MESSAGE.CONFIRM_DELETE_DESC_PLURAL", "Damit werden %COUNT% Mails sofort entfernt. Das l\xE4sst sich nicht r\xFCckg\xE4ngig machen.").replace("%COUNT%", String(uids.length)), t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen"));
       if (!ok) return;
       try {
         await call("MessageDelete", { folder: this.folder, uids: uids.join(",") });
-        this.view.notice(uids.length === 1 ? "Endg\xFCltig gel\xF6scht." : `${uids.length} Mails endg\xFCltig gel\xF6scht.`);
+        this.view.notice(uids.length === 1 ? t("MESSAGE_LIST.DELETED_ONE", "Endg\xFCltig gel\xF6scht.") : t("MESSAGE_LIST.DELETED_COUNT", "%COUNT% Mails endg\xFCltig gel\xF6scht.").replace("%COUNT%", String(uids.length)));
         await this.afterRemoval(uids);
       } catch (error) {
         this.view.notice(explain(error));
@@ -9388,7 +9396,7 @@ ${body}`
       await loadLanguage(raw);
       document.documentElement.lang = raw;
       if (!this.view.composerOpen()) location.reload();
-      else this.view.notice("Die Sprache gilt vollst\xE4ndig nach dem n\xE4chsten Laden.");
+      else this.view.notice(t("SETTINGS_GENERAL.NOTICE_RELOAD", "Die Sprache gilt vollst\xE4ndig nach dem n\xE4chsten Laden."));
     }
     const readKeys = ["RemoveColors", "AllowStyles", "minFontSize", "MaxBlockquotesLevel", "CollapseBlockquotes", "ViewHTML", "ViewImages", "ViewImagesWhitelist", "ListInlineAttachments", "simpleAttachmentsList"];
     if (readKeys.includes(key)) {
@@ -9730,10 +9738,10 @@ ${body}`
         const uids = this.targets();
         if (!uids.length) return;
         const copy = name === "copy";
-        const target = await this.view.pickFolder(copy ? "Kopieren nach" : "Verschieben nach", this.pickerFolders(), copy ? "" : this.folder);
+        const target = await this.view.pickFolder(copy ? t("MESSAGE.ACTION_COPY_TO", "Kopieren nach") : t("MESSAGE.ACTION_MOVE_TO", "Verschieben nach"), this.pickerFolders(), copy ? "" : this.folder);
         if (!target) return;
-        const n = uids.length === 1 ? "Mail" : `${uids.length} Mails`;
-        await this.moveTo(uids, target, copy, `${n} ${copy ? "kopiert" : "verschoben"} nach ${target}.`);
+        const n = uids.length === 1 ? t("MESSAGE.ONE_MAIL", "Mail") : t("MESSAGE.PLURAL_MAILS", "%COUNT% Mails").replace("%COUNT%", String(uids.length));
+        await this.moveTo(uids, target, copy, (copy ? t("MESSAGE.COPIED_TO", "%N% kopiert nach %TARGET%.") : t("MESSAGE.MOVED_TO", "%N% verschoben nach %TARGET%.")).replace("%N%", n).replace("%TARGET%", target));
         return;
       }
       case "drop": {
@@ -9771,7 +9779,7 @@ ${body}`
       }
       case "tag": {
         if (!message) return;
-        const value = await this.view.ask("Schlagwort hinzuf\xFCgen", "Schlagwort");
+        const value = await this.view.ask(t("MESSAGE.ACTION_ADD_TAG", "Schlagwort hinzuf\xFCgen"), t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"));
         const keyword = (value || "").replace(/[\s\\()"{}%*\]]+/g, "");
         if (!keyword) return;
         await this.setFlag([message.uid], keyword, true, "MessageSetKeyword");
@@ -9795,7 +9803,7 @@ ${body}`
         await this.paintLetter();
         try {
           await call("SettingsUpdate", { ViewImagesWhitelist: this.prefs.whitelist, ViewImages: this.prefs.viewImages });
-          this.view.notice(`Bilder von ${sender} werden k\xFCnftig angezeigt.`);
+          this.view.notice(t("MESSAGE.SHOW_IMAGES_ALWAYS", "Bilder von %SENDER% werden k\xFCnftig angezeigt.").replace("%SENDER%", sender));
         } catch (error) {
           this.view.notice(explain(error));
         }
@@ -9835,11 +9843,11 @@ ${body}`
               messageFolder: message.folder,
               messageUid: message.uid,
               readReceipt: message.readReceipt,
-              subject: `Gelesen: ${message.subject}`,
-              plain: `Ihre Nachricht an ${this.email} wurde gelesen.`
+              subject: t("MESSAGE.READ_RECEIPT_SUBJECT", "Gelesen: %SUBJECT%").replace("%SUBJECT%", message.subject),
+              plain: t("MESSAGE.READ_RECEIPT_BODY", "Ihre Nachricht an %EMAIL% wurde gelesen.").replace("%EMAIL%", this.email)
             });
             message.flags.push("$mdnsent");
-            this.view.notice("Lesebest\xE4tigung gesendet.");
+            this.view.notice(t("MESSAGE.READ_RECEIPT_SENT", "Lesebest\xE4tigung gesendet."));
           } catch (error) {
             this.receiptSkipped.delete(`${message.folder}:${message.uid}`);
             this.view.notice(explain(error));
@@ -9856,7 +9864,7 @@ ${body}`
           const seed = parseMailto(info.mailto);
           this.replyKind = "";
           this.draftRef = null;
-          this.view.openCompose({ title: "Vom Verteiler abmelden", to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
+          this.view.openCompose({ title: t("MESSAGE.UNSUBSCRIBE_TITLE", "Vom Verteiler abmelden"), to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject || "unsubscribe", body: seed.body, mode: "new" });
           return;
         }
         const host = (() => {
@@ -9866,7 +9874,7 @@ ${body}`
             return info.http;
           }
         })();
-        const ok = await this.view.confirm("Vom Verteiler abmelden?", `Die Abmeldeseite von ${host} \xF6ffnet sich in einem neuen Tab.`, "Seite \xF6ffnen", false);
+        const ok = await this.view.confirm(t("MESSAGE.UNSUBSCRIBE_CONFIRM", "Vom Verteiler abmelden?"), t("MESSAGE.UNSUBSCRIBE_DESC", "Die Abmeldeseite von %HOST% \xF6ffnet sich in einem neuen Tab.").replace("%HOST%", host), t("MESSAGE.UNSUBSCRIBE_OPEN_BTN", "Seite \xF6ffnen"), false);
         if (ok) window.open(info.http, "_blank", "noopener,noreferrer");
         return;
       }
@@ -9896,7 +9904,7 @@ ${body}`
         this.replyKind = "";
         this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
         this.view.openCompose({
-          title: name === "edit-draft" ? "Entwurf" : "Neue Nachricht",
+          title: name === "edit-draft" ? t("COMPOSE.TITLE_EDIT_DRAFT", "Entwurf") : t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
           to: message.to.map(address).join(", "),
           cc: message.cc.map(address).join(", "),
           bcc: message.bcc.map(address).join(", "),
@@ -9917,7 +9925,7 @@ ${body}`
         if (!list.length) return;
         this.replyKind = "";
         this.draftRef = null;
-        const subject = list.length === 1 ? /^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}` : "Weitergeleitete Nachrichten";
+        const subject = list.length === 1 ? /^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}` : t("MESSAGE.FORWARDED_MESSAGES_SUBJECT", "Weitergeleitete Nachrichten");
         this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
         void this.view.attachCompose(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
         return;
@@ -9972,7 +9980,7 @@ ${body}`
       case "addr-write":
         this.replyKind = "";
         this.draftRef = null;
-        this.view.openCompose({ title: "Neue Nachricht", to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
+        this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: address({ name: data.name || "", email: data.email || "" }), cc: "", subject: "", body: "", mode: "new" });
         return;
       case "addr-copy":
         try {
@@ -9996,7 +10004,7 @@ ${body}`
             let card = writeProp(void 0, "fn", (data.name || "").trim() || data.email);
             card = writeProp(card, "email", data.email);
             await call("ContactSave", { uid: "", jCard: card });
-            this.view.notice(`${data.name || data.email} wurde zu den Kontakten hinzugef\xFCgt.`);
+            this.view.notice(t("CONTACTS.ADDED", "%NAME% wurde zu den Kontakten hinzugef\xFCgt.").replace("%NAME%", data.name || data.email));
             await this.view.reloadBook();
           } catch (error) {
             this.view.notice(explain(error));
@@ -10006,7 +10014,7 @@ ${body}`
       case "compose-to":
         this.replyKind = "";
         this.draftRef = null;
-        this.view.openCompose({ title: "Neue Nachricht", to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
+        this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: data.to || "", cc: "", subject: "", body: "", mode: "new" });
         return;
       case "accounts":
         await this.loadAccounts();
@@ -10238,7 +10246,7 @@ ${body}`
       return;
     }
     if (name === "replies" && this.current) {
-      this.view.setStrip({ ...this.strip(), loading: "Antwortvorschl\xE4ge werden erstellt \u2026" });
+      this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschl\xE4ge werden erstellt \u2026") });
       try {
         const result = await plugin("AiQuickReplies", {
           folder: this.folder,
@@ -10268,7 +10276,7 @@ ${body}`
       return;
     }
     if (name === "triage") {
-      this.view.notice("Absender, Betreff und Vorschau dieser Seite gehen an das Modell.");
+      this.view.notice(t("AI_COPILOT.TRIAGE_DISCLOSURE", "Absender, Betreff und Vorschau dieser Seite gehen an das Modell."));
       try {
         const result = await plugin("AiTriageLlm", {
           folder: this.folder,
@@ -10279,7 +10287,7 @@ ${body}`
             preview: message.preview
           }))
         });
-        this.view.notice(result.warning || `${result.stored || 0} Mails eingeordnet.`);
+        this.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
         await this.loadList(false);
       } catch (error) {
         this.view.notice(explain(error));
@@ -10289,7 +10297,7 @@ ${body}`
     if (name === "deadlines") {
       const items = this.alertItems.filter((item) => item.type !== "followup").slice(0, 8);
       if (!items.length) {
-        this.view.notice("Keine Mails f\xFCr eine Frist.");
+        this.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails f\xFCr eine Frist."));
         return;
       }
       try {
@@ -10368,13 +10376,13 @@ ${body}`
   }
   contextLabel() {
     if (!this.useContext || !this.current) return "";
-    return this.current.subject || "(ohne Betreff)";
+    return this.current.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)");
   }
   async generate() {
     const options2 = this.view.draftOptions();
     this.draftBackup = options2.body;
     this.draftAbort = new AbortController();
-    this.view.setDraftBusy(true, "Entwurf wird geschrieben \u2026");
+    this.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben \u2026"));
     let streamed = "";
     try {
       await streamEvents("AiStream", {
@@ -10396,12 +10404,12 @@ ${body}`
           this.view.setSubjectHint(String(payload.subject || ""));
           this.summaryModel = String(payload.model || "");
         }
-        if (event === "error") throw new ApiError(1, String(payload.error || "Verbindung unterbrochen."));
+        if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")));
       }, this.draftAbort.signal);
-      this.view.setDraftBusy(false, `Entwurf eingef\xFCgt.${this.summaryModel ? ` \xB7 ${this.summaryModel}` : ""}`);
+      this.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingef\xFCgt.")}${this.summaryModel ? ` \xB7 ${this.summaryModel}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        this.view.setDraftBusy(false, "Abgebrochen.");
+        this.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."));
         return;
       }
       this.view.setDraftBusy(false, explain(error));
@@ -10435,7 +10443,7 @@ ${body}`
       } else if (type === "compose") {
         this.openNew();
         this.view.openCompose({
-          title: "Neue Nachricht",
+          title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
           mode: "new",
           to: String(action.to || ""),
           cc: "",
@@ -10446,7 +10454,7 @@ ${body}`
         if (folder) await this.selectFolder(folder);
         await this.setSearch(String(action.search || ""));
       }
-      turn.actions[index].state = "Erledigt";
+      turn.actions[index].state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
       this.view.setChat(this.turns, "", this.contextLabel());
       if (uids) await this.loadList(false);
     } catch (error) {

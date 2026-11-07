@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface ApiFailure {
   code: number;
   message: string;
@@ -33,7 +35,7 @@ export function watchSession(handler: () => void): void {
 
 export async function loadLanguage(code: string): Promise<void> {
   const response = await fetch(`${root()}?/Lang/App/${encodeURIComponent(code)}/`, { credentials: "same-origin" });
-  if (!response.ok) throw new ApiError(1, "Die Sprache konnte nicht geladen werden.");
+  if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_LANG_LOAD", "Die Sprache konnte nicht geladen werden."));
   const script = await response.text();
   new Function(script)();
 }
@@ -43,23 +45,24 @@ function root(): string {
 }
 
 export function explain(error: unknown): string {
-  if (!(error instanceof ApiError)) return "Die Anfrage ist fehlgeschlagen.";
-  const known: Record<number, string> = {
-    101: "Die Sitzung ist abgelaufen. Seite neu laden.",
-    102: "Anmeldung fehlgeschlagen. Adresse oder Passwort prüfen.",
-    104: "Der Mailserver ist nicht erreichbar.",
-    109: "Diese Domain ist nicht erlaubt.",
-    110: "Dieses Konto ist nicht erlaubt.",
-    201: "Die Liste konnte nicht geladen werden.",
-    202: "Der Brief konnte nicht geladen werden.",
-    203: "Löschen ist fehlgeschlagen.",
-    204: "Verschieben ist fehlgeschlagen.",
-    302: "Senden ist fehlgeschlagen.",
-    303: "Empfänger prüfen.",
-    140: "Die Kontakte konnten nicht synchronisiert werden.",
-    901: "Der Mailserver hat die Anfrage abgelehnt."
+  if (!(error instanceof ApiError)) return t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen.");
+  const known: Record<number, [string, string]> = {
+    101: ["NOTIFICATIONS.InvalidToken", "Die Sitzung ist abgelaufen. Seite neu laden."],
+    102: ["NOTIFICATIONS.AuthError", "Anmeldung fehlgeschlagen. Adresse oder Passwort prüfen."],
+    104: ["NOTIFICATIONS.ConnectionError", "Der Mailserver ist nicht erreichbar."],
+    109: ["NOTIFICATIONS.DomainNotAllowed", "Diese Domain ist nicht erlaubt."],
+    110: ["NOTIFICATIONS.AccountNotAllowed", "Dieses Konto ist nicht erlaubt."],
+    140: ["NOTIFICATIONS.ContactsSyncError", "Die Kontakte konnten nicht synchronisiert werden."],
+    201: ["NOTIFICATIONS.CantGetMessageList", "Die Liste konnte nicht geladen werden."],
+    202: ["NOTIFICATIONS.CantGetMessage", "Der Brief konnte nicht geladen werden."],
+    203: ["NOTIFICATIONS.CantDeleteMessage", "Löschen ist fehlgeschlagen."],
+    204: ["NOTIFICATIONS.CantMoveMessage", "Verschieben ist fehlgeschlagen."],
+    302: ["NOTIFICATIONS.CantSendMessage", "Senden ist fehlgeschlagen."],
+    303: ["NOTIFICATIONS.InvalidRecipients", "Empfänger prüfen."],
+    901: ["NOTIFICATIONS.MailServerError", "Der Mailserver hat die Anfrage abgelehnt."]
   };
-  const text = known[error.code] || error.message || "Die Anfrage ist fehlgeschlagen.";
+  const item = known[error.code];
+  const text = item ? t(item[0], item[1]) : (error.message || t("NOTIFICATIONS.UnknownError", "Die Anfrage ist fehlgeschlagen."));
   return error.detail ? `${text} ${error.detail}` : text;
 }
 
@@ -68,7 +71,7 @@ async function readApp(url: string): Promise<Record<string, unknown>> {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
   });
-  if (!response.ok) throw new ApiError(1, "Die Anwendung konnte nicht geladen werden.");
+  if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_APP_LOAD", "Die Anwendung konnte nicht geladen werden."));
   const data = await response.json() as Record<string, unknown>;
   const system = data.System as { token?: string } | undefined;
   if (system?.token) token = system.token;
@@ -166,7 +169,7 @@ function readEnvelope(text: string): Envelope {
   try {
     return JSON.parse(last) as Envelope;
   } catch {
-    throw new ApiError(1, "Der Server hat keine lesbare Antwort geschickt.");
+    throw new ApiError(1, t("NOTIFICATIONS.RequestError", "Der Server hat keine lesbare Antwort geschickt."));
   }
 }
 

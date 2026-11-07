@@ -109,10 +109,10 @@ function textButton(action: string, label: string, extra = ""): string {
 
 export function renderReader(body: HTMLElement, data: ReaderData, expanded: boolean): void {
   const tags = data.keywords.map((tag) =>
-    `<span class="tag">${icon("tag")}<span>${esc(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc(tag)}" aria-label="Schlagwort ${esc(tag)} entfernen">${icon("close")}</button></span>`
+    `<span class="tag">${icon("tag")}<span>${esc(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc(tag)}" aria-label="${esc(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
   ).join("");
   const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted)
-    ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc(data.crypto.text || (data.crypto.state === "bad" ? "Signatur ungültig" : "Kryptografisch verifiziert"))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc(data.crypto.state === "bad" ? "Ungültig" : "Verifiziert")}</span></span>`
+    ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ungültig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ungültig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>`
     : "";
   const from = data.from[0];
   const summary = `
@@ -121,22 +121,22 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
       <span class="spacer"></span>
       ${secBadge}
       <time class="quiet" title="${esc(data.whenFull)}">${esc(data.when)}</time>
-      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
+      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen")}" title="${esc(t("MESSAGE.DETAILS_EXPAND", "Details anzeigen"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
   const details = expanded ? `
     <div class="head-details">
-      ${line("Von", data.from)}
-      ${line("An", data.to)}
+      ${line(t("MESSAGE.FORWARD_FROM", "Von"), data.from)}
+      ${line(t("MESSAGE.FORWARD_TO", "An"), data.to)}
       ${line("Cc", data.cc)}
       ${line("Bcc", data.bcc)}
-      ${line("Antwort an", data.replyTo)}
-      <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc(data.whenFull)}</span></div>
-      ${data.crypto ? `<div class="head-line"><span class="head-key mono">Sicherheit</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
-      ${data.size ? `<div class="head-line"><span class="head-key mono">Größe</span><span class="head-val">${esc(data.size)}</span></div>` : ""}
-    </div>` : (data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "");
+      ${line(t("MESSAGE.REPLY_TO", "Antwort an"), data.replyTo)}
+      <div class="head-line"><span class="head-key mono">${esc(t("MESSAGE.FORWARD_DATE", "Datum"))}</span><span class="head-val">${esc(data.whenFull)}</span></div>
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
+      ${data.size ? `<div class="head-line"><span class="head-key mono">${esc(t("MESSAGE_LIST.SORT_SIZE", "Größe"))}</span><span class="head-val">${esc(data.size)}</span></div>` : ""}
+    </div>` : (data.to.length ? `<div class="head-line quiet"><span class="head-key mono">${esc(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "");
 
   const bars: string[] = [];
-  if (data.deleted) bars.push(bar("deleted", "trash", "Als gelöscht markiert.", textButton("m-restore", "Wiederherstellen")));
+  if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gelöscht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
   if (data.blocked) {
     bars.push(bar("images", "image-blocked",
@@ -187,8 +187,8 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
 
   const files = data.files.length ? `
     <section class="files" aria-label="Anhänge">
-      <div class="files-head"><span class="mono">${data.files.length === 1 ? "1 Anhang" : `${data.files.length} Anhänge`}</span><span class="spacer"></span>
-        ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">Alle als ZIP</span></button>` : ""}
+      <div class="files-head"><span class="mono">${data.files.length === 1 ? t("MESSAGE.ATTACHMENT_ONE", "1 Anhang") : t("MESSAGE.ATTACHMENTS_COUNT", "%COUNT% Anhänge").replace("%COUNT%", String(data.files.length))}</span><span class="spacer"></span>
+        ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">${esc(t("MESSAGE.ALL_AS_ZIP", "Alle als ZIP"))}</span></button>` : ""}
       </div>
       <ul class="file-list${data.simpleFiles ? " simple" : ""}">
         ${data.files.map((file) => `
@@ -202,7 +202,7 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
                 : `<span class="file-name" title="${esc(file.name)}">${esc(file.name)}</span>`}
               <span class="quiet">${esc(file.size)}</span>
             </span>
-            <a class="icon-btn" href="${esc(file.href)}" download="${esc(file.name)}" aria-label="${esc(file.name)} laden" title="Laden">${icon("download")}</a>
+            <a class="icon-btn" href="${esc(file.href)}" download="${esc(file.name)}" aria-label="${esc(file.name)} ${esc(t("GLOBAL.DOWNLOAD", "laden"))}" title="${esc(t("GLOBAL.DOWNLOAD", "Laden"))}">${icon("download")}</a>
           </li>`).join("")}
       </ul>
     </section>` : "";
@@ -213,7 +213,7 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
       <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
-      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
+      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">${esc(t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"))}</span></button></div>
     </header>
     ${bars.join("")}
     ${cal}
@@ -250,21 +250,21 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc(label)}</span></button>`;
   body.innerHTML = `
     <div class="bulk">
-      <p class="title title-md">${data.count} Mails ausgewählt</p>
+      <p class="title title-md">${data.count} ${esc(t("MESSAGE_LIST.SELECTED_MAILS", "Mails ausgewählt"))}</p>
       <div class="bulk-grid">
-        ${b("m-read", "mark-read", "Als gelesen markieren")}
-        ${b("m-unread-all", "mark-unread", "Als ungelesen markieren")}
-        ${b("m-flag-all", "flag-filled", "Markieren")}
-        ${b("m-unflag-all", "flag", "Markierung entfernen")}
-        ${b("m-move", "move", "Verschieben …")}
-        ${b("m-copy", "copy", "Kopieren …")}
-        ${data.place.archive ? b("m-archive", "archive", "Archivieren") : ""}
-        ${data.place.inSpam ? b("m-notspam", "not-spam", "Kein Spam") : data.place.spam ? b("m-spam", "spam", "Spam") : ""}
-        ${b("m-forward-att", "forward-attachment", "Als Anhang weiterleiten")}
-        ${data.zip ? b("m-zip-mails", "download-zip", "Als ZIP laden") : ""}
-        ${b("delete", "delete", data.place.inTrash ? "Endgültig löschen" : "Löschen", true)}
-        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", "Endgültig löschen", true)}
+        ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
+        ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
+        ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
+        ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
+        ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben …"))}
+        ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "Kopieren …"))}
+        ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
+        ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
+        ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
+        ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
+        ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen") : t("GLOBAL.DELETE", "Löschen"), true)}
+        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen"), true)}
       </div>
-      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">Auswahl aufheben</span></button>
+      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
     </div>`;
 }

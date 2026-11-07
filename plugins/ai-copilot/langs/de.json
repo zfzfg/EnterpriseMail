@@ -8,9 +8,9 @@
 		"LANG_AUTO": "Wie die Mail",
 		"YOUR_NAME": "Ihr Name",
 		"YOUR_NAME_PLACEHOLDER": "für Grußformeln in Entwürfen",
-		"STYLE": "Hinweise zum Stil",
+		"STYLE": "Schreibstil",
 		"STYLE_PLACEHOLDER": "z. B. Wir duzen Stammkunden. Kurze Sätze. Immer mit „Viele Grüße“ schließen.",
-		"ADDRESSES": "Weitere eigene Adressen",
+		"ADDRESSES": "Eigene Adressen",
 		"ADDRESSES_PLACEHOLDER": "adresse@beispiel.de, zweite@beispiel.de",
 		"ADDRESSES_HINT": "Für „Antwort nötig“: Mails an diese Adressen gelten als direkt an Sie gerichtet. Konto und Identitäten zählen automatisch.",
 		"PROVIDERS": "Anbieter",
@@ -81,7 +81,7 @@
 		"MODE_REWRITE": "Umschreiben",
 		"MODE_PROOFREAD": "Korrektur",
 		"INSTRUCTION_PLACEHOLDER": "Was soll die Mail sagen? z. B. „Termin am Donnerstag bestätigen, nach Parkmöglichkeit fragen“",
-		"TONE": "Ton",
+		"TONE": "Standardton",
 		"TONE_PROFESSIONAL": "Professionell",
 		"TONE_FRIENDLY": "Freundlich",
 		"TONE_CASUAL": "Locker",
@@ -130,7 +130,12 @@
 		"NO_ARCHIVE": "Kein Archiv-Ordner eingerichtet.",
 		"OPENED": "Geöffnet",
 		"SEARCHED": "Suche gesetzt",
-		"COMPOSE_OPENED": "Entwurf geöffnet"
+		"COMPOSE_OPENED": "Entwurf geöffnet",
+		"NAME": "Eigener Name",
+		"NOTICE": "Einwilligung bleibt gespeichert",
+		"PRIVACY": "Der Assistent sendet Brieftext erst nach einer Einwilligung an den Anbieter.",
+		"REVOKE": "Einwilligung zurücknehmen",
+		"TITLE": "Assistent"
 	},
 	"EDITOR": {
 		"AIWAND": "Entwurf mit KI"

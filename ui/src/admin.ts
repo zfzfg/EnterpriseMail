@@ -81,7 +81,7 @@ async function submitLogin(root: HTMLElement, form: HTMLFormElement, login: stri
   const button = form.querySelector("button") as HTMLButtonElement;
   if (!login.trim() || !password) {
     slot.hidden = false;
-    slot.textContent = "Benutzer und Passwort eintragen.";
+    slot.textContent = t("ADMIN.ENTER_CREDENTIALS", "Benutzer und Passwort eintragen.");
     return;
   }
   button.disabled = true;

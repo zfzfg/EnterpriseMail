@@ -300,9 +300,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
 
   const showLogin: MailView["showLogin"] = (title, options) => {
     document.title = title;
-    const languages = options?.languages || {};
-    const codes = Object.keys(languages);
-    const langField = options && codes.length ? `<label class="field"><span>${esc(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc(code)}"${code === options.language ? " selected" : ""}>${esc(languages[code] || code)}</option>`).join("")}</select></label>` : "";
+    const rawLanguages = options?.languages;
+    const codes = Array.isArray(rawLanguages) ? rawLanguages : Object.keys(rawLanguages || {});
+    const langNames: Record<string, string> = {
+      de: t("LANGS_NAMES.de", "Deutsch"),
+      en: t("LANGS_NAMES.en", "English")
+    };
+    const langField = options && codes.length ? `<label class="field"><span>${esc(t("GLOBAL.LANGUAGE", "Sprache"))}</span><select name="language">${codes.map((code) => `<option value="${esc(code)}"${code === options.language ? " selected" : ""}>${esc(langNames[code] || (rawLanguages && typeof rawLanguages === "object" && !Array.isArray(rawLanguages) ? (rawLanguages as Record<string, string>)[code] : code))}</option>`).join("")}</select></label>` : "";
     const codeField = options?.twoFactor ? `<label class="field"><span>${esc(t("LOGIN.TWO_FACTOR", "Code"))}</span><input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>` : "";
     root.innerHTML = `
       <main class="login">
@@ -472,7 +476,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="empty reader-empty" id="reader-empty">
               <span class="icon icon-lg">${icon("inbox")}</span>
               <p class="empty-title">${esc(t("MESSAGE.SELECT_MESSAGE", "Wählen Sie eine Mail aus der Liste."))}</p>
-              <span class="empty-hint mono">J / K Navigieren · C Verfassen · ? Tastenkürzel</span>
+              <span class="empty-hint mono">${esc(t("MESSAGE.SHORTCUTS_HINT", "J / K Navigieren · C Verfassen · ? Tastenkürzel"))}</span>
             </div>
           </div>
         </section>
@@ -1993,7 +1997,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="msg-actions">
               <button type="button" class="msg-action" data-action="m-delete" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}: ${esc(subject)}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
               <button type="button" class="msg-action" data-action="m-archive" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc(subject)}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
-              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? "Markierung entfernen" : "Markieren"}: ${esc(subject)}" title="${row.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc(subject)}" title="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
             </div>
           </div>`;
         }).join("");
@@ -2011,7 +2015,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (clearBtn) clearBtn.hidden = !searching;
       if (result) {
         result.hidden = !searching;
-        result.textContent = searching ? (rows.length ? `Ergebnisse · ${rows.length}` : "Keine Treffer") : "";
+        result.textContent = searching ? (rows.length ? `${t("SEARCH_UI.RESULTS", "Ergebnisse")} · ${rows.length}` : t("SEARCH_UI.NO_RESULTS", "Keine Treffer")) : "";
       }
     },
     setReader(data, loading, error) {
@@ -2035,7 +2039,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <div class="empty reader-empty">
             <span class="icon icon-lg">${icon("inbox")}</span>
             <p class="empty-title">${esc(t("MESSAGE.SELECT_MESSAGE", "Wählen Sie eine Mail aus der Liste."))}</p>
-            <span class="empty-hint mono">J / K Navigieren · C Verfassen · ? Tastenkürzel</span>
+            <span class="empty-hint mono">${esc(t("MESSAGE.SHORTCUTS_HINT", "J / K Navigieren · C Verfassen · ? Tastenkürzel"))}</span>
           </div>`;
         return;
       }

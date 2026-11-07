@@ -4,6 +4,7 @@ namespace SnappyMail;
 
 abstract class L10n
 {
+	public const ALLOWED_LANGUAGES = ['de', 'en'];
 
 	/**
 	 * @staticvar array $aCache
@@ -17,18 +18,13 @@ abstract class L10n
 		}
 
 		$aList = array();
-		foreach (\glob(APP_VERSION_ROOT_PATH . 'app/localization/*', GLOB_ONLYDIR) as $dir) {
+		foreach (static::ALLOWED_LANGUAGES as $lang) {
+			$dir = APP_VERSION_ROOT_PATH . 'app/localization/' . $lang;
 			if (\is_file($dir . ($bAdmin ? '/admin' : '/user') . '.json')) {
-				$aList[] = \basename($dir);
+				$aList[] = $lang;
 			}
 		}
-/*
-		foreach (\glob(APP_PLUGINS_PATH . 'language-*', GLOB_ONLYDIR) as $dir) {
-			if (\is_file($dir . ($bAdmin ? '/admin' : '/user') . '.json')) {
-				$aList[] = \substr(\basename($dir), 9);
-			}
-		}
-*/
+
 		\sort($aList);
 		$aCache[$bAdmin] = $aList;
 		return $aCache[$bAdmin];
@@ -36,14 +32,12 @@ abstract class L10n
 
 	public static function validLanguage(string $sLanguage, bool $bAdmin) : ?string
 	{
-		$aLang = static::getLanguages($bAdmin);
-		$sLanguage = \strtr($sLanguage, '_', '-');
-		if (!\in_array($sLanguage, $aLang)) {
-			if (\str_contains($sLanguage, '-')) {
-				$sLanguage = \strtok($sLanguage, '-');
-			}
+		$sLanguage = \strtolower(\strtr($sLanguage, '_', '-'));
+		$prefix = \explode('-', $sLanguage)[0];
+		if (\in_array($prefix, static::ALLOWED_LANGUAGES, true)) {
+			return $prefix;
 		}
-		return \in_array($sLanguage, $aLang) ? $sLanguage : null;
+		return null;
 	}
 
 	/**
@@ -60,13 +54,6 @@ abstract class L10n
 			if (\is_file($file)) {
 				$aLang = \array_replace_recursive($aLang, \json_decode(\file_get_contents($file), true));
 			}
-/*			else {
-				$file = APP_PLUGINS_PATH."language-{$sLanguage}/{$sFile}.json";
-				if (\is_file($file)) {
-					$aLang = \array_replace_recursive($aLang, \json_decode(\file_get_contents($file), true));
-				}
-			}
-*/
 		}
 		return $aLang;
 	}
