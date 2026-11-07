@@ -22,11 +22,12 @@ export function srcdoc(body: string, kind: "html" | "plain", look: LetterLook): 
   const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:; media-src 'none'; form-action 'none'`;
   const followScheme = kind === "plain" || look.removeColors;
   const scheme = followScheme ? (look.dark ? "dark" : "light") : "light";
-  const paper = followScheme ? "background:Canvas;color:CanvasText" : "background:#fff;color:#1c1917";
+  const paper = followScheme ? "background:Canvas;color:CanvasText" : "background:var(--background);color:var(--foreground)";
   const swap = look.swap
     ? "html{filter:invert(1) hue-rotate(180deg)}img,[style*='background-image']{filter:invert(1) hue-rotate(180deg)}"
     : "";
   const base = [
+    ":root{--background:#ffffff;--foreground:rgb(28 25 23);}",
     `html{color-scheme:${scheme}}`,
     `body{margin:0;padding:16px;${paper};font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
     kind === "plain" ? "body{white-space:pre-wrap;max-width:72ch}" : "",
@@ -36,7 +37,7 @@ export function srcdoc(body: string, kind: "html" | "plain", look: LetterLook): 
     "a[href]{text-decoration:underline;text-underline-offset:2px}",
     "pre{white-space:pre-wrap}",
     "blockquote{margin:8px 0;padding-left:12px;border-left:2px solid color-mix(in srgb,currentColor 25%,transparent)}",
-    "details.sm-bq>summary{cursor:pointer;list-style:none;display:inline-block;padding:0 6px;border-radius:4px;font:12px/18px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;opacity:.7;background:color-mix(in srgb,currentColor 10%,transparent)}",
+    "details.sm-bq>summary{cursor:pointer;list-style:none;display:inline-block;padding:0 6px;border-radius:2px;font:12px/18px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;opacity:.7;background:color-mix(in srgb,currentColor 10%,transparent)}",
     "details.sm-bq>summary::-webkit-details-marker{display:none}",
     swap
   ].join("");
@@ -66,11 +67,16 @@ export function openLetterWindow(data: PrintData, print: boolean): boolean {
   win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(data.subject || "Mail")}</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'">
 <style>
-  body{margin:24px;font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:#1c1917;background:#fff}
-  header{border-bottom:1px solid #27272a33;padding-bottom:12px;margin-bottom:16px}
+  :root {
+    --background: #ffffff;
+    --foreground: #1c1917;
+    --border: #27272a33;
+  }
+  body{margin:24px;font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:var(--foreground);background:var(--background)}
+  header{border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px}
   h1{font-size:20px;margin:0 0 8px}
-  header p{margin:2px 0;color:color-mix(in srgb,#1c1917 68%,transparent)}
-  .files{margin-top:16px;border-top:1px solid #27272a33;padding-top:8px}
+  header p{margin:2px 0;color:color-mix(in srgb,var(--foreground) 68%,transparent)}
+  .files{margin-top:16px;border-top:1px solid var(--border);padding-top:8px}
   img{max-width:100%;height:auto}
   details.sm-bq>summary{display:none}
   details.sm-bq{display:block}

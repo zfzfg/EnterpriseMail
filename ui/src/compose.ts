@@ -391,6 +391,28 @@ export class Composer {
     this.root.addEventListener("dragover", (event) => { event.preventDefault(); this.root.classList.add("dragging"); });
     this.root.addEventListener("dragleave", (event) => { if (!this.root.contains(event.relatedTarget as Node)) this.root.classList.remove("dragging"); });
     this.root.addEventListener("drop", (event) => { event.preventDefault(); this.root.classList.remove("dragging"); this.addFiles([...(event.dataTransfer?.files || [])]); });
+
+    const updateEditorToolbar = () => {
+      if (this.mode !== "html" || this.root.hidden) return;
+      ["bold", "italic", "underline"].forEach((cmd) => {
+        const btn = this.root.querySelector(`[data-compose='${cmd}']`);
+        if (btn) {
+          const active = document.queryCommandState(cmd);
+          btn.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+      });
+      const quoteBtn = this.root.querySelector("[data-compose='quote']");
+      if (quoteBtn) {
+        const active = document.queryCommandValue("formatBlock")?.toLowerCase() === "blockquote";
+        quoteBtn.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+    };
+    document.addEventListener("selectionchange", () => {
+      if (!this.root.hidden && this.mode === "html") updateEditorToolbar();
+    });
+    this.editor.addEventListener("keyup", updateEditorToolbar);
+    this.editor.addEventListener("mouseup", updateEditorToolbar);
+
     this.closeDialog.querySelectorAll<HTMLButtonElement>("button[value]").forEach((button) => {
       button.addEventListener("click", () => this.closeDialog.close(button.value));
     });
@@ -542,7 +564,38 @@ export class Composer {
 
   private paintRecipients(field: RecipientField): void {
     const chips = field.box.querySelector(".recipient-chips") as HTMLElement;
-    chips.innerHTML = field.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc(value)}<button type="button" data-chip="${index}" aria-label="${esc(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.innerHTML = field.values.map((value, index) =>
+      `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" tabindex="0" data-chip-index="${index}" title="${esc(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc(value)}<button type="button" data-chip="${index}" aria-label="${esc(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`
+    ).join("");
+
+    chips.querySelectorAll<HTMLElement>(".recipient-chip").forEach((chip) => {
+      const idx = Number(chip.dataset.chipIndex);
+      chip.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft" && idx > 0) {
+          e.preventDefault();
+          (chips.children[idx - 1] as HTMLElement | undefined)?.focus({ preventScroll: true });
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          if (idx < field.values.length - 1) {
+            (chips.children[idx + 1] as HTMLElement | undefined)?.focus({ preventScroll: true });
+          } else {
+            field.input.focus({ preventScroll: true });
+          }
+        } else if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          field.values.splice(idx, 1);
+          this.paintRecipients(field);
+          this.changed();
+          const targetIdx = Math.max(0, idx - 1);
+          if (field.values.length) {
+            (chips.children[targetIdx] as HTMLElement | undefined)?.focus({ preventScroll: true });
+          } else {
+            field.input.focus({ preventScroll: true });
+          }
+        }
+      });
+    });
+
     chips.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.addEventListener("click", () => {
       field.values.splice(Number(button.dataset.chip), 1);
       this.paintRecipients(field);
@@ -595,6 +648,10 @@ export class Composer {
       event.preventDefault();
       if (event.key === "Enter" && field.active >= 0) field.input.value = field.suggestions[field.active];
       this.commitInput(field);
+    } else if (event.key === "ArrowLeft" && !field.input.value && field.values.length) {
+      event.preventDefault();
+      const chips = field.box.querySelector(".recipient-chips") as HTMLElement;
+      (chips.lastElementChild as HTMLElement | null)?.focus({ preventScroll: true });
     } else if (event.key === "Backspace" && !field.input.value && field.values.length) {
       field.values.pop();
       this.paintRecipients(field);

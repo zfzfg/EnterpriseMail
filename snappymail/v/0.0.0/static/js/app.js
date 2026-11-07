@@ -777,9 +777,10 @@ function srcdoc(body, kind, look) {
   const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:; media-src 'none'; form-action 'none'`;
   const followScheme = kind === "plain" || look.removeColors;
   const scheme = followScheme ? look.dark ? "dark" : "light" : "light";
-  const paper = followScheme ? "background:Canvas;color:CanvasText" : "background:#fff;color:#1c1917";
+  const paper = followScheme ? "background:Canvas;color:CanvasText" : "background:var(--background);color:var(--foreground)";
   const swap = look.swap ? "html{filter:invert(1) hue-rotate(180deg)}img,[style*='background-image']{filter:invert(1) hue-rotate(180deg)}" : "";
   const base = [
+    ":root{--background:#ffffff;--foreground:rgb(28 25 23);}",
     `html{color-scheme:${scheme}}`,
     `body{margin:0;padding:16px;${paper};font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
     kind === "plain" ? "body{white-space:pre-wrap;max-width:72ch}" : "",
@@ -789,7 +790,7 @@ function srcdoc(body, kind, look) {
     "a[href]{text-decoration:underline;text-underline-offset:2px}",
     "pre{white-space:pre-wrap}",
     "blockquote{margin:8px 0;padding-left:12px;border-left:2px solid color-mix(in srgb,currentColor 25%,transparent)}",
-    "details.sm-bq>summary{cursor:pointer;list-style:none;display:inline-block;padding:0 6px;border-radius:4px;font:12px/18px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;opacity:.7;background:color-mix(in srgb,currentColor 10%,transparent)}",
+    "details.sm-bq>summary{cursor:pointer;list-style:none;display:inline-block;padding:0 6px;border-radius:2px;font:12px/18px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;opacity:.7;background:color-mix(in srgb,currentColor 10%,transparent)}",
     "details.sm-bq>summary::-webkit-details-marker{display:none}",
     swap
   ].join("");
@@ -804,11 +805,16 @@ function openLetterWindow(data, print) {
   win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(data.subject || "Mail")}</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'">
 <style>
-  body{margin:24px;font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:#1c1917;background:#fff}
-  header{border-bottom:1px solid #27272a33;padding-bottom:12px;margin-bottom:16px}
+  :root {
+    --background: #ffffff;
+    --foreground: #1c1917;
+    --border: #27272a33;
+  }
+  body{margin:24px;font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:var(--foreground);background:var(--background)}
+  header{border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px}
   h1{font-size:20px;margin:0 0 8px}
-  header p{margin:2px 0;color:color-mix(in srgb,#1c1917 68%,transparent)}
-  .files{margin-top:16px;border-top:1px solid #27272a33;padding-top:8px}
+  header p{margin:2px 0;color:color-mix(in srgb,var(--foreground) 68%,transparent)}
+  .files{margin-top:16px;border-top:1px solid var(--border);padding-top:8px}
   img{max-width:100%;height:auto}
   details.sm-bq>summary{display:none}
   details.sm-bq{display:block}
@@ -3822,6 +3828,26 @@ var Composer = class {
       this.root.classList.remove("dragging");
       this.addFiles([...event.dataTransfer?.files || []]);
     });
+    const updateEditorToolbar = () => {
+      if (this.mode !== "html" || this.root.hidden) return;
+      ["bold", "italic", "underline"].forEach((cmd) => {
+        const btn = this.root.querySelector(`[data-compose='${cmd}']`);
+        if (btn) {
+          const active = document.queryCommandState(cmd);
+          btn.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+      });
+      const quoteBtn = this.root.querySelector("[data-compose='quote']");
+      if (quoteBtn) {
+        const active = document.queryCommandValue("formatBlock")?.toLowerCase() === "blockquote";
+        quoteBtn.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+    };
+    document.addEventListener("selectionchange", () => {
+      if (!this.root.hidden && this.mode === "html") updateEditorToolbar();
+    });
+    this.editor.addEventListener("keyup", updateEditorToolbar);
+    this.editor.addEventListener("mouseup", updateEditorToolbar);
     this.closeDialog.querySelectorAll("button[value]").forEach((button3) => {
       button3.addEventListener("click", () => this.closeDialog.close(button3.value));
     });
@@ -3989,7 +4015,36 @@ ${signature}`;
   }
   paintRecipients(field2) {
     const chips = field2.box.querySelector(".recipient-chips");
-    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc6(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc6(value)}<button type="button" data-chip="${index}" aria-label="${esc6(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.innerHTML = field2.values.map(
+      (value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" tabindex="0" data-chip-index="${index}" title="${esc6(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc6(value)}<button type="button" data-chip="${index}" aria-label="${esc6(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`
+    ).join("");
+    chips.querySelectorAll(".recipient-chip").forEach((chip) => {
+      const idx = Number(chip.dataset.chipIndex);
+      chip.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft" && idx > 0) {
+          e.preventDefault();
+          chips.children[idx - 1]?.focus({ preventScroll: true });
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          if (idx < field2.values.length - 1) {
+            chips.children[idx + 1]?.focus({ preventScroll: true });
+          } else {
+            field2.input.focus({ preventScroll: true });
+          }
+        } else if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          field2.values.splice(idx, 1);
+          this.paintRecipients(field2);
+          this.changed();
+          const targetIdx = Math.max(0, idx - 1);
+          if (field2.values.length) {
+            chips.children[targetIdx]?.focus({ preventScroll: true });
+          } else {
+            field2.input.focus({ preventScroll: true });
+          }
+        }
+      });
+    });
     chips.querySelectorAll("button").forEach((button3) => button3.addEventListener("click", () => {
       field2.values.splice(Number(button3.dataset.chip), 1);
       this.paintRecipients(field2);
@@ -4044,6 +4099,10 @@ ${signature}`;
       event.preventDefault();
       if (event.key === "Enter" && field2.active >= 0) field2.input.value = field2.suggestions[field2.active];
       this.commitInput(field2);
+    } else if (event.key === "ArrowLeft" && !field2.input.value && field2.values.length) {
+      event.preventDefault();
+      const chips = field2.box.querySelector(".recipient-chips");
+      chips.lastElementChild?.focus({ preventScroll: true });
     } else if (event.key === "Backspace" && !field2.input.value && field2.values.length) {
       field2.values.pop();
       this.paintRecipients(field2);
@@ -4449,11 +4508,13 @@ function renderReader(body, data, expanded) {
   const tags = data.keywords.map(
     (tag) => `<span class="tag">${icon("tag")}<span>${esc7(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc7(tag)}" aria-label="Schlagwort ${esc7(tag)} entfernen">${icon("close")}</button></span>`
   ).join("");
+  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted) ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc7(data.crypto.text || (data.crypto.state === "bad" ? "Signatur ung\xFCltig" : "Kryptografisch verifiziert"))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc7(data.crypto.state === "bad" ? "Ung\xFCltig" : "Verifiziert")}</span></span>` : "";
   const from = data.from[0];
   const summary = `
     <div class="head-line head-main">
       <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
       <span class="spacer"></span>
+      ${secBadge}
       <time class="quiet" title="${esc7(data.whenFull)}">${esc7(data.when)}</time>
       <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
@@ -4465,6 +4526,7 @@ function renderReader(body, data, expanded) {
       ${line("Bcc", data.bcc)}
       ${line("Antwort an", data.replyTo)}
       <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc7(data.whenFull)}</span></div>
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">Sicherheit</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
       ${data.size ? `<div class="head-line"><span class="head-key mono">Gr\xF6\xDFe</span><span class="head-val">${esc7(data.size)}</span></div>` : ""}
     </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
   const bars = [];
@@ -5166,11 +5228,18 @@ var Book = class {
     const canEdit = !lock;
     const back = this.hooks.wide() ? "" : `<button type="button" class="icon-btn" data-action="book" data-op="back-list" aria-label="${esc8(t("GLOBAL.BACK", "Zur\xFCck"))}">${icon("back")}</button>`;
     const heading = displayName2(card) || t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen");
+    const rawName = displayName2(card);
+    const initials = rawName ? rawName.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("") : "+";
     box.innerHTML = `
       <div class="book-card-head">
         ${back}
-        <h2 class="title title-md">${esc8(heading)}</h2>
-        ${lock ? `<p class="quiet">${esc8(t("CONTACTS.LABEL_READ_ONLY", "Schreibgesch\xFCtzt"))}</p>` : `<button type="button" class="ink-btn" data-action="book" data-op="save">${icon("save")}<span class="btn-label">${esc8(card.id ? t("GLOBAL.SAVE", "Speichern") : t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen"))}</span></button>`}
+        <span class="contact-avatar mono">${esc8(initials || "?")}</span>
+        <div class="book-card-title">
+          <h2 class="title title-md">${esc8(heading)}</h2>
+          ${lock ? `<p class="quiet">${esc8(t("CONTACTS.LABEL_READ_ONLY", "Schreibgesch\xFCtzt"))}</p>` : ""}
+        </div>
+        <span class="spacer"></span>
+        ${lock ? "" : `<button type="button" class="ink-btn" data-action="book" data-op="save">${icon("save")}<span class="btn-label">${esc8(card.id ? t("GLOBAL.SAVE", "Speichern") : t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen"))}</span></button>`}
       </div>
       <div class="book-tabs" role="tablist" aria-label="${esc8(t("GLOBAL.CONTACTS", "Kontakte"))}">
         ${this.tabButton("person", t("CONTACTS.TAB_CONTACT", "Kontakt"))}
@@ -5552,7 +5621,7 @@ function createView(root3, actions) {
             <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${withIcon("flag", t("SEARCH.FLAGGED", "Markiert"))}</button>
             <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${withIcon("attachment", t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
           </div>
-          <p class="list-status live" id="list-status"></p>
+          <p class="list-status live" id="list-status" aria-live="polite"></p>
           <div class="thread-bar" id="thread-bar" hidden>
             <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zur\xFCck zur Liste"))}</button>
             <span class="quiet" id="thread-label"></span>
@@ -5560,10 +5629,14 @@ function createView(root3, actions) {
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
             <p class="result-label mono" id="list-result" hidden></p>
-            <p class="empty" id="list-empty" hidden></p>
+            <div class="empty" id="list-empty" hidden>
+              <span class="icon icon-lg">${icon("inbox")}</span>
+              <p class="empty-title"></p>
+              <span class="empty-hint mono">R Aktualisieren \xB7 / Suchen</span>
+            </div>
             <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>Suche aufheben</button>
             <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>Weitere</span></button>
-            <p class="error" id="list-error" hidden></p>
+            <p class="error" id="list-error" role="alert" hidden></p>
           </div>
         </section>
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
@@ -5615,9 +5688,13 @@ function createView(root3, actions) {
             <button type="button" class="icon-btn wide-only" data-action="m-prev" data-one="1" aria-label="Vorige Mail (K)" title="Vorige Mail (K)" hidden>${icon("chevron-up")}</button>
             <button type="button" class="icon-btn wide-only" data-action="m-next" data-one="1" aria-label="N\xE4chste Mail (J)" title="N\xE4chste Mail (J)" hidden>${icon("chevron-down")}</button>
           </div>
-          <p class="quiet live" id="notice"></p>
+          <p class="quiet live" id="notice" aria-live="polite"></p>
           <div class="pane-body" id="reader-body">
-            <div class="empty reader-empty" id="reader-empty">${icon("inbox")}<p>W\xE4hlen Sie eine Mail.</p></div>
+            <div class="empty reader-empty" id="reader-empty">
+              <span class="icon icon-lg">${icon("inbox")}</span>
+              <p class="empty-title">${esc9(t("MESSAGE.SELECT_MESSAGE", "W\xE4hlen Sie eine Mail aus der Liste."))}</p>
+              <span class="empty-hint mono">J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel</span>
+            </div>
           </div>
         </section>
         <section class="book" id="book" hidden aria-label="${esc9(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
@@ -5983,6 +6060,17 @@ function createView(root3, actions) {
       shell?.style.setProperty("--list-w", `${next}px`);
       separator.setAttribute("aria-valuenow", String(next));
     };
+    const closeDialogWithAnimation = (dlg, returnValue) => {
+      if (!dlg || !dlg.open) return;
+      dlg.classList.add("closing");
+      window.setTimeout(() => {
+        dlg.classList.remove("closing");
+        try {
+          dlg.close(returnValue);
+        } catch {
+        }
+      }, 120);
+    };
     shell.addEventListener("click", (event) => {
       const target = event.target.closest("[data-action], [data-folder], [data-uid]");
       if (!target?.closest("#book-menu, #book-add, [data-op='more'], [data-op='add-menu']")) {
@@ -6205,7 +6293,7 @@ function createView(root3, actions) {
           await actions.settings?.(name, payload);
         })();
       } else if (action === "logout") actions.logout();
-      else if (action === "close-dialog") target.closest("dialog")?.close();
+      else if (action === "close-dialog") closeDialogWithAnimation(target.closest("dialog"));
       else if (action === "search") {
       } else if (action === "drop-criterion") {
         const input2 = shell?.querySelector("#search");
@@ -6693,17 +6781,31 @@ function createView(root3, actions) {
     separator.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       separator.setPointerCapture(event.pointerId);
+      separator.classList.add("dragging");
       const startX = event.clientX;
       const startW = list.getBoundingClientRect().width;
       const move = (ev) => setListWidth(startW + ev.clientX - startX);
       const up = () => {
+        separator.classList.remove("dragging");
         separator.removeEventListener("pointermove", move);
         separator.removeEventListener("pointerup", up);
+        separator.removeEventListener("pointercancel", up);
       };
       separator.addEventListener("pointermove", move);
       separator.addEventListener("pointerup", up);
+      separator.addEventListener("pointercancel", up);
     });
     separator.addEventListener("keydown", (event) => {
+      if (event.key === "Home") {
+        event.preventDefault();
+        setListWidth(288);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setListWidth(640);
+        return;
+      }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
       const delta = event.key === "ArrowRight" ? 16 : -16;
@@ -6712,7 +6814,66 @@ function createView(root3, actions) {
     const confirm = shell.querySelector("#confirm");
     confirm.addEventListener("click", (event) => {
       const button3 = event.target.closest("button");
-      if (button3) confirm.close(button3.value);
+      if (button3) closeDialogWithAnimation(confirm, button3.value);
+    });
+    shell.querySelectorAll("dialog").forEach((dlg) => {
+      dlg.addEventListener("cancel", (e) => {
+        e.preventDefault();
+        closeDialogWithAnimation(dlg);
+      });
+    });
+    let tooltipEl = null;
+    let tooltipTimer = 0;
+    let lastTooltipTime = 0;
+    const hideTooltip = () => {
+      window.clearTimeout(tooltipTimer);
+      if (tooltipEl) {
+        tooltipEl.remove();
+        tooltipEl = null;
+      }
+    };
+    const showTooltip = (target, text2) => {
+      hideTooltip();
+      const warm = Date.now() - lastTooltipTime < 400;
+      const delay = warm ? 0 : 250;
+      tooltipTimer = window.setTimeout(() => {
+        const rect = target.getBoundingClientRect();
+        tooltipEl = document.createElement("div");
+        tooltipEl.className = "sm-tooltip";
+        tooltipEl.textContent = text2;
+        document.body.append(tooltipEl);
+        const tipRect = tooltipEl.getBoundingClientRect();
+        let top = rect.bottom + 6;
+        if (top + tipRect.height > window.innerHeight - 8) {
+          top = Math.max(8, rect.top - tipRect.height - 6);
+        }
+        let left = rect.left + (rect.width - tipRect.width) / 2;
+        left = Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left));
+        tooltipEl.style.top = `${top}px`;
+        tooltipEl.style.left = `${left}px`;
+        lastTooltipTime = Date.now();
+      }, delay);
+    };
+    shell.addEventListener("pointerover", (event) => {
+      const target = event.target.closest("[data-tooltip], [title]");
+      if (!target || target.closest(".menu, .editor-tools, .sm-tooltip")) return;
+      const text2 = target.getAttribute("data-tooltip") || target.getAttribute("title");
+      if (!text2) return;
+      if (!target.hasAttribute("data-tooltip")) {
+        target.setAttribute("data-tooltip", text2);
+        target.removeAttribute("title");
+      }
+      showTooltip(target, text2);
+    });
+    shell.addEventListener("pointerout", (event) => {
+      const target = event.target.closest("[data-tooltip]");
+      if (target) {
+        hideTooltip();
+        lastTooltipTime = Date.now();
+      }
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideTooltip();
     });
   }
   function moveSelection(delta) {
@@ -7093,13 +7254,18 @@ function createView(root3, actions) {
               <span class="peek">${esc9(row2.preview)}</span>
             </button>
             ${thread}
-            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc9(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            <div class="msg-actions">
+              <button type="button" class="msg-action" data-action="m-delete" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
+              <button type="button" class="msg-action" data-action="m-archive" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? "Markierung entfernen" : "Markieren"}: ${esc9(subject)}" title="${row2.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            </div>
           </div>`;
         }).join("");
       }
       if (emptyEl) {
         emptyEl.hidden = !empty;
-        emptyEl.textContent = empty;
+        const titleEl = emptyEl.querySelector(".empty-title") || emptyEl;
+        titleEl.textContent = empty;
       }
       if (errorEl) {
         errorEl.hidden = !error;
@@ -7129,7 +7295,12 @@ function createView(root3, actions) {
       if (loading2) return say("quiet", loading2);
       if (error) return say("error", error);
       if (!data) {
-        body.innerHTML = `<div class="empty reader-empty">${icon("inbox")}<p>W\xE4hlen Sie eine Mail.</p></div>`;
+        body.innerHTML = `
+          <div class="empty reader-empty">
+            <span class="icon icon-lg">${icon("inbox")}</span>
+            <p class="empty-title">${esc9(t("MESSAGE.SELECT_MESSAGE", "W\xE4hlen Sie eine Mail aus der Liste."))}</p>
+            <span class="empty-hint mono">J / K Navigieren \xB7 C Verfassen \xB7 ? Tastenk\xFCrzel</span>
+          </div>`;
         return;
       }
       renderReader(body, data, expanded);
@@ -9064,8 +9235,8 @@ ${body}`
     if (this.checked.size) return [...this.checked];
     return this.selected ? [this.selected] : [];
   }
-  async archive() {
-    const uids = this.targets();
+  async archive(uid) {
+    const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     if (!this.archiveFolder) {
       this.view.notice("Kein Archiv-Ordner eingerichtet.");
@@ -9078,8 +9249,8 @@ ${body}`
     await this.moveTo(uids, this.archiveFolder, false, uids.length === 1 ? "Archiviert." : `${uids.length} Mails archiviert.`);
   }
   /** Löschen: in den Papierkorb verschieben. Im Papierkorb oder ohne Papierkorb endgültig, dann mit Bestätigung. */
-  async remove(forever = false) {
-    const uids = this.targets();
+  async remove(forever = false, uid) {
+    const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     const permanent = forever || !this.trashFolder || this.folder === this.trashFolder;
     if (permanent) {
@@ -9575,7 +9746,7 @@ ${body}`
         return;
       }
       case "archive":
-        await this.archive();
+        await this.archive(ref || void 0);
         return;
       case "spam":
       case "notspam": {
@@ -9586,8 +9757,11 @@ ${body}`
         await this.moveTo(uids, target, false, name === "spam" ? "Als Spam verschoben." : "In den Posteingang verschoben.");
         return;
       }
+      case "delete":
+        await this.remove(false, ref || void 0);
+        return;
       case "delete-forever":
-        await this.remove(true);
+        await this.remove(true, ref || void 0);
         return;
       case "restore": {
         const uids = this.targets();

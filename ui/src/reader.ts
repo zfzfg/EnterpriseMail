@@ -111,11 +111,15 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
   const tags = data.keywords.map((tag) =>
     `<span class="tag">${icon("tag")}<span>${esc(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc(tag)}" aria-label="Schlagwort ${esc(tag)} entfernen">${icon("close")}</button></span>`
   ).join("");
+  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted)
+    ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc(data.crypto.text || (data.crypto.state === "bad" ? "Signatur ungültig" : "Kryptografisch verifiziert"))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc(data.crypto.state === "bad" ? "Ungültig" : "Verifiziert")}</span></span>`
+    : "";
   const from = data.from[0];
   const summary = `
     <div class="head-line head-main">
       <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
       <span class="spacer"></span>
+      ${secBadge}
       <time class="quiet" title="${esc(data.whenFull)}">${esc(data.when)}</time>
       <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Details ausblenden" : "Details anzeigen"}" title="Details">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
@@ -127,6 +131,7 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
       ${line("Bcc", data.bcc)}
       ${line("Antwort an", data.replyTo)}
       <div class="head-line"><span class="head-key mono">Datum</span><span class="head-val">${esc(data.whenFull)}</span></div>
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">Sicherheit</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
       ${data.size ? `<div class="head-line"><span class="head-key mono">Größe</span><span class="head-val">${esc(data.size)}</span></div>` : ""}
     </div>` : (data.to.length ? `<div class="head-line quiet"><span class="head-key mono">An</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "");
 

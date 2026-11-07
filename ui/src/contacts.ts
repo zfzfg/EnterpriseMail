@@ -576,11 +576,20 @@ export class Book {
     const canEdit = !lock;
     const back = this.hooks.wide() ? "" : `<button type="button" class="icon-btn" data-action="book" data-op="back-list" aria-label="${esc(t("GLOBAL.BACK", "Zurück"))}">${icon("back")}</button>`;
     const heading = displayName(card) || t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen");
+    const rawName = displayName(card);
+    const initials = rawName
+      ? rawName.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("")
+      : "+";
     box.innerHTML = `
       <div class="book-card-head">
         ${back}
-        <h2 class="title title-md">${esc(heading)}</h2>
-        ${lock ? `<p class="quiet">${esc(t("CONTACTS.LABEL_READ_ONLY", "Schreibgeschützt"))}</p>` : `<button type="button" class="ink-btn" data-action="book" data-op="save">${icon("save")}<span class="btn-label">${esc(card.id ? t("GLOBAL.SAVE", "Speichern") : t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen"))}</span></button>`}
+        <span class="contact-avatar mono">${esc(initials || "?")}</span>
+        <div class="book-card-title">
+          <h2 class="title title-md">${esc(heading)}</h2>
+          ${lock ? `<p class="quiet">${esc(t("CONTACTS.LABEL_READ_ONLY", "Schreibgeschützt"))}</p>` : ""}
+        </div>
+        <span class="spacer"></span>
+        ${lock ? "" : `<button type="button" class="ink-btn" data-action="book" data-op="save">${icon("save")}<span class="btn-label">${esc(card.id ? t("GLOBAL.SAVE", "Speichern") : t("CONTACTS.BUTTON_CREATE_CONTACT", "Kontakt anlegen"))}</span></button>`}
       </div>
       <div class="book-tabs" role="tablist" aria-label="${esc(t("GLOBAL.CONTACTS", "Kontakte"))}">
         ${this.tabButton("person", t("CONTACTS.TAB_CONTACT", "Kontakt"))}

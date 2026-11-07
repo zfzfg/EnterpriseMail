@@ -1540,8 +1540,8 @@ class Session {
     return this.selected ? [this.selected] : [];
   }
 
-  private async archive(): Promise<void> {
-    const uids = this.targets();
+  private async archive(uid?: number): Promise<void> {
+    const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     if (!this.archiveFolder) {
       this.view.notice("Kein Archiv-Ordner eingerichtet.");
@@ -1555,8 +1555,8 @@ class Session {
   }
 
   /** Löschen: in den Papierkorb verschieben. Im Papierkorb oder ohne Papierkorb endgültig, dann mit Bestätigung. */
-  private async remove(forever = false): Promise<void> {
-    const uids = this.targets();
+  private async remove(forever = false, uid?: number): Promise<void> {
+    const uids = uid ? [uid] : this.targets();
     if (!uids.length) return;
     const permanent = forever || !this.trashFolder || this.folder === this.trashFolder;
     if (permanent) {
@@ -2053,7 +2053,7 @@ class Session {
         return;
       }
       case "archive":
-        await this.archive();
+        await this.archive(ref || undefined);
         return;
       case "spam":
       case "notspam": {
@@ -2064,8 +2064,11 @@ class Session {
         await this.moveTo(uids, target, false, name === "spam" ? "Als Spam verschoben." : "In den Posteingang verschoben.");
         return;
       }
+      case "delete":
+        await this.remove(false, ref || undefined);
+        return;
       case "delete-forever":
-        await this.remove(true);
+        await this.remove(true, ref || undefined);
         return;
       case "restore": {
         const uids = this.targets();

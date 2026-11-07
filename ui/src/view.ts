@@ -400,7 +400,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${withIcon("flag", t("SEARCH.FLAGGED", "Markiert"))}</button>
             <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${withIcon("attachment", t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
           </div>
-          <p class="list-status live" id="list-status"></p>
+          <p class="list-status live" id="list-status" aria-live="polite"></p>
           <div class="thread-bar" id="thread-bar" hidden>
             <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zurück zur Liste"))}</button>
             <span class="quiet" id="thread-label"></span>
@@ -408,10 +408,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
             <p class="result-label mono" id="list-result" hidden></p>
-            <p class="empty" id="list-empty" hidden></p>
+            <div class="empty" id="list-empty" hidden>
+              <span class="icon icon-lg">${icon("inbox")}</span>
+              <p class="empty-title"></p>
+              <span class="empty-hint mono">R Aktualisieren · / Suchen</span>
+            </div>
             <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>Suche aufheben</button>
             <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>Weitere</span></button>
-            <p class="error" id="list-error" hidden></p>
+            <p class="error" id="list-error" role="alert" hidden></p>
           </div>
         </section>
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
@@ -463,9 +467,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <button type="button" class="icon-btn wide-only" data-action="m-prev" data-one="1" aria-label="Vorige Mail (K)" title="Vorige Mail (K)" hidden>${icon("chevron-up")}</button>
             <button type="button" class="icon-btn wide-only" data-action="m-next" data-one="1" aria-label="Nächste Mail (J)" title="Nächste Mail (J)" hidden>${icon("chevron-down")}</button>
           </div>
-          <p class="quiet live" id="notice"></p>
+          <p class="quiet live" id="notice" aria-live="polite"></p>
           <div class="pane-body" id="reader-body">
-            <div class="empty reader-empty" id="reader-empty">${icon("inbox")}<p>Wählen Sie eine Mail.</p></div>
+            <div class="empty reader-empty" id="reader-empty">
+              <span class="icon icon-lg">${icon("inbox")}</span>
+              <p class="empty-title">${esc(t("MESSAGE.SELECT_MESSAGE", "Wählen Sie eine Mail aus der Liste."))}</p>
+              <span class="empty-hint mono">J / K Navigieren · C Verfassen · ? Tastenkürzel</span>
+            </div>
           </div>
         </section>
         <section class="book" id="book" hidden aria-label="${esc(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
@@ -843,6 +851,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       separator.setAttribute("aria-valuenow", String(next));
     };
 
+    const closeDialogWithAnimation = (dlg: HTMLDialogElement | null, returnValue?: string) => {
+      if (!dlg || !dlg.open) return;
+      dlg.classList.add("closing");
+      window.setTimeout(() => {
+        dlg.classList.remove("closing");
+        try { dlg.close(returnValue); } catch {}
+      }, 120);
+    };
+
     shell.addEventListener("click", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action], [data-folder], [data-uid]");
       if (!target?.closest("#book-menu, #book-add, [data-op='more'], [data-op='add-menu']")) {
@@ -1048,7 +1065,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           await actions.settings?.(name, payload);
         })();
       } else if (action === "logout") actions.logout();
-      else if (action === "close-dialog") (target.closest("dialog") as HTMLDialogElement | null)?.close();
+      else if (action === "close-dialog") closeDialogWithAnimation(target.closest("dialog"));
       else if (action === "search") { /* form */ }
       else if (action === "drop-criterion") {
         const input = shell?.querySelector("#search") as HTMLInputElement | null;
@@ -1487,17 +1504,31 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     separator.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       separator.setPointerCapture(event.pointerId);
+      separator.classList.add("dragging");
       const startX = event.clientX;
       const startW = list.getBoundingClientRect().width;
       const move = (ev: PointerEvent) => setListWidth(startW + ev.clientX - startX);
       const up = () => {
+        separator.classList.remove("dragging");
         separator.removeEventListener("pointermove", move);
         separator.removeEventListener("pointerup", up);
+        separator.removeEventListener("pointercancel", up);
       };
       separator.addEventListener("pointermove", move);
       separator.addEventListener("pointerup", up);
+      separator.addEventListener("pointercancel", up);
     });
     separator.addEventListener("keydown", (event) => {
+      if (event.key === "Home") {
+        event.preventDefault();
+        setListWidth(288);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setListWidth(640);
+        return;
+      }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
       const delta = event.key === "ArrowRight" ? 16 : -16;
@@ -1507,7 +1538,74 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     const confirm = shell.querySelector("#confirm") as HTMLDialogElement;
     confirm.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest("button");
-      if (button) confirm.close(button.value);
+      if (button) closeDialogWithAnimation(confirm, button.value);
+    });
+
+    shell.querySelectorAll("dialog").forEach((dlg) => {
+      dlg.addEventListener("cancel", (e) => {
+        e.preventDefault();
+        closeDialogWithAnimation(dlg);
+      });
+    });
+
+    // Emil Kowalski instant micro-tooltips with skip-delay choreography
+    let tooltipEl: HTMLElement | null = null;
+    let tooltipTimer = 0;
+    let lastTooltipTime = 0;
+
+    const hideTooltip = () => {
+      window.clearTimeout(tooltipTimer);
+      if (tooltipEl) {
+        tooltipEl.remove();
+        tooltipEl = null;
+      }
+    };
+
+    const showTooltip = (target: HTMLElement, text: string) => {
+      hideTooltip();
+      const warm = Date.now() - lastTooltipTime < 400;
+      const delay = warm ? 0 : 250;
+      tooltipTimer = window.setTimeout(() => {
+        const rect = target.getBoundingClientRect();
+        tooltipEl = document.createElement("div");
+        tooltipEl.className = "sm-tooltip";
+        tooltipEl.textContent = text;
+        document.body.append(tooltipEl);
+        const tipRect = tooltipEl.getBoundingClientRect();
+        let top = rect.bottom + 6;
+        if (top + tipRect.height > window.innerHeight - 8) {
+          top = Math.max(8, rect.top - tipRect.height - 6);
+        }
+        let left = rect.left + (rect.width - tipRect.width) / 2;
+        left = Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, left));
+        tooltipEl.style.top = `${top}px`;
+        tooltipEl.style.left = `${left}px`;
+        lastTooltipTime = Date.now();
+      }, delay);
+    };
+
+    shell.addEventListener("pointerover", (event) => {
+      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tooltip], [title]");
+      if (!target || target.closest(".menu, .editor-tools, .sm-tooltip")) return;
+      const text = target.getAttribute("data-tooltip") || target.getAttribute("title");
+      if (!text) return;
+      if (!target.hasAttribute("data-tooltip")) {
+        target.setAttribute("data-tooltip", text);
+        target.removeAttribute("title");
+      }
+      showTooltip(target, text);
+    });
+
+    shell.addEventListener("pointerout", (event) => {
+      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tooltip]");
+      if (target) {
+        hideTooltip();
+        lastTooltipTime = Date.now();
+      }
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideTooltip();
     });
   }
 
@@ -1892,13 +1990,18 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <span class="peek">${esc(row.preview)}</span>
             </button>
             ${thread}
-            <button type="button" class="msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? "Markierung entfernen" : "Markieren"}: ${esc(subject)}" title="${row.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+            <div class="msg-actions">
+              <button type="button" class="msg-action" data-action="m-delete" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}: ${esc(subject)}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
+              <button type="button" class="msg-action" data-action="m-archive" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc(subject)}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? "Markierung entfernen" : "Markieren"}: ${esc(subject)}" title="${row.flagged ? "Markierung entfernen" : "Markieren"}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+            </div>
           </div>`;
         }).join("");
       }
       if (emptyEl) {
         emptyEl.hidden = !empty;
-        emptyEl.textContent = empty;
+        const titleEl = emptyEl.querySelector(".empty-title") || emptyEl;
+        titleEl.textContent = empty;
       }
       if (errorEl) {
         errorEl.hidden = !error;
@@ -1928,7 +2031,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (loading) return say("quiet", loading);
       if (error) return say("error", error);
       if (!data) {
-        body.innerHTML = `<div class="empty reader-empty">${icon("inbox")}<p>Wählen Sie eine Mail.</p></div>`;
+        body.innerHTML = `
+          <div class="empty reader-empty">
+            <span class="icon icon-lg">${icon("inbox")}</span>
+            <p class="empty-title">${esc(t("MESSAGE.SELECT_MESSAGE", "Wählen Sie eine Mail aus der Liste."))}</p>
+            <span class="empty-hint mono">J / K Navigieren · C Verfassen · ? Tastenkürzel</span>
+          </div>`;
         return;
       }
       renderReader(body, data, expanded);
