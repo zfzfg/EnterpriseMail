@@ -203,22 +203,24 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
     </section>` : "";
 
   body.innerHTML = `
+    <div class="read-measure">
     <header class="letter-head">
-      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
       <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
     </header>
     ${bars.join("")}
     ${cal}
-    ${files}`;
+    ${files}
+    </div>`;
   const frame = document.createElement("iframe");
   frame.className = "letter";
   frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
   frame.title = "Brief";
   frame.srcdoc = data.srcdoc;
-  body.append(frame);
+  body.querySelector(".read-measure")?.append(frame);
 }
 
 export function renderBulk(body: HTMLElement, data: BulkData): void {

@@ -781,8 +781,8 @@ function srcdoc(body, kind, look) {
   const swap = look.swap ? "html{filter:invert(1) hue-rotate(180deg)}img,[style*='background-image']{filter:invert(1) hue-rotate(180deg)}" : "";
   const base = [
     `html{color-scheme:${scheme}}`,
-    `body{margin:0;padding:16px;${paper};font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
-    kind === "plain" ? "body{white-space:pre-wrap}" : "",
+    `body{margin:0;padding:16px;${paper};font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
+    kind === "plain" ? "body{white-space:pre-wrap;max-width:72ch}" : "",
     "img{max-width:100%;height:auto}",
     "table{max-width:100%}",
     "a{color:inherit}",
@@ -929,6 +929,7 @@ var bodies = {
   "folder-open": '<rect x="1.5" y="4.5" width="12" height="3"/><rect x="1.5" y="7.5" width="3" height="3"/><rect x="13.5" y="7.5" width="12" height="3"/><rect x="1.5" y="10.5" width="3" height="3"/><rect x="22.5" y="10.5" width="3" height="3"/><rect x="1.5" y="13.5" width="3" height="3"/><rect x="10.5" y="13.5" width="18" height="3"/><rect x="1.5" y="16.5" width="3" height="3"/><rect x="7.5" y="16.5" width="3" height="3"/><rect x="25.5" y="16.5" width="3" height="3"/><rect x="1.5" y="19.5" width="6" height="3"/><rect x="22.5" y="19.5" width="3" height="3"/><rect x="1.5" y="22.5" width="21" height="3"/>',
   "folder-plus": '<rect x="1.5" y="4.5" width="12" height="3"/><rect x="1.5" y="7.5" width="3" height="3"/><rect x="13.5" y="7.5" width="15" height="3"/><rect x="1.5" y="10.5" width="3" height="3"/><rect x="13.5" y="10.5" width="3" height="3"/><rect x="25.5" y="10.5" width="3" height="3"/><rect x="1.5" y="13.5" width="3" height="3"/><rect x="10.5" y="13.5" width="9" height="3"/><rect x="25.5" y="13.5" width="3" height="3"/><rect x="1.5" y="16.5" width="3" height="3"/><rect x="13.5" y="16.5" width="3" height="3"/><rect x="25.5" y="16.5" width="3" height="3"/><rect x="1.5" y="19.5" width="3" height="3"/><rect x="25.5" y="19.5" width="3" height="3"/><rect x="1.5" y="22.5" width="27" height="3"/>',
   "folder-shared": '<rect x="1.5" y="4.5" width="12" height="3"/><rect x="1.5" y="7.5" width="3" height="3"/><rect x="13.5" y="7.5" width="15" height="3"/><rect x="1.5" y="10.5" width="3" height="3"/><rect x="25.5" y="10.5" width="3" height="3"/><rect x="1.5" y="13.5" width="3" height="3"/><rect x="7.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="25.5" y="13.5" width="3" height="3"/><rect x="1.5" y="16.5" width="3" height="3"/><rect x="10.5" y="16.5" width="9" height="3"/><rect x="25.5" y="16.5" width="3" height="3"/><rect x="1.5" y="19.5" width="3" height="3"/><rect x="25.5" y="19.5" width="3" height="3"/><rect x="1.5" y="22.5" width="27" height="3"/>',
+  "format-clear": '<rect x="16.5" y="1.5" width="6" height="3"/><rect x="10.5" y="4.5" width="6" height="3"/><rect x="7.5" y="7.5" width="6" height="3"/><rect x="4.5" y="10.5" width="6" height="3"/><rect x="1.5" y="13.5" width="6" height="3"/><rect x="4.5" y="16.5" width="18" height="3"/>',
   "forward": '<rect x="16.5" y="4.5" width="3" height="3"/><rect x="19.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="18" height="3"/><rect x="4.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="4.5" y="16.5" width="3" height="3"/><rect x="16.5" y="16.5" width="3" height="3"/><rect x="4.5" y="19.5" width="3" height="3"/><rect x="4.5" y="22.5" width="3" height="3"/>',
   "forward-attachment": '<rect x="16.5" y="1.5" width="3" height="3"/><rect x="19.5" y="4.5" width="3" height="3"/><rect x="1.5" y="7.5" width="24" height="3"/><rect x="19.5" y="10.5" width="3" height="3"/><rect x="16.5" y="13.5" width="3" height="3"/><rect x="1.5" y="16.5" width="15" height="3"/><rect x="1.5" y="19.5" width="3" height="3"/><rect x="13.5" y="19.5" width="3" height="3"/><rect x="1.5" y="22.5" width="3" height="3"/><rect x="13.5" y="22.5" width="3" height="3"/><rect x="1.5" y="25.5" width="15" height="3"/>',
   "forwarded": '<rect x="16.5" y="4.5" width="3" height="3"/><rect x="19.5" y="7.5" width="3" height="3"/><rect x="7.5" y="10.5" width="18" height="3"/><rect x="4.5" y="13.5" width="3" height="3"/><rect x="19.5" y="13.5" width="3" height="3"/><rect x="4.5" y="16.5" width="3" height="3"/><rect x="16.5" y="16.5" width="3" height="3"/><rect x="4.5" y="19.5" width="3" height="3"/><rect x="4.5" y="22.5" width="3" height="3"/>',
@@ -3656,7 +3657,7 @@ var Composer = class {
             <div class="editor-tools" role="toolbar" aria-label="${esc6(t("COMPOSE.FORMAT_TEXT", "Text formatieren"))}">
               ${button2("bold", "bold", t("COMPOSE.BOLD", "Fett"))}${button2("italic", "italic", t("COMPOSE.ITALIC", "Kursiv"))}${button2("underline", "underline", t("COMPOSE.UNDERLINE", "Unterstrichen"))}
               <span class="tool-separator"></span>${button2("insertUnorderedList", "list-bullet", t("COMPOSE.BULLETED_LIST", "Aufz\xE4hlung"))}${button2("insertOrderedList", "list-number", t("COMPOSE.NUMBERED_LIST", "Nummerierte Liste"))}
-              ${button2("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button2("link", "link", t("COMPOSE.INSERT_LINK", "Link einf\xFCgen"))}${button2("removeFormat", "close", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
+              ${button2("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button2("link", "link", t("COMPOSE.INSERT_LINK", "Link einf\xFCgen"))}${button2("removeFormat", "format-clear", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
               <span class="spacer"></span><button type="button" class="seg" data-compose="mode" aria-pressed="false">HTML</button>
             </div>
             <div class="compose-html" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc6(t("GLOBAL.TEXT", "Nachricht"))}" data-placeholder="${esc6(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben \u2026"))}"></div>
@@ -3714,6 +3715,7 @@ var Composer = class {
   autosaveTimer = 0;
   saving = false;
   sending = false;
+  instantNext = false;
   minimized = false;
   fileInput;
   closeDialog;
@@ -3842,7 +3844,13 @@ var Composer = class {
       }
     });
   }
+  /** Nächstes Öffnen ohne Einfahrbewegung (Tastatur). */
+  armInstant() {
+    this.instantNext = true;
+  }
   open(seed) {
+    const instant = Boolean(seed.instant || this.instantNext);
+    this.instantNext = false;
     this.seed = seed;
     this.draftRef = seed.draftRef || null;
     this.files = [];
@@ -3872,12 +3880,18 @@ var Composer = class {
     this.setStatus("");
     this.setError("");
     this.root.hidden = false;
-    this.root.dataset.open = "false";
     this.minimized = false;
     (this.root.parentElement?.querySelector(".compose-dock")).hidden = true;
-    requestAnimationFrame(() => {
+    if (instant || matchMedia("(max-width: 799px)").matches) {
+      this.root.dataset.instant = "1";
       this.root.dataset.open = "true";
-    });
+    } else {
+      delete this.root.dataset.instant;
+      this.root.dataset.open = "false";
+      requestAnimationFrame(() => {
+        this.root.dataset.open = "true";
+      });
+    }
     this.callbacks.mobile(true);
     this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const target = seed.to ? seed.subject ? this.mode === "html" ? this.editor : this.plain : this.form.elements.namedItem("subject") : this.fields.get("to")?.input;
@@ -3975,7 +3989,7 @@ ${signature}`;
   }
   paintRecipients(field2) {
     const chips = field2.box.querySelector(".recipient-chips");
-    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc6(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${esc6(value)}<button type="button" data-chip="${index}" aria-label="${esc6(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.innerHTML = field2.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc6(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc6(value)}<button type="button" data-chip="${index}" aria-label="${esc6(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
     chips.querySelectorAll("button").forEach((button3) => button3.addEventListener("click", () => {
       field2.values.splice(Number(button3.dataset.chip), 1);
       this.paintRecipients(field2);
@@ -4342,8 +4356,20 @@ ${signature}`;
   finishClose(discard) {
     window.clearTimeout(this.autosaveTimer);
     this.files.forEach((file) => file.task?.abort());
-    this.root.hidden = true;
+    delete this.root.dataset.instant;
     this.root.dataset.open = "false";
+    const hide = () => {
+      this.root.hidden = true;
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || matchMedia("(max-width: 799px)").matches) hide();
+    else {
+      const timer = window.setTimeout(hide, 200);
+      this.root.addEventListener("transitionend", (event) => {
+        if (event.target !== this.root || event.propertyName !== "transform") return;
+        window.clearTimeout(timer);
+        hide();
+      }, { once: true });
+    }
     (this.root.parentElement?.querySelector(".compose-dock")).hidden = true;
     this.minimized = false;
     this.callbacks.mobile(false);
@@ -4515,22 +4541,24 @@ function renderReader(body, data, expanded) {
       </ul>
     </section>` : "";
   body.innerHTML = `
+    <div class="read-measure">
     <header class="letter-head">
-      <h2 class="title title-md">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc7(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc7(data.subject || "(ohne Betreff)")}</h2>
       ${summary}
       ${details}
       <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">Schlagwort</span></button></div>
     </header>
     ${bars.join("")}
     ${cal}
-    ${files}`;
+    ${files}
+    </div>`;
   const frame = document.createElement("iframe");
   frame.className = "letter";
   frame.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
   frame.title = "Brief";
   frame.srcdoc = data.srcdoc;
-  body.append(frame);
+  body.querySelector(".read-measure")?.append(frame);
 }
 function renderBulk(body, data) {
   const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc7(label2)}</span></button>`;
@@ -5493,23 +5521,30 @@ function createView(root3, actions) {
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
-            <input class="search" id="search" type="search" placeholder="" autocomplete="off">
+            <div class="search-field">
+              ${icon("search")}
+              <input class="search" id="search" type="search" placeholder="" autocomplete="off" aria-keyshortcuts="Escape">
+              <button type="button" class="icon-btn search-clear" data-action="clear-search" data-clear="field" hidden aria-label="Suche l\xF6schen" title="Suche l\xF6schen">${icon("close")}</button>
+            </div>
             <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc9(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc9(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
+          <div class="criteria" id="criteria" hidden></div>
           <div class="quick" role="group" aria-label="${esc9(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
-            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc9(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc9(t("SEARCH.FLAGGED", "Markiert"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc9(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${withIcon("mark-unread", t("SEARCH.UNSEEN", "Ungelesen"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${withIcon("flag", t("SEARCH.FLAGGED", "Markiert"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${withIcon("attachment", t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
           </div>
+          <p class="list-status live" id="list-status"></p>
           <div class="thread-bar" id="thread-bar" hidden>
             <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zur\xFCck zur Liste"))}</button>
             <span class="quiet" id="thread-label"></span>
           </div>
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
+            <p class="result-label mono" id="list-result" hidden></p>
             <p class="empty" id="list-empty" hidden></p>
-            <button type="button" class="text-btn" data-action="clear-search" hidden>Suche aufheben</button>
-            <button type="button" class="text-btn" data-action="more" hidden>Weitere</button>
+            <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>Suche aufheben</button>
+            <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>Weitere</span></button>
             <p class="error" id="list-error" hidden></p>
           </div>
         </section>
@@ -5519,12 +5554,13 @@ function createView(root3, actions) {
             <button type="button" class="text-btn bar-btn" data-action="back" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc9(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn reply-main" data-action="reply" title="${esc9(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="reply-all" title="${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+            <span class="bar-sep" aria-hidden="true"></span>
+            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
@@ -5541,16 +5577,20 @@ function createView(root3, actions) {
                 <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>Entwurf bearbeiten</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>Als neu bearbeiten</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>Als Anhang weiterleiten</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>Kopieren nach \u2026</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>Schlagwort hinzuf\xFCgen</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>Nur Text anzeigen</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>Farben umkehren</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>Vom Verteiler abmelden</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>Drucken</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>In neuem Fenster</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>Vollbild</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>Quelltext anzeigen</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>Als .eml laden</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>Endg\xFCltig l\xF6schen</span></button>
               </div>
             </div>
@@ -5559,7 +5599,7 @@ function createView(root3, actions) {
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
-            <p class="empty" id="reader-empty">W\xE4hlen Sie eine Mail.</p>
+            <div class="empty reader-empty" id="reader-empty">${icon("inbox")}<p>W\xE4hlen Sie eine Mail.</p></div>
           </div>
         </section>
         <section class="book" id="book" hidden aria-label="${esc9(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
@@ -5722,7 +5762,7 @@ function createView(root3, actions) {
     if (!next) return;
     shell = next;
     const account = next.querySelector(".account-btn");
-    account.textContent = email;
+    account.innerHTML = `<span class="account-mail">${esc9(email)}</span>${icon("chevron-down")}`;
     composer = new Composer(next.querySelector("#compose-host"), composePrefs, {
       send: (values2) => actions.send(values2),
       save: (values2) => actions.saveCompose(values2),
@@ -5877,20 +5917,34 @@ function createView(root3, actions) {
   function openLayer(layer, from) {
     opener = from;
     layer.hidden = false;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      layer.dataset.instant = "1";
+      layer.dataset.open = "true";
+      return;
+    }
+    delete layer.dataset.instant;
     layer.dataset.open = "false";
     requestAnimationFrame(() => {
       layer.dataset.open = "true";
     });
   }
   function closeLayer(layer) {
+    const back = opener;
+    opener = null;
+    back?.focus({ preventScroll: true });
     layer.dataset.open = "false";
-    const finish = () => {
+    let settled = false;
+    const finish = (event) => {
+      if (settled) return;
+      if (event && (event.target !== layer || event.propertyName !== "transform")) return;
+      settled = true;
+      window.clearTimeout(timer);
+      layer.removeEventListener("transitionend", finish);
       layer.hidden = true;
     };
+    const timer = window.setTimeout(() => finish(), 320);
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
-    else layer.addEventListener("transitionend", finish, { once: true });
-    opener?.focus({ preventScroll: true });
-    opener = null;
+    else layer.addEventListener("transitionend", finish);
   }
   function toggleFullscreen(force) {
     if (!shell) return;
@@ -6135,6 +6189,13 @@ function createView(root3, actions) {
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") target.closest("dialog")?.close();
       else if (action === "search") {
+      } else if (action === "drop-criterion") {
+        const input2 = shell?.querySelector("#search");
+        if (!input2) return;
+        const params = new URLSearchParams(input2.value);
+        params.delete(target.dataset.key || "");
+        input2.value = params.toString();
+        actions.search(input2.value);
       } else if (action === "clear-search") {
         (shell?.querySelector("#search")).value = "";
         actions.clearSearch();
@@ -6484,6 +6545,15 @@ function createView(root3, actions) {
           opener2?.focus({ preventScroll: true });
           return;
         }
+        const searchField = document.activeElement;
+        if (searchField instanceof HTMLInputElement && searchField.id === "search" && searchField.value) {
+          event.preventDefault();
+          searchField.value = "";
+          const status = shell.querySelector("#list-status");
+          if (status) status.textContent = "Suche gel\xF6scht";
+          actions.clearSearch();
+          return;
+        }
         if (shell.dataset.surface === "contacts") {
           if (!wide() && shell.dataset.pane === "reader") {
             pane("list");
@@ -6525,15 +6595,19 @@ function createView(root3, actions) {
       else if (event.key === "*") actions.act("select-all", {});
       else if (key === "c") {
         event.preventDefault();
+        composer?.armInstant();
         actions.compose();
       } else if (key === "r") {
         event.preventDefault();
+        composer?.armInstant();
         actions.reply(false);
       } else if (key === "a") {
         event.preventDefault();
+        composer?.armInstant();
         actions.reply(true);
       } else if (key === "f") {
         event.preventDefault();
+        composer?.armInstant();
         actions.forward();
       } else if (key === "e") actions.archive();
       else if (key === "i") actions.act("flag", {});
@@ -6860,7 +6934,9 @@ function createView(root3, actions) {
       shell.querySelector("[data-action='f-create']").hidden = !data.canCreate;
       shell.querySelector("#quota").innerHTML = renderQuota(data.quota);
       if (data.currentName) {
-        shell.querySelector("#folder-title").textContent = data.currentName;
+        const title = shell.querySelector("#folder-title");
+        title.textContent = data.currentName;
+        title.title = data.currentName;
         shell.querySelector("#reader-place").textContent = data.currentName;
         const search = shell.querySelector("#search");
         if (document.activeElement !== search) search.placeholder = `In ${data.currentName} suchen`;
@@ -6896,6 +6972,31 @@ function createView(root3, actions) {
     setSearch(query, quick) {
       const input2 = shell?.querySelector("#search");
       if (input2 && input2.value.trim() !== query) input2.value = query;
+      const fieldClear = shell?.querySelector(".search-clear");
+      if (fieldClear) fieldClear.hidden = !input2?.value.trim();
+      const names = {
+        from: "Von",
+        to: "An",
+        subject: "Betreff",
+        text: "Text",
+        body: "Text",
+        since: "Seit",
+        before: "Bis",
+        attachment: "Mit Anhang",
+        unseen: "Ungelesen",
+        flagged: "Markiert"
+      };
+      const box = shell?.querySelector("#criteria");
+      if (box) {
+        const chips = query.includes("=") ? [...new URLSearchParams(query).entries()].flatMap(([key, value]) => {
+          const name = names[key];
+          if (!name) return [];
+          const label2 = value ? `${name}: ${value}` : name;
+          return [`<button type="button" class="chip criterion" data-action="drop-criterion" data-key="${esc9(key)}" aria-label="${esc9(label2)} entfernen">${icon("filter")}<span>${esc9(label2)}</span>${icon("close")}</button>`];
+        }) : [];
+        box.hidden = chips.length === 0;
+        box.innerHTML = chips.join("");
+      }
       shell?.querySelectorAll("[data-action='quick']").forEach((button3) => {
         button3.setAttribute("aria-pressed", quick.has(button3.dataset.flag) ? "true" : "false");
       });
@@ -6942,7 +7043,8 @@ function createView(root3, actions) {
       const emptyEl = shell?.querySelector("#list-empty");
       const errorEl = shell?.querySelector("#list-error");
       const moreBtn = shell?.querySelector("[data-action='more']");
-      const clearBtn = shell?.querySelector("[data-action='clear-search']");
+      const clearBtn = shell?.querySelector("[data-clear='list']");
+      const result = shell?.querySelector("#list-result");
       if (box) {
         box.innerHTML = rows2.map((row2) => {
           const subject = row2.subject || "(ohne Betreff)";
@@ -6950,7 +7052,8 @@ function createView(root3, actions) {
           const threadText = row2.threadCount ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung \xF6ffnen")}: ${row2.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row2.threadUnseen ? `, ${row2.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : "";
           const thread = row2.threadCount ? `<button type="button" class="msg-thread${row2.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row2.uid}" aria-label="${esc9(`${threadText} \u2013 ${subject}`)}" title="${esc9(threadText)} (T)">${icon("thread")}<span>${row2.threadCount}</span></button>` : "";
           return `${group2}
-          <div class="msg-row${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}">
+          <div class="msg-row${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}${row2.unseen ? " unseen" : ""}">
+            <span class="unread-slot" aria-hidden="true">${row2.unseen ? `<span class="unread-mark"></span>` : ""}</span>
             <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc9(subject)}">
             <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
               <span class="who">${esc9(row2.who)}</span>
@@ -6973,6 +7076,10 @@ function createView(root3, actions) {
       }
       if (moreBtn) moreBtn.hidden = !more;
       if (clearBtn) clearBtn.hidden = !searching;
+      if (result) {
+        result.hidden = !searching;
+        result.textContent = searching ? rows2.length ? `Ergebnisse \xB7 ${rows2.length}` : "Keine Treffer" : "";
+      }
     },
     setReader(data, loading2, error) {
       if (shell) shell.dataset.reading = data ? "1" : "0";
@@ -6990,7 +7097,10 @@ function createView(root3, actions) {
       };
       if (loading2) return say("quiet", loading2);
       if (error) return say("error", error);
-      if (!data) return say("empty", "W\xE4hlen Sie eine Mail.");
+      if (!data) {
+        body.innerHTML = `<div class="empty reader-empty">${icon("inbox")}<p>W\xE4hlen Sie eine Mail.</p></div>`;
+        return;
+      }
       renderReader(body, data, expanded);
       body.scrollTop = 0;
     },
@@ -7008,6 +7118,8 @@ function createView(root3, actions) {
       if (!button3) return;
       button3.disabled = busy;
       button3.innerHTML = icon(busy ? "loading" : "refresh");
+      const status = shell?.querySelector("#list-status");
+      if (status) status.textContent = busy ? "Wird aktualisiert \u2026" : "";
     },
     setAccounts(items) {
       const box = shell?.querySelector("#account-list");
@@ -8515,7 +8627,7 @@ var Session = class {
     });
   }
   paintList() {
-    const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Mails f\xFCr diese Suche." : "Dieser Ordner ist leer.";
+    const empty = this.visible().length ? "" : this.category !== "all" ? "Keine Mails f\xFCr diesen Filter." : this.search ? "Keine Treffer. Suche anpassen oder Filter entfernen." : "Dieser Ordner ist leer.";
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
   async setSearch(query) {

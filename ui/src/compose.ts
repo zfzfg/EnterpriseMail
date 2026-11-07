@@ -53,6 +53,8 @@ export interface ComposeSeed {
   sourceFolder?: string;
   draftRef?: { folder: string; uid: number } | null;
   files?: ComposeFile[];
+  /** Tastaturstart: ohne Einfahrbewegung, Fokus sofort. */
+  instant?: boolean;
 }
 
 export interface ComposeValues extends ComposeSeed {
@@ -239,6 +241,7 @@ export class Composer {
   private autosaveTimer = 0;
   private saving = false;
   private sending = false;
+  private instantNext = false;
   private minimized = false;
   private fileInput: HTMLInputElement;
   private closeDialog: HTMLDialogElement;
@@ -269,7 +272,7 @@ export class Composer {
             <div class="editor-tools" role="toolbar" aria-label="${esc(t("COMPOSE.FORMAT_TEXT", "Text formatieren"))}">
               ${button("bold", "bold", t("COMPOSE.BOLD", "Fett"))}${button("italic", "italic", t("COMPOSE.ITALIC", "Kursiv"))}${button("underline", "underline", t("COMPOSE.UNDERLINE", "Unterstrichen"))}
               <span class="tool-separator"></span>${button("insertUnorderedList", "list-bullet", t("COMPOSE.BULLETED_LIST", "Aufzählung"))}${button("insertOrderedList", "list-number", t("COMPOSE.NUMBERED_LIST", "Nummerierte Liste"))}
-              ${button("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button("link", "link", t("COMPOSE.INSERT_LINK", "Link einfügen"))}${button("removeFormat", "close", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
+              ${button("quote", "quote", t("COMPOSE.QUOTE", "Zitat"))}${button("link", "link", t("COMPOSE.INSERT_LINK", "Link einfügen"))}${button("removeFormat", "format-clear", t("COMPOSE.REMOVE_FORMAT", "Format entfernen"))}
               <span class="spacer"></span><button type="button" class="seg" data-compose="mode" aria-pressed="false">HTML</button>
             </div>
             <div class="compose-html" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(t("GLOBAL.TEXT", "Nachricht"))}" data-placeholder="${esc(t("COMPOSE.BODY_PLACEHOLDER", "Nachricht schreiben …"))}"></div>
@@ -404,7 +407,12 @@ export class Composer {
     });
   }
 
+  /** Nächstes Öffnen ohne Einfahrbewegung (Tastatur). */
+  armInstant(): void { this.instantNext = true; }
+
   open(seed: ComposeSeed): void {
+    const instant = Boolean(seed.instant || this.instantNext);
+    this.instantNext = false;
     this.seed = seed;
     this.draftRef = seed.draftRef || null;
     this.files = [];
@@ -432,10 +440,16 @@ export class Composer {
     this.setStatus("");
     this.setError("");
     this.root.hidden = false;
-    this.root.dataset.open = "false";
     this.minimized = false;
     (this.root.parentElement?.querySelector(".compose-dock") as HTMLElement).hidden = true;
-    requestAnimationFrame(() => { this.root.dataset.open = "true"; });
+    if (instant || matchMedia("(max-width: 799px)").matches) {
+      this.root.dataset.instant = "1";
+      this.root.dataset.open = "true";
+    } else {
+      delete this.root.dataset.instant;
+      this.root.dataset.open = "false";
+      requestAnimationFrame(() => { this.root.dataset.open = "true"; });
+    }
     this.callbacks.mobile(true);
     this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const target = seed.to ? (seed.subject ? (this.mode === "html" ? this.editor : this.plain) : this.form.elements.namedItem("subject") as HTMLElement) : this.fields.get("to")?.input;
@@ -528,7 +542,7 @@ export class Composer {
 
   private paintRecipients(field: RecipientField): void {
     const chips = field.box.querySelector(".recipient-chips") as HTMLElement;
-    chips.innerHTML = field.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse"))}">${esc(value)}<button type="button" data-chip="${index}" aria-label="${esc(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
+    chips.innerHTML = field.values.map((value, index) => `<span class="recipient-chip${validAddress(value) ? "" : " invalid"}" title="${esc(validAddress(value) ? value : t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse"))}">${validAddress(value) ? "" : icon("error")}${esc(value)}<button type="button" data-chip="${index}" aria-label="${esc(t("COMPOSE.REMOVE_RECIPIENT", "%ADDRESS% entfernen").replace("%ADDRESS%", value))}">${icon("close")}</button></span>`).join("");
     chips.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.addEventListener("click", () => {
       field.values.splice(Number(button.dataset.chip), 1);
       this.paintRecipients(field);
@@ -873,8 +887,18 @@ export class Composer {
   private finishClose(discard: boolean): void {
     window.clearTimeout(this.autosaveTimer);
     this.files.forEach((file) => file.task?.abort());
-    this.root.hidden = true;
+    delete this.root.dataset.instant;
     this.root.dataset.open = "false";
+    const hide = () => { this.root.hidden = true; };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || matchMedia("(max-width: 799px)").matches) hide();
+    else {
+      const timer = window.setTimeout(hide, 200);
+      this.root.addEventListener("transitionend", (event) => {
+        if (event.target !== this.root || event.propertyName !== "transform") return;
+        window.clearTimeout(timer);
+        hide();
+      }, { once: true });
+    }
     (this.root.parentElement?.querySelector(".compose-dock") as HTMLElement).hidden = true;
     this.minimized = false;
     this.callbacks.mobile(false);

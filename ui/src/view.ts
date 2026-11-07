@@ -382,23 +382,30 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
-            <input class="search" id="search" type="search" placeholder="" autocomplete="off">
+            <div class="search-field">
+              ${icon("search")}
+              <input class="search" id="search" type="search" placeholder="" autocomplete="off" aria-keyshortcuts="Escape">
+              <button type="button" class="icon-btn search-clear" data-action="clear-search" data-clear="field" hidden aria-label="Suche löschen" title="Suche löschen">${icon("close")}</button>
+            </div>
             <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
+          <div class="criteria" id="criteria" hidden></div>
           <div class="quick" role="group" aria-label="${esc(t("SEARCH_UI.QUICK", "Schnellfilter"))}">
-            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${esc(t("SEARCH.UNSEEN", "Ungelesen"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${esc(t("SEARCH.FLAGGED", "Markiert"))}</button>
-            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${esc(t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="unseen" aria-pressed="false">${withIcon("mark-unread", t("SEARCH.UNSEEN", "Ungelesen"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="flagged" aria-pressed="false">${withIcon("flag", t("SEARCH.FLAGGED", "Markiert"))}</button>
+            <button type="button" class="chip" data-action="quick" data-flag="attachment" aria-pressed="false">${withIcon("attachment", t("SEARCH_UI.WITH_ATTACHMENT", "Mit Anhang"))}</button>
           </div>
+          <p class="list-status live" id="list-status"></p>
           <div class="thread-bar" id="thread-bar" hidden>
             <button type="button" class="text-btn" data-action="thread-back">${withIcon("back", t("FOLDERS_UI.BACK_TO_LIST", "Zurück zur Liste"))}</button>
             <span class="quiet" id="thread-label"></span>
           </div>
           <div class="pane-body" id="list-body">
             <div id="rows"></div>
+            <p class="result-label mono" id="list-result" hidden></p>
             <p class="empty" id="list-empty" hidden></p>
-            <button type="button" class="text-btn" data-action="clear-search" hidden>Suche aufheben</button>
-            <button type="button" class="text-btn" data-action="more" hidden>Weitere</button>
+            <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>Suche aufheben</button>
+            <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>Weitere</span></button>
             <p class="error" id="list-error" hidden></p>
           </div>
         </section>
@@ -408,12 +415,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <button type="button" class="text-btn bar-btn" data-action="back" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zurück"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn primary" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary wide-only" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="archive" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+            <button type="button" class="text-btn bar-btn reply-main" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+            <button type="button" class="text-btn bar-btn wide-only" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <button type="button" class="text-btn bar-btn primary" data-action="delete" title="${esc(t("GLOBAL.DELETE", "Löschen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
+            <span class="bar-sep" aria-hidden="true"></span>
+            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc(t("GLOBAL.DELETE", "Löschen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "Löschen"))}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
             <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
@@ -430,16 +438,20 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
                 <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>Entwurf bearbeiten</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>Als neu bearbeiten</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>Als Anhang weiterleiten</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>Kopieren nach …</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>Schlagwort hinzufügen</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>Nur Text anzeigen</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>Farben umkehren</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>Vom Verteiler abmelden</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>Drucken</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>In neuem Fenster</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>Vollbild</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>Quelltext anzeigen</span></button>
                 <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>Als .eml laden</span></button>
+                <hr class="menu-sep">
                 <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>Endgültig löschen</span></button>
               </div>
             </div>
@@ -448,7 +460,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </div>
           <p class="quiet live" id="notice"></p>
           <div class="pane-body" id="reader-body">
-            <p class="empty" id="reader-empty">Wählen Sie eine Mail.</p>
+            <div class="empty reader-empty" id="reader-empty">${icon("inbox")}<p>Wählen Sie eine Mail.</p></div>
           </div>
         </section>
         <section class="book" id="book" hidden aria-label="${esc(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
@@ -611,7 +623,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!next) return;
     shell = next;
     const account = next.querySelector(".account-btn") as HTMLButtonElement;
-    account.textContent = email;
+    account.innerHTML = `<span class="account-mail">${esc(email)}</span>${icon("chevron-down")}`;
     composer = new Composer(next.querySelector("#compose-host") as HTMLElement, composePrefs, {
       send: (values) => actions.send(values),
       save: (values) => actions.saveCompose(values),
@@ -775,17 +787,33 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   function openLayer(layer: HTMLElement, from: HTMLElement | null): void {
     opener = from;
     layer.hidden = false;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      layer.dataset.instant = "1";
+      layer.dataset.open = "true";
+      return;
+    }
+    delete layer.dataset.instant;
     layer.dataset.open = "false";
     requestAnimationFrame(() => { layer.dataset.open = "true"; });
   }
 
   function closeLayer(layer: HTMLElement): void {
-    layer.dataset.open = "false";
-    const finish = () => { layer.hidden = true; };
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
-    else layer.addEventListener("transitionend", finish, { once: true });
-    opener?.focus({ preventScroll: true });
+    const back = opener;
     opener = null;
+    back?.focus({ preventScroll: true });
+    layer.dataset.open = "false";
+    let settled = false;
+    const finish = (event?: TransitionEvent) => {
+      if (settled) return;
+      if (event && (event.target !== layer || event.propertyName !== "transform")) return;
+      settled = true;
+      window.clearTimeout(timer);
+      layer.removeEventListener("transitionend", finish);
+      layer.hidden = true;
+    };
+    const timer = window.setTimeout(() => finish(), 320);
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
+    else layer.addEventListener("transitionend", finish);
   }
 
   function toggleFullscreen(force?: boolean): void {
@@ -1017,6 +1045,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       } else if (action === "logout") actions.logout();
       else if (action === "close-dialog") (target.closest("dialog") as HTMLDialogElement | null)?.close();
       else if (action === "search") { /* form */ }
+      else if (action === "drop-criterion") {
+        const input = shell?.querySelector("#search") as HTMLInputElement | null;
+        if (!input) return;
+        const params = new URLSearchParams(input.value);
+        params.delete(target.dataset.key || "");
+        input.value = params.toString();
+        actions.search(input.value);
+      }
       else if (action === "clear-search") {
         (shell?.querySelector("#search") as HTMLInputElement).value = "";
         actions.clearSearch();
@@ -1339,6 +1375,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           opener?.focus({ preventScroll: true });
           return;
         }
+        const searchField = document.activeElement;
+        if (searchField instanceof HTMLInputElement && searchField.id === "search" && searchField.value) {
+          event.preventDefault();
+          searchField.value = "";
+          const status = shell.querySelector("#list-status");
+          if (status) status.textContent = "Suche gelöscht";
+          actions.clearSearch();
+          return;
+        }
         if (shell.dataset.surface === "contacts") {
           if (!wide() && shell.dataset.pane === "reader") { pane("list"); return; }
           void closeBook();
@@ -1375,10 +1420,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (event.key === "Delete" && event.shiftKey) actions.act("delete-forever", {});
       else if (event.key === "Delete" || event.key === "#") actions.askDelete();
       else if (event.key === "*") actions.act("select-all", {});
-      else if (key === "c") { event.preventDefault(); actions.compose(); }
-      else if (key === "r") { event.preventDefault(); actions.reply(false); }
-      else if (key === "a") { event.preventDefault(); actions.reply(true); }
-      else if (key === "f") { event.preventDefault(); actions.forward(); }
+      else if (key === "c") { event.preventDefault(); composer?.armInstant(); actions.compose(); }
+      else if (key === "r") { event.preventDefault(); composer?.armInstant(); actions.reply(false); }
+      else if (key === "a") { event.preventDefault(); composer?.armInstant(); actions.reply(true); }
+      else if (key === "f") { event.preventDefault(); composer?.armInstant(); actions.forward(); }
       else if (key === "e") actions.archive();
       else if (key === "i") actions.act("flag", {});
       else if (key === "u" && event.shiftKey) actions.markRead();
@@ -1704,7 +1749,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       (shell.querySelector("[data-action='f-create']") as HTMLElement).hidden = !data.canCreate;
       (shell.querySelector("#quota") as HTMLElement).innerHTML = renderQuota(data.quota);
       if (data.currentName) {
-        (shell.querySelector("#folder-title") as HTMLElement).textContent = data.currentName;
+        const title = shell.querySelector("#folder-title") as HTMLElement;
+        title.textContent = data.currentName;
+        title.title = data.currentName;
         (shell.querySelector("#reader-place") as HTMLElement).textContent = data.currentName;
         const search = shell.querySelector("#search") as HTMLInputElement;
         if (document.activeElement !== search) search.placeholder = `In ${data.currentName} suchen`;
@@ -1741,6 +1788,23 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     setSearch(query, quick) {
       const input = shell?.querySelector("#search") as HTMLInputElement | null;
       if (input && input.value.trim() !== query) input.value = query;
+      const fieldClear = shell?.querySelector(".search-clear") as HTMLButtonElement | null;
+      if (fieldClear) fieldClear.hidden = !(input?.value.trim());
+      const names: Record<string, string> = {
+        from: "Von", to: "An", subject: "Betreff", text: "Text", body: "Text",
+        since: "Seit", before: "Bis", attachment: "Mit Anhang", unseen: "Ungelesen", flagged: "Markiert"
+      };
+      const box = shell?.querySelector("#criteria") as HTMLElement | null;
+      if (box) {
+        const chips = query.includes("=") ? [...new URLSearchParams(query).entries()].flatMap(([key, value]) => {
+          const name = names[key];
+          if (!name) return [];
+          const label = value ? `${name}: ${value}` : name;
+          return [`<button type="button" class="chip criterion" data-action="drop-criterion" data-key="${esc(key)}" aria-label="${esc(label)} entfernen">${icon("filter")}<span>${esc(label)}</span>${icon("close")}</button>`];
+        }) : [];
+        box.hidden = chips.length === 0;
+        box.innerHTML = chips.join("");
+      }
       shell?.querySelectorAll<HTMLElement>("[data-action='quick']").forEach((button) => {
         button.setAttribute("aria-pressed", quick.has(button.dataset.flag as QuickFlag) ? "true" : "false");
       });
@@ -1787,7 +1851,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const emptyEl = shell?.querySelector("#list-empty") as HTMLElement | null;
       const errorEl = shell?.querySelector("#list-error") as HTMLElement | null;
       const moreBtn = shell?.querySelector("[data-action='more']") as HTMLButtonElement | null;
-      const clearBtn = shell?.querySelector("[data-action='clear-search']") as HTMLButtonElement | null;
+      const clearBtn = shell?.querySelector("[data-clear='list']") as HTMLButtonElement | null;
+      const result = shell?.querySelector("#list-result") as HTMLElement | null;
       if (box) {
         box.innerHTML = rows.map((row) => {
           const subject = row.subject || "(ohne Betreff)";
@@ -1799,7 +1864,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             ? `<button type="button" class="msg-thread${row.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row.uid}" aria-label="${esc(`${threadText} – ${subject}`)}" title="${esc(threadText)} (T)">${icon("thread")}<span>${row.threadCount}</span></button>`
             : "";
           return `${group}
-          <div class="msg-row${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}">
+          <div class="msg-row${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}${row.unseen ? " unseen" : ""}">
+            <span class="unread-slot" aria-hidden="true">${row.unseen ? `<span class="unread-mark"></span>` : ""}</span>
             <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="Auswählen: ${esc(subject)}">
             <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" draggable="true" aria-current="${row.current ? "true" : "false"}">
               <span class="who">${esc(row.who)}</span>
@@ -1822,6 +1888,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       }
       if (moreBtn) moreBtn.hidden = !more;
       if (clearBtn) clearBtn.hidden = !searching;
+      if (result) {
+        result.hidden = !searching;
+        result.textContent = searching ? (rows.length ? `Ergebnisse · ${rows.length}` : "Keine Treffer") : "";
+      }
     },
     setReader(data, loading, error) {
       if (shell) shell.dataset.reading = data ? "1" : "0";
@@ -1839,7 +1909,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       };
       if (loading) return say("quiet", loading);
       if (error) return say("error", error);
-      if (!data) return say("empty", "Wählen Sie eine Mail.");
+      if (!data) {
+        body.innerHTML = `<div class="empty reader-empty">${icon("inbox")}<p>Wählen Sie eine Mail.</p></div>`;
+        return;
+      }
       renderReader(body, data, expanded);
       body.scrollTop = 0;
     },
@@ -1857,6 +1930,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!button) return;
       button.disabled = busy;
       button.innerHTML = icon(busy ? "loading" : "refresh");
+      const status = shell?.querySelector("#list-status");
+      if (status) status.textContent = busy ? "Wird aktualisiert …" : "";
     },
     setAccounts(items) {
       const box = shell?.querySelector("#account-list") as HTMLElement | null;

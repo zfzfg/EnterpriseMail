@@ -1202,7 +1202,7 @@ class Session {
     const empty = this.visible().length
       ? ""
       : this.category !== "all" ? "Keine Mails für diesen Filter."
-      : this.search ? "Keine Mails für diese Suche." : "Dieser Ordner ist leer.";
+      : this.search ? "Keine Treffer. Suche anpassen oder Filter entfernen." : "Dieser Ordner ist leer.";
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
 

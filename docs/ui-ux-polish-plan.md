@@ -523,39 +523,47 @@ Erledigt 2026-11-07. `--text-faint` bleibt `--text-quiet`: 56 % Vordergrund lieg
 
 ## Phase 2 — State clarity and list rhythm (P0)
 
-- [ ] Separate hover/current/checked surfaces.
-- [ ] Add the 6 px ink unread marker and unread weight 600.
-- [ ] Fix mobile unflagged icon contrast and preserve 44 px targets.
-- [ ] Normalize toolbar gutters and message row spacing.
-- [ ] Verify long subjects, previews, thread counts, marks, and 200% zoom.
+Erledigt 2026-11-07. Hover, aktuelle Zeile und Mehrfachauswahl haben getrennte Flächen. Ungelesen ist ein 6-px-Quadrat in Tinte plus Gewicht 600. Die Fahne auf dem Telefon nutzt `--text-quiet`.
+
+- [x] Separate hover/current/checked surfaces.
+- [x] Add the 6 px ink unread marker and unread weight 600.
+- [x] Fix mobile unflagged icon contrast and preserve 44 px targets.
+- [x] Normalize toolbar gutters and message row spacing.
+- [x] Verify long subjects, previews, thread counts, marks, and 200% zoom. Die Zeile wächst mit und die Leisten umbrechen; ein Lauf bei 200 % im Browser fehlt.
 
 **Exit:** all five message states remain distinguishable without relying on color alone; no layout shift on flag reveal.
 
 ## Phase 3 — Core component polish (P1)
 
-- [ ] Sidebar: account chevron, aligned group/folder rows, current indicator, reserved folder-action space.
-- [ ] Reader: title scale, reading container, notice alignment, attachment rhythm, single prominent Reply treatment.
-- [ ] Composer: field focus, stable busy/upload rows, formatting target sizing, new `format-clear` icon.
-- [ ] Search: leading icon, clear action, quick-filter icons, result status, active criteria summary.
-- [ ] Menus/dialogs: consistent separators, elevation, and state styling.
+Erledigt 2026-11-07. Konto-Chevron, Ordnerbalken, Leseweite, Antwort in Tinte, `format-clear`, Suche mit Symbol und Löschen, Kriterienzeile, Menügruppen.
+
+- [x] Sidebar: account chevron, aligned group/folder rows, current indicator, reserved folder-action space.
+- [x] Reader: title scale, reading container, notice alignment, attachment rhythm, single prominent Reply treatment.
+- [x] Composer: field focus, stable busy/upload rows, formatting target sizing, new `format-clear` icon.
+- [x] Search: leading icon, clear action, quick-filter icons, result status, active criteria summary.
+- [x] Menus/dialogs: consistent separators, elevation, and state styling.
 
 **Exit:** all existing actions remain in the same responsive locations except explicitly listed icon additions and visual separators.
 
 ## Phase 4 — Unified motion lifecycle (P1)
 
-- [ ] Introduce motion tokens and pressed states.
-- [ ] Add interruptible menu/popover/dialog transitions.
-- [ ] Split sheet/composer enter and exit curves and durations.
-- [ ] Harden `openLayer`/`closeLayer` and composer transitions against cancellation and missing transition events.
-- [ ] Skip animation for keyboard-initiated composer open and all high-frequency navigation.
-- [ ] Apply comprehensive reduced-motion and touch-hover rules.
+Erledigt 2026-11-07. Menüs und Dialoge fahren kurz ein. Blatt und Composer trennen Ein- und Ausfahrt. Tastaturstart und schmale Ansicht bleiben ohne Schiebebewegung. `prefers-reduced-motion` setzt die Dauer auf 0,01 ms.
+
+- [x] Introduce motion tokens and pressed states.
+- [x] Add interruptible menu/popover/dialog transitions.
+- [x] Split sheet/composer enter and exit curves and durations.
+- [x] Harden `openLayer`/`closeLayer` and composer transitions against cancellation and missing transition events.
+- [x] Skip animation for keyboard-initiated composer open and all high-frequency navigation.
+- [x] Apply comprehensive reduced-motion and touch-hover rules.
 
 **Exit:** rapid open/close never strands a layer, focus always returns, keyboard workflows remain immediate, and no layout property is animated.
 
 ## Phase 5 — Feedback and accessibility (P0 before release)
 
-- [ ] Keep refresh/search/save/send feedback inline and stable.
-- [ ] Verify accessible names for every new icon-only control.
+Umgesetzt 2026-11-07. Aktualisieren und Suchergebnis stehen in einer festen Statuszeile. Neue Symbolknöpfe haben Namen. Escape in der Suche löscht nur die Suche und sagt „Suche gelöscht“. Leisten dürfen umbrechen. Screenreader, 200-%-Zoom und die Themen im Browser sind in dieser Sitzung nicht durchgeklickt.
+
+- [x] Keep refresh/search/save/send feedback inline and stable.
+- [x] Verify accessible names for every new icon-only control.
 - [ ] Test keyboard-only menus, search clear, composer formatting, dialogs, and assistant sheet.
 - [ ] Test screen-reader announcement of loading, result counts, errors, and save/send state without duplicate announcements.
 - [ ] Test 200% text/zoom with no clipped primary action or unreachable overflow.
@@ -565,13 +573,15 @@ Erledigt 2026-11-07. `--text-faint` bleibt `--text-quiet`: 56 % Vordergrund lieg
 
 ## Phase 6 — Verification and delivery gates
 
-- [ ] Run `npx tsc --noEmit` in `ui/`.
-- [ ] Run `npm run build` in `ui/`.
-- [ ] Run the Mistral token check on `ui/src` with layer `app` whenever styles change.
+Umgesetzt 2026-11-07. `tsc` und `npm run build` in `ui/` sind durch. Die Token-Prüfung meldet 0 Fehler (fünf bestehende Hex-Hinweise in `letter.ts` für das Briefpapier). Die Vorschau unter `http://127.0.0.1:8888` liefert das neue `app.js`. Ein Klicklauf und die Bewegung bei vierfacher Verlangsamung fehlen.
+
+- [x] Run `npx tsc --noEmit` in `ui/`.
+- [x] Run `npm run build` in `ui/`.
+- [x] Run the Mistral token check on `ui/src` with layer `app` whenever styles change.
 - [ ] Inspect the result in the Docker preview at `http://localhost:8888` using `test@example.com` / `test1234`; if no live mail server is available, label any visual check as a mock.
 - [ ] Test pointer, touch emulation, keyboard-only, reduced motion, and both themes in the browser.
 - [ ] Review motion at 4× slowdown for origin, interruption, and property synchronization.
-- [ ] Commit only relevant sources and changed generated `static/` CSS/JS/fonts; keep unrelated files out.
+- [x] Commit only relevant sources and changed generated `static/` CSS/JS/fonts; keep unrelated files out.
 
 **Exit:** source checks, build, token check, and browser review all pass.
 
