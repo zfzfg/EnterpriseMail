@@ -465,6 +465,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             </div>
             <span class="spacer"></span>
             <div class="bar-group bar-primary" role="group" aria-label="${esc(t("MESSAGE.REPLY_ACTIONS", "Antworten und Weiterleiten"))}">
+              <button type="button" class="text-btn bar-btn ink-btn" data-direct="1" data-action="m-edit-draft" title="${esc(t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))}" hidden>${withIcon("compose", t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))}</button>
               <button type="button" class="text-btn bar-btn reply-main" data-direct="1" data-action="reply" title="${esc(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="reply-all" title="${esc(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="forward" title="${esc(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
@@ -741,11 +742,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     lastReader = data;
     if (!shell) return;
     const one = Boolean(data);
+    const inDrafts = Boolean(data?.place.inDrafts);
     const width = shell.querySelector(".reader")?.clientWidth || 0;
     const available: Record<string, boolean> = {
-      reply: one,
-      "reply-all": one,
-      forward: one,
+      "m-edit-draft": one && inDrafts,
+      reply: one && !inDrafts,
+      "reply-all": one && !inDrafts,
+      forward: one && !inDrafts,
       archive: one && Boolean(data?.place.archive),
       unread: one,
       delete: one,
@@ -757,6 +760,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       "m-next": one
     };
     const direct: Record<string, boolean> = {
+      "m-edit-draft": true,
       reply: true,
       "reply-all": width >= 480,
       forward: true,
@@ -1257,6 +1261,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       } else if (action) actions.assist?.(action, target.dataset);
     });
 
+    shell.addEventListener("dblclick", (event) => {
+      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-uid]");
+      if (!target || !target.dataset.uid) return;
+      if (lastReader?.place.inDrafts || shell?.querySelector(".folder[aria-current='page']")?.getAttribute("data-role") === "drafts") {
+        event.preventDefault();
+        actions.act("edit-draft", { uid: target.dataset.uid });
+      }
+    });
+
     shell.addEventListener("submit", (event) => {
       const form = event.target as HTMLFormElement;
       if (form.classList.contains("composer-form")) return;
@@ -1594,6 +1607,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       else if (key === "m") { event.preventDefault(); actions.act("move", {}); }
       else if (key === "t") { event.preventDefault(); actions.act("thread", {}); }
       else if (key === "j" || key === "k" || event.key === "Enter") {
+        if (event.key === "Enter" && (lastReader?.place.inDrafts || shell.querySelector(".folder[aria-current='page']")?.getAttribute("data-role") === "drafts")) {
+          const focused = document.activeElement?.closest<HTMLElement>("[data-uid]");
+          if (focused?.dataset.uid) {
+            event.preventDefault();
+            actions.act("edit-draft", { uid: focused.dataset.uid });
+            return;
+          }
+        }
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
       }

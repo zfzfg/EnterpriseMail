@@ -381,8 +381,8 @@ h1, .title {
   .reader-bar #reader-place { display: none; }
 }
 @container (min-width: 520px) {
-  .reader-bar .reply-main { padding: 0 10px; }
-  .reader-bar .reply-main .btn-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .reader-bar .reply-main, .reader-bar [data-action="m-edit-draft"] { padding: 0 10px; }
+  .reader-bar .reply-main .btn-label, .reader-bar [data-action="m-edit-draft"] .btn-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
 }
 @container (min-width: 1000px) {
   .bar-btn.primary { padding: 0 10px; }

@@ -52,6 +52,9 @@ export interface ComposeSeed {
   identityId?: string;
   sourceFolder?: string;
   draftRef?: { folder: string; uid: number } | null;
+  inReplyTo?: string;
+  references?: string;
+  draftInfo?: [string, number, string];
   files?: ComposeFile[];
   /** Tastaturstart: ohne Einfahrbewegung, Fokus sofort. */
   instant?: boolean;
@@ -79,6 +82,9 @@ export interface ComposeValues extends ComposeSeed {
   encryptCertificates: string[];
   messageFolder: string;
   messageUid: number;
+  inReplyTo?: string;
+  references?: string;
+  draftInfo?: [string, number, string];
 }
 
 interface ComposeCallbacks {
@@ -453,12 +459,13 @@ export class Composer {
     if (seed.replyTo) (this.root.querySelector("[data-extra='reply']") as HTMLElement).hidden = false;
     const identity = this.identities.find((item) => item.id === seed.identityId) || this.identities[0];
     (this.form.elements.namedItem("identity") as HTMLSelectElement).value = identity?.id || "";
-    this.mode = this.prefs.editor === "Html" ? "html" : "plain";
+    const isDraft = seed.mode === "draft";
+    this.mode = isDraft && seed.html ? "html" : (this.prefs.editor === "Html" ? "html" : "plain");
     this.plain.value = seed.body;
     this.editor.innerHTML = seed.html ? sanitizeHtml(seed.html) : plainToHtml(seed.body, seed.mode === "reply");
     this.paintMode();
     this.setOptions();
-    this.applyIdentity(identity, true);
+    this.applyIdentity(identity, true, isDraft);
     this.setStatus("");
     this.setError("");
     this.root.hidden = false;
@@ -507,9 +514,9 @@ export class Composer {
     return html ? (isHtml ? sanitizeHtml(signature) : plainToHtml(signature)) : (isHtml ? htmlToPlain(signature) : signature);
   }
 
-  private applyIdentity(identity: ComposeIdentity | undefined, initial: boolean): void {
+  private applyIdentity(identity: ComposeIdentity | undefined, initial: boolean, skipSignature = false): void {
     if (!identity) return;
-    if (initial || this.seed?.mode === "new" || !this.seed?.mode) {
+    if ((initial || this.seed?.mode === "new" || !this.seed?.mode) && !skipSignature) {
       if (identity.replyTo && !(this.form.elements.namedItem("replyTo") as HTMLInputElement).value) {
         (this.form.elements.namedItem("replyTo") as HTMLInputElement).value = identity.replyTo;
         (this.root.querySelector("[data-extra='reply']") as HTMLElement).hidden = false;
@@ -521,6 +528,7 @@ export class Composer {
         (this.root.querySelector("[data-extra='bcc']") as HTMLElement).hidden = false;
       }
     }
+    if (skipSignature) return;
     this.root.querySelectorAll(".compose-signature").forEach((node) => node.remove());
     const signature = this.signature(identity, this.mode === "html");
     if (!signature) return;
@@ -716,12 +724,14 @@ export class Composer {
     }));
   }
 
-  private values(saveFolder: string): ComposeValues {
+  private values(saveFolder: string, isSend = false): ComposeValues {
     this.fields.forEach((field) => this.commitInput(field));
     const identity = this.identity();
     if (!identity) throw new ApiError(0, t("COMPOSE.NO_IDENTITY", "Keine Absender-Identität vorhanden."));
-    const invalid = [...this.fields.values()].flatMap((field) => field.values).filter((value) => !validAddress(value));
-    if (invalid.length) throw new ApiError(303, `${t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse")}: ${invalid[0]}`);
+    if (isSend) {
+      const invalid = [...this.fields.values()].flatMap((field) => field.values).filter((value) => !validAddress(value));
+      if (invalid.length) throw new ApiError(303, `${t("COMPOSE.INVALID_ADDRESS", "Ungültige Adresse")}: ${invalid[0]}`);
+    }
     const html = this.mode === "html" ? sanitizeHtml(this.editor.innerHTML) : this.prefs.markdown ? markdownToHtml(this.plain.value) : "";
     const plain = this.mode === "html" ? htmlToPlain(html) : this.plain.value;
     const attachments: ComposeValues["attachments"] = {};
@@ -754,7 +764,10 @@ export class Composer {
       encryptFingerprints: "",
       encryptCertificates: [],
       messageFolder: this.draftRef?.folder || "",
-      messageUid: this.draftRef?.uid || 0
+      messageUid: this.draftRef?.uid || 0,
+      inReplyTo: this.seed?.inReplyTo || "",
+      references: this.seed?.references || "",
+      draftInfo: this.seed?.draftInfo
     };
   }
 
@@ -765,7 +778,7 @@ export class Composer {
 
   private async sendReady(): Promise<void> {
     try {
-      const values = this.values(this.saveFolder());
+      const values = this.values(this.saveFolder(), true);
       if (!values.to && !values.cc && !values.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empfänger an."));
       if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anhänge werden noch hochgeladen."));
       if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anhänge vor dem Senden."));
@@ -922,6 +935,12 @@ export class Composer {
   async requestClose(): Promise<void> {
     if (this.empty() && !this.draftRef) { this.finishClose(false); return; }
     if (this.fingerprint() === this.baseline) { this.finishClose(false); return; }
+    const discardBtn = this.closeDialog.querySelector<HTMLButtonElement>("button[value='discard']");
+    if (discardBtn) {
+      discardBtn.textContent = this.seed?.mode === "draft"
+        ? t("COMPOSE.DISCARD_CHANGES", "Änderungen verwerfen")
+        : t("COMPOSE.DISCARD", "Verwerfen");
+    }
     this.closeDialog.showModal();
   }
 

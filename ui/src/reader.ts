@@ -208,6 +208,7 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
     </div>`;
 
   const bars: string[] = [];
+  if (data.place.inDrafts) bars.push(bar("draft", "compose", t("MESSAGE.IS_DRAFT", "Dies ist ein noch nicht gesendeter Entwurf."), textButton("m-edit-draft", t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))));
   if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gelöscht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
   if (data.blocked || data.failed) {

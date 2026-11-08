@@ -51,6 +51,8 @@ interface Msg {
   flags: string[];
   messageId: string;
   references: string;
+  inReplyTo: string;
+  draftInfo: [string, number, string] | null;
   html: string;
   plain: string;
   attachments: MsgFile[];
@@ -276,6 +278,7 @@ class Session {
   private trashFolder = "";
   private junkFolder = "";
   private draftsFolder = "";
+  private isExistingDraft = false;
   private checked = new Set<number>();
   private anchor = 0;
   private readTimer = 0;
@@ -433,6 +436,7 @@ class Session {
     this.trashFolder = pick(src.TrashFolder ?? this.trashFolder, ["trash"], ["trash", "papierkorb", "deleted items", "gelöschte elemente"]);
     this.junkFolder = pick(src.JunkFolder ?? this.junkFolder, ["junk", "spam"], ["junk", "spam", "junk-e-mail"]);
     this.archiveFolder = pick(src.ArchiveFolder ?? this.archiveFolder, ["archive", "all"], ["archive", "archiv"]);
+    this.configureComposer();
   }
 
   private place(): ReaderPlace {
@@ -1139,6 +1143,10 @@ class Session {
     });
     const contentType = (headers["content-type"] || "").toLowerCase();
     const references = Array.isArray(item.references) ? item.references.map(String).join(" ") : String(item.references || "");
+    const inReplyTo = String(item.inReplyTo || headers["in-reply-to"] || "");
+    const draftInfo = (Array.isArray(item.draftInfo) && item.draftInfo.length === 3)
+      ? [String(item.draftInfo[0]), Number(item.draftInfo[1]), String(item.draftInfo[2])] as [string, number, string]
+      : null;
     return {
       uid,
       folder,
@@ -1155,6 +1163,8 @@ class Session {
       flags,
       messageId: String(item.messageId || ""),
       references,
+      inReplyTo,
+      draftInfo,
       html: String(item.html || ""),
       plain: String(item.plain || ""),
       attachments,
@@ -1491,6 +1501,7 @@ class Session {
   private openNew(): void {
     this.replyKind = "";
     this.draftRef = null;
+    this.isExistingDraft = false;
     this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new" });
   }
 
@@ -1499,6 +1510,7 @@ class Session {
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
     this.draftRef = null;
+    this.isExistingDraft = false;
     const author = message.replyTo[0] || message.from[0];
     const others = [...message.to, ...message.cc].filter((person) => person.email.toLowerCase() !== this.email.toLowerCase());
     const body = message.plain || plainFromHtml(message.html);
@@ -1506,6 +1518,9 @@ class Session {
     this.view.openCompose({
       title: all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten"), mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
       to: author ? address(author) : "", cc: all ? others.map(address).join(", ") : "", subject,
+      inReplyTo: message.messageId,
+      references: [message.references, message.messageId].filter(Boolean).join(" "),
+      draftInfo: [this.replyKind, message.uid, message.folder],
       body: `\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
     });
   }
@@ -1515,35 +1530,52 @@ class Session {
     if (!message) return;
     this.replyKind = "forward";
     this.draftRef = null;
+    this.isExistingDraft = false;
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
     this.view.openCompose({
-      title: t("COMPOSE.TITLE_FORWARD", "Weiterleiten"), to: "", cc: "", subject, identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      title: t("COMPOSE.TITLE_FORWARD", "Weiterleiten"), mode: "forward", to: "", cc: "", subject, identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      inReplyTo: message.messageId,
+      references: [message.references, message.messageId].filter(Boolean).join(" "),
+      draftInfo: ["forward", message.uid, message.folder],
       body: `\n\n${t("MESSAGE.FORWARD_HEADER", "-------- Weitergeleitete Nachricht --------")}\n${t("MESSAGE.FORWARD_FROM", "Von")}: ${message.from.map(label).join(", ")}\n${t("MESSAGE.FORWARD_SUBJECT", "Betreff")}: ${message.subject}\n\n${body}`
     });
     void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
   }
 
   private async saveDraft(values: ComposeValues): Promise<{ folder: string; uid: number }> {
-    const result = await call<{ folder?: string; uid?: number } | true>("SaveMessage", { ...values });
-    if (result === true || !result.folder || !result.uid) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
-    this.draftRef = { folder: result.folder, uid: result.uid };
+    const result = await call<{ folder?: string; uid?: number } | boolean>("SaveMessage", { ...values });
+    if (!result) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
+    const folder = (typeof result === "object" && result?.folder) ? result.folder : (values.saveFolder || this.draftsFolder);
+    const uid = (typeof result === "object" && result?.uid) ? result.uid : (this.draftRef?.uid || 0);
+    this.draftRef = { folder, uid };
+    if (this.folder === this.draftsFolder) {
+      if (this.selected && uid) {
+        this.selected = uid;
+        if (this.current) this.current.uid = uid;
+      }
+      void this.loadList(false, true);
+    }
     return this.draftRef;
   }
 
   private async closeCompose(discard: boolean): Promise<void> {
-    if (discard && this.draftRef) {
+    if (discard && this.draftRef && !this.isExistingDraft) {
       try { await call("MessageDelete", { folder: this.draftRef.folder, uids: String(this.draftRef.uid) }); }
       catch (error) { this.view.notice(explain(error)); }
     }
     this.replyKind = "";
     this.draftRef = null;
+    this.isExistingDraft = false;
     await this.loadList(false, true);
   }
 
   private async send(values: ComposeValues): Promise<void> {
     const message = this.current;
     const params: Record<string, unknown> = { ...values };
+    if (values.inReplyTo) params.inReplyTo = values.inReplyTo;
+    if (values.references) params.references = values.references;
+    if (values.draftInfo) params.draftInfo = values.draftInfo;
     if (message && this.replyKind) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
@@ -1555,8 +1587,9 @@ class Session {
       this.view.closeCompose();
       this.view.notice("Gesendet.");
       this.replyKind = "";
-      const wasDraft = Boolean(this.draftRef);
+      const wasDraft = Boolean(this.draftRef) || this.isExistingDraft;
       this.draftRef = null;
+      this.isExistingDraft = false;
       this.offset = 0;
       if (wasDraft && this.current) { this.current = null; this.selected = 0; this.view.setReader(null, "", ""); }
       await this.loadList(false, true);
@@ -2305,17 +2338,33 @@ class Session {
         return;
       case "edit-draft":
       case "edit-new": {
-        if (!message) return;
+        let targetMsg = message;
+        const targetUid = Number(data.uid || 0);
+        if (targetUid && (!targetMsg || targetMsg.uid !== targetUid)) {
+          try {
+            const raw = await call<Record<string, unknown>>("Message", { folder: this.folder, uid: targetUid });
+            targetMsg = this.parseMessage(raw, true);
+            this.current = targetMsg;
+            this.selected = targetUid;
+            this.paintList();
+          } catch (error) {
+            this.view.notice(explain(error));
+            return;
+          }
+        }
+        if (!targetMsg) return;
         this.replyKind = "";
-        this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
+        this.isExistingDraft = name === "edit-draft";
+        this.draftRef = name === "edit-draft" ? { folder: targetMsg.folder, uid: targetMsg.uid } : null;
         this.view.openCompose({
           title: name === "edit-draft" ? t("COMPOSE.TITLE_EDIT_DRAFT", "Entwurf") : t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
-          to: message.to.map(address).join(", "), cc: message.cc.map(address).join(", "), bcc: message.bcc.map(address).join(", "),
-          replyTo: message.replyTo.map(address).join(", "), subject: message.subject, body: message.plain || plainFromHtml(message.html),
-          html: message.html, mode: name === "edit-draft" ? "draft" : "new", draftRef: this.draftRef,
-          identityId: this.identities.find((identity) => message.from.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id
+          to: targetMsg.to.map(address).join(", "), cc: targetMsg.cc.map(address).join(", "), bcc: targetMsg.bcc.map(address).join(", "),
+          replyTo: targetMsg.replyTo.map(address).join(", "), subject: targetMsg.subject, body: targetMsg.plain || plainFromHtml(targetMsg.html),
+          html: targetMsg.html, mode: name === "edit-draft" ? "draft" : "new", draftRef: this.draftRef,
+          inReplyTo: targetMsg.inReplyTo, references: targetMsg.references, draftInfo: targetMsg.draftInfo || undefined,
+          identityId: this.identities.find((identity) => targetMsg.from.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id
         });
-        void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+        void this.view.attachCompose(targetMsg.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
         return;
       }
       case "forward-att": {

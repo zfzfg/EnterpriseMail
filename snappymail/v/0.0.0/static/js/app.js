@@ -1270,7 +1270,7 @@ function renderSidebarRows(rows2, filtering) {
     const symbol = icon(ROLE_ICON[row2.role] || (row2.hasChildren && !row2.collapsed ? "folder-open" : "folder"));
     const pathNote = filtering && row2.depth > 0 ? `<span class="sr"> (${esc2(row2.path)})</span>` : "";
     const label2 = `${symbol}<span class="folder-name">${esc2(name)}${pathNote}</span>${count}`;
-    const main = row2.info.selectable ? `<button type="button" class="folder" data-folder="${target}" data-depth="${row2.depth}" aria-current="${row2.current ? "page" : "false"}" title="${esc2(row2.path)}">${label2}</button>` : `<button type="button" class="folder is-group" data-action="f-toggle" data-target="${target}" data-depth="${row2.depth}" title="${esc2(`${row2.path} \xB7 ${t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar")}`)}"${row2.hasChildren ? ` aria-expanded="${row2.collapsed ? "false" : "true"}"` : " disabled"}>${label2}</button>`;
+    const main = row2.info.selectable ? `<button type="button" class="folder" data-folder="${target}" data-role="${esc2(row2.role || "")}" data-depth="${row2.depth}" aria-current="${row2.current ? "page" : "false"}" title="${esc2(row2.path)}">${label2}</button>` : `<button type="button" class="folder is-group" data-action="f-toggle" data-target="${target}" data-role="${esc2(row2.role || "")}" data-depth="${row2.depth}" title="${esc2(`${row2.path} \xB7 ${t("FOLDERS_UI.NOT_SELECTABLE", "nicht ausw\xE4hlbar")}`)}"${row2.hasChildren ? ` aria-expanded="${row2.collapsed ? "false" : "true"}"` : " disabled"}>${label2}</button>`;
     const more = row2.actions.length ? `<button type="button" class="icon-btn fmore" data-action="f-menu" data-target="${target}" aria-haspopup="menu" aria-expanded="false" aria-label="${esc2(`${t("FOLDERS_UI.ACTIONS_FOR", "Aktionen f\xFCr")} ${name}`)}" title="${esc2(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}">${icon("more")}</button>` : "";
     return `<div class="frow" style="--depth:${row2.depth}" data-row="${target}">${toggle}${main}${more}</div>`;
   }).join("");
@@ -4013,12 +4013,13 @@ var Composer = class {
     if (seed.replyTo) this.root.querySelector("[data-extra='reply']").hidden = false;
     const identity = this.identities.find((item) => item.id === seed.identityId) || this.identities[0];
     this.form.elements.namedItem("identity").value = identity?.id || "";
-    this.mode = this.prefs.editor === "Html" ? "html" : "plain";
+    const isDraft = seed.mode === "draft";
+    this.mode = isDraft && seed.html ? "html" : this.prefs.editor === "Html" ? "html" : "plain";
     this.plain.value = seed.body;
     this.editor.innerHTML = seed.html ? sanitizeHtml(seed.html) : plainToHtml2(seed.body, seed.mode === "reply");
     this.paintMode();
     this.setOptions();
-    this.applyIdentity(identity, true);
+    this.applyIdentity(identity, true, isDraft);
     this.setStatus("");
     this.setError("");
     this.root.hidden = false;
@@ -4067,9 +4068,9 @@ var Composer = class {
     signature = signature.replace(/{{FROM-FULL}}|{{FROM}}/g, from).replace(/{{DATE}}/g, (/* @__PURE__ */ new Date()).toLocaleString()).replace(/{{TIME}}/g, (/* @__PURE__ */ new Date()).toLocaleTimeString()).replace(/{{MOMENT:[^}]+}}/g, "");
     return html ? isHtml ? sanitizeHtml(signature) : plainToHtml2(signature) : isHtml ? htmlToPlain(signature) : signature;
   }
-  applyIdentity(identity, initial) {
+  applyIdentity(identity, initial, skipSignature = false) {
     if (!identity) return;
-    if (initial || this.seed?.mode === "new" || !this.seed?.mode) {
+    if ((initial || this.seed?.mode === "new" || !this.seed?.mode) && !skipSignature) {
       if (identity.replyTo && !this.form.elements.namedItem("replyTo").value) {
         this.form.elements.namedItem("replyTo").value = identity.replyTo;
         this.root.querySelector("[data-extra='reply']").hidden = false;
@@ -4081,6 +4082,7 @@ var Composer = class {
         this.root.querySelector("[data-extra='bcc']").hidden = false;
       }
     }
+    if (skipSignature) return;
     this.root.querySelectorAll(".compose-signature").forEach((node) => node.remove());
     const signature = this.signature(identity, this.mode === "html");
     if (!signature) return;
@@ -4297,12 +4299,14 @@ ${signature}`;
       this.changed();
     }));
   }
-  values(saveFolder) {
+  values(saveFolder, isSend = false) {
     this.fields.forEach((field2) => this.commitInput(field2));
     const identity = this.identity();
     if (!identity) throw new ApiError(0, t("COMPOSE.NO_IDENTITY", "Keine Absender-Identit\xE4t vorhanden."));
-    const invalid = [...this.fields.values()].flatMap((field2) => field2.values).filter((value) => !validAddress(value));
-    if (invalid.length) throw new ApiError(303, `${t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse")}: ${invalid[0]}`);
+    if (isSend) {
+      const invalid = [...this.fields.values()].flatMap((field2) => field2.values).filter((value) => !validAddress(value));
+      if (invalid.length) throw new ApiError(303, `${t("COMPOSE.INVALID_ADDRESS", "Ung\xFCltige Adresse")}: ${invalid[0]}`);
+    }
     const html = this.mode === "html" ? sanitizeHtml(this.editor.innerHTML) : this.prefs.markdown ? markdownToHtml(this.plain.value) : "";
     const plain = this.mode === "html" ? htmlToPlain(html) : this.plain.value;
     const attachments = {};
@@ -4335,7 +4339,10 @@ ${signature}`;
       encryptFingerprints: "",
       encryptCertificates: [],
       messageFolder: this.draftRef?.folder || "",
-      messageUid: this.draftRef?.uid || 0
+      messageUid: this.draftRef?.uid || 0,
+      inReplyTo: this.seed?.inReplyTo || "",
+      references: this.seed?.references || "",
+      draftInfo: this.seed?.draftInfo
     };
   }
   send() {
@@ -4344,7 +4351,7 @@ ${signature}`;
   }
   async sendReady() {
     try {
-      const values2 = this.values(this.saveFolder());
+      const values2 = this.values(this.saveFolder(), true);
       if (!values2.to && !values2.cc && !values2.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empf\xE4nger an."));
       if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anh\xE4nge werden noch hochgeladen."));
       if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anh\xE4nge vor dem Senden."));
@@ -4512,6 +4519,10 @@ ${signature}`;
       this.finishClose(false);
       return;
     }
+    const discardBtn = this.closeDialog.querySelector("button[value='discard']");
+    if (discardBtn) {
+      discardBtn.textContent = this.seed?.mode === "draft" ? t("COMPOSE.DISCARD_CHANGES", "\xC4nderungen verwerfen") : t("COMPOSE.DISCARD", "Verwerfen");
+    }
     this.closeDialog.showModal();
   }
   minimize() {
@@ -4675,6 +4686,7 @@ function renderReader(body, data, expanded, showAllFiles = false) {
       <button type="button" class="icon-btn details-toggle" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-controls="reader-details" aria-label="${esc7(detailsLabel)}" title="${esc7(detailsLabel)}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
     </div>`;
   const bars = [];
+  if (data.place.inDrafts) bars.push(bar("draft", "compose", t("MESSAGE.IS_DRAFT", "Dies ist ein noch nicht gesendeter Entwurf."), textButton("m-edit-draft", t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))));
   if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gel\xF6scht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
   if (data.blocked || data.failed) {
@@ -5958,6 +5970,7 @@ function createView(root3, actions) {
             </div>
             <span class="spacer"></span>
             <div class="bar-group bar-primary" role="group" aria-label="${esc9(t("MESSAGE.REPLY_ACTIONS", "Antworten und Weiterleiten"))}">
+              <button type="button" class="text-btn bar-btn ink-btn" data-direct="1" data-action="m-edit-draft" title="${esc9(t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))}" hidden>${withIcon("compose", t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))}</button>
               <button type="button" class="text-btn bar-btn reply-main" data-direct="1" data-action="reply" title="${esc9(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="reply-all" title="${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="forward" title="${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
@@ -6235,11 +6248,13 @@ function createView(root3, actions) {
     lastReader = data;
     if (!shell) return;
     const one = Boolean(data);
+    const inDrafts = Boolean(data?.place.inDrafts);
     const width = shell.querySelector(".reader")?.clientWidth || 0;
     const available = {
-      reply: one,
-      "reply-all": one,
-      forward: one,
+      "m-edit-draft": one && inDrafts,
+      reply: one && !inDrafts,
+      "reply-all": one && !inDrafts,
+      forward: one && !inDrafts,
       archive: one && Boolean(data?.place.archive),
       unread: one,
       delete: one,
@@ -6251,6 +6266,7 @@ function createView(root3, actions) {
       "m-next": one
     };
     const direct = {
+      "m-edit-draft": true,
       reply: true,
       "reply-all": width >= 480,
       forward: true,
@@ -6752,6 +6768,14 @@ function createView(root3, actions) {
         actions.assist?.("ask", { text: target.textContent || "" });
       } else if (action) actions.assist?.(action, target.dataset);
     });
+    shell.addEventListener("dblclick", (event) => {
+      const target = event.target.closest("[data-uid]");
+      if (!target || !target.dataset.uid) return;
+      if (lastReader?.place.inDrafts || shell?.querySelector(".folder[aria-current='page']")?.getAttribute("data-role") === "drafts") {
+        event.preventDefault();
+        actions.act("edit-draft", { uid: target.dataset.uid });
+      }
+    });
     shell.addEventListener("submit", (event) => {
       const form2 = event.target;
       if (form2.classList.contains("composer-form")) return;
@@ -7138,6 +7162,14 @@ function createView(root3, actions) {
         event.preventDefault();
         actions.act("thread", {});
       } else if (key === "j" || key === "k" || event.key === "Enter") {
+        if (event.key === "Enter" && (lastReader?.place.inDrafts || shell.querySelector(".folder[aria-current='page']")?.getAttribute("data-role") === "drafts")) {
+          const focused = document.activeElement?.closest("[data-uid]");
+          if (focused?.dataset.uid) {
+            event.preventDefault();
+            actions.act("edit-draft", { uid: focused.dataset.uid });
+            return;
+          }
+        }
         event.preventDefault();
         moveSelection(key === "k" ? -1 : key === "j" ? 1 : 0);
       }
@@ -8429,6 +8461,7 @@ var Session = class {
   trashFolder = "";
   junkFolder = "";
   draftsFolder = "";
+  isExistingDraft = false;
   checked = /* @__PURE__ */ new Set();
   anchor = 0;
   readTimer = 0;
@@ -8592,6 +8625,7 @@ var Session = class {
     this.trashFolder = pick(src.TrashFolder ?? this.trashFolder, ["trash"], ["trash", "papierkorb", "deleted items", "gel\xF6schte elemente"]);
     this.junkFolder = pick(src.JunkFolder ?? this.junkFolder, ["junk", "spam"], ["junk", "spam", "junk-e-mail"]);
     this.archiveFolder = pick(src.ArchiveFolder ?? this.archiveFolder, ["archive", "all"], ["archive", "archiv"]);
+    this.configureComposer();
   }
   place() {
     return {
@@ -9286,6 +9320,8 @@ var Session = class {
     });
     const contentType = (headers["content-type"] || "").toLowerCase();
     const references = Array.isArray(item.references) ? item.references.map(String).join(" ") : String(item.references || "");
+    const inReplyTo = String(item.inReplyTo || headers["in-reply-to"] || "");
+    const draftInfo = Array.isArray(item.draftInfo) && item.draftInfo.length === 3 ? [String(item.draftInfo[0]), Number(item.draftInfo[1]), String(item.draftInfo[2])] : null;
     return {
       uid,
       folder,
@@ -9302,6 +9338,8 @@ var Session = class {
       flags,
       messageId: String(item.messageId || ""),
       references,
+      inReplyTo,
+      draftInfo,
       html: String(item.html || ""),
       plain: String(item.plain || ""),
       attachments,
@@ -9637,6 +9675,7 @@ var Session = class {
   openNew() {
     this.replyKind = "";
     this.draftRef = null;
+    this.isExistingDraft = false;
     this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new" });
   }
   openReply(all) {
@@ -9644,6 +9683,7 @@ var Session = class {
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
     this.draftRef = null;
+    this.isExistingDraft = false;
     const author = message.replyTo[0] || message.from[0];
     const others = [...message.to, ...message.cc].filter((person2) => person2.email.toLowerCase() !== this.email.toLowerCase());
     const body = message.plain || plainFromHtml(message.html);
@@ -9656,6 +9696,9 @@ var Session = class {
       to: author ? address(author) : "",
       cc: all ? others.map(address).join(", ") : "",
       subject,
+      inReplyTo: message.messageId,
+      references: [message.references, message.messageId].filter(Boolean).join(" "),
+      draftInfo: [this.replyKind, message.uid, message.folder],
       body: `
 
 Am ${when(message.date)} schrieb ${author ? label(author) : ""}:
@@ -9667,15 +9710,20 @@ ${quote2(body)}`
     if (!message) return;
     this.replyKind = "forward";
     this.draftRef = null;
+    this.isExistingDraft = false;
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^fw:/i.test(message.subject) ? message.subject : `Fw: ${message.subject}`;
     this.view.openCompose({
       title: t("COMPOSE.TITLE_FORWARD", "Weiterleiten"),
+      mode: "forward",
       to: "",
       cc: "",
       subject,
       identityId: this.replyIdentity(message),
       sourceFolder: message.folder,
+      inReplyTo: message.messageId,
+      references: [message.references, message.messageId].filter(Boolean).join(" "),
+      draftInfo: ["forward", message.uid, message.folder],
       body: `
 
 ${t("MESSAGE.FORWARD_HEADER", "-------- Weitergeleitete Nachricht --------")}
@@ -9688,12 +9736,21 @@ ${body}`
   }
   async saveDraft(values2) {
     const result = await call("SaveMessage", { ...values2 });
-    if (result === true || !result.folder || !result.uid) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
-    this.draftRef = { folder: result.folder, uid: result.uid };
+    if (!result) throw new ApiError(0, t("COMPOSE.ERROR_DRAFT_SAVE", "Der Entwurf konnte nicht gespeichert werden."));
+    const folder = typeof result === "object" && result?.folder ? result.folder : values2.saveFolder || this.draftsFolder;
+    const uid = typeof result === "object" && result?.uid ? result.uid : this.draftRef?.uid || 0;
+    this.draftRef = { folder, uid };
+    if (this.folder === this.draftsFolder) {
+      if (this.selected && uid) {
+        this.selected = uid;
+        if (this.current) this.current.uid = uid;
+      }
+      void this.loadList(false, true);
+    }
     return this.draftRef;
   }
   async closeCompose(discard) {
-    if (discard && this.draftRef) {
+    if (discard && this.draftRef && !this.isExistingDraft) {
       try {
         await call("MessageDelete", { folder: this.draftRef.folder, uids: String(this.draftRef.uid) });
       } catch (error) {
@@ -9702,11 +9759,15 @@ ${body}`
     }
     this.replyKind = "";
     this.draftRef = null;
+    this.isExistingDraft = false;
     await this.loadList(false, true);
   }
   async send(values2) {
     const message = this.current;
     const params = { ...values2 };
+    if (values2.inReplyTo) params.inReplyTo = values2.inReplyTo;
+    if (values2.references) params.references = values2.references;
+    if (values2.draftInfo) params.draftInfo = values2.draftInfo;
     if (message && this.replyKind) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
@@ -9721,8 +9782,9 @@ ${body}`
       this.view.closeCompose();
       this.view.notice("Gesendet.");
       this.replyKind = "";
-      const wasDraft = Boolean(this.draftRef);
+      const wasDraft = Boolean(this.draftRef) || this.isExistingDraft;
       this.draftRef = null;
+      this.isExistingDraft = false;
       this.offset = 0;
       if (wasDraft && this.current) {
         this.current = null;
@@ -10470,23 +10532,41 @@ ${body}`
         return;
       case "edit-draft":
       case "edit-new": {
-        if (!message) return;
+        let targetMsg = message;
+        const targetUid = Number(data.uid || 0);
+        if (targetUid && (!targetMsg || targetMsg.uid !== targetUid)) {
+          try {
+            const raw = await call("Message", { folder: this.folder, uid: targetUid });
+            targetMsg = this.parseMessage(raw, true);
+            this.current = targetMsg;
+            this.selected = targetUid;
+            this.paintList();
+          } catch (error) {
+            this.view.notice(explain(error));
+            return;
+          }
+        }
+        if (!targetMsg) return;
         this.replyKind = "";
-        this.draftRef = name === "edit-draft" ? { folder: message.folder, uid: message.uid } : null;
+        this.isExistingDraft = name === "edit-draft";
+        this.draftRef = name === "edit-draft" ? { folder: targetMsg.folder, uid: targetMsg.uid } : null;
         this.view.openCompose({
           title: name === "edit-draft" ? t("COMPOSE.TITLE_EDIT_DRAFT", "Entwurf") : t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
-          to: message.to.map(address).join(", "),
-          cc: message.cc.map(address).join(", "),
-          bcc: message.bcc.map(address).join(", "),
-          replyTo: message.replyTo.map(address).join(", "),
-          subject: message.subject,
-          body: message.plain || plainFromHtml(message.html),
-          html: message.html,
+          to: targetMsg.to.map(address).join(", "),
+          cc: targetMsg.cc.map(address).join(", "),
+          bcc: targetMsg.bcc.map(address).join(", "),
+          replyTo: targetMsg.replyTo.map(address).join(", "),
+          subject: targetMsg.subject,
+          body: targetMsg.plain || plainFromHtml(targetMsg.html),
+          html: targetMsg.html,
           mode: name === "edit-draft" ? "draft" : "new",
           draftRef: this.draftRef,
-          identityId: this.identities.find((identity) => message.from.some((person2) => person2.email.toLowerCase() === identity.email.toLowerCase()))?.id
+          inReplyTo: targetMsg.inReplyTo,
+          references: targetMsg.references,
+          draftInfo: targetMsg.draftInfo || void 0,
+          identityId: this.identities.find((identity) => targetMsg.from.some((person2) => person2.email.toLowerCase() === identity.email.toLowerCase()))?.id
         });
-        void this.view.attachCompose(message.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
+        void this.view.attachCompose(targetMsg.attachments.filter((file) => !file.inline).map((file) => ({ key: file.hash, name: file.name, size: file.size })));
         return;
       }
       case "forward-att": {

@@ -297,8 +297,8 @@ export function renderSidebarRows(rows: SidebarRow[], filtering: boolean): strin
     const pathNote = filtering && row.depth > 0 ? `<span class="sr"> (${esc(row.path)})</span>` : "";
     const label = `${symbol}<span class="folder-name">${esc(name)}${pathNote}</span>${count}`;
     const main = row.info.selectable
-      ? `<button type="button" class="folder" data-folder="${target}" data-depth="${row.depth}" aria-current="${row.current ? "page" : "false"}" title="${esc(row.path)}">${label}</button>`
-      : `<button type="button" class="folder is-group" data-action="f-toggle" data-target="${target}" data-depth="${row.depth}" title="${esc(`${row.path} · ${t("FOLDERS_UI.NOT_SELECTABLE", "nicht auswählbar")}`)}"${row.hasChildren ? ` aria-expanded="${row.collapsed ? "false" : "true"}"` : " disabled"}>${label}</button>`;
+      ? `<button type="button" class="folder" data-folder="${target}" data-role="${esc(row.role || "")}" data-depth="${row.depth}" aria-current="${row.current ? "page" : "false"}" title="${esc(row.path)}">${label}</button>`
+      : `<button type="button" class="folder is-group" data-action="f-toggle" data-target="${target}" data-role="${esc(row.role || "")}" data-depth="${row.depth}" title="${esc(`${row.path} · ${t("FOLDERS_UI.NOT_SELECTABLE", "nicht auswählbar")}`)}"${row.hasChildren ? ` aria-expanded="${row.collapsed ? "false" : "true"}"` : " disabled"}>${label}</button>`;
     const more = row.actions.length
       ? `<button type="button" class="icon-btn fmore" data-action="f-menu" data-target="${target}" aria-haspopup="menu" aria-expanded="false" aria-label="${esc(`${t("FOLDERS_UI.ACTIONS_FOR", "Aktionen für")} ${name}`)}" title="${esc(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}">${icon("more")}</button>`
       : "";
