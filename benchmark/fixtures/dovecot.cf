@@ -1,0 +1,2 @@
+# Synthetic concurrency fixture only; not a production mail-server recommendation.
+mail_max_userip_connections = 100

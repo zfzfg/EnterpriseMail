@@ -407,6 +407,14 @@ def main() -> int:
             target.add_argument("--rows", type=int, default=20)
             target.add_argument("--iterations", type=int, default=1)
             target.add_argument("--runs", type=int)
+        else:
+            target.add_argument(
+                "--candidate",
+                type=int,
+                choices=(8, 16, 30),
+                action="append",
+                help="Measure only this candidate; repeat the option to select several",
+            )
     down = sub.add_parser("down", help="Stop only this isolated Compose project")
     down.add_argument("--volumes", action="store_true", help="Also delete this benchmark project's synthetic volumes")
     args = parser.parse_args()
@@ -452,7 +460,7 @@ def main() -> int:
         else:
             outcomes = []
             image_ids = set()
-            for index, candidate in enumerate(config["fpm_candidates"]):
+            for index, candidate in enumerate(args.candidate or config["fpm_candidates"]):
                 prepare(config, candidate, directory, args.build and index == 0)
                 environment = json.loads((directory / f"candidate-{candidate}" / "environment.json").read_text(encoding="utf-8"))
                 image_id = environment.get("docker", {}).get("value", {}).get("image", {}).get("id")

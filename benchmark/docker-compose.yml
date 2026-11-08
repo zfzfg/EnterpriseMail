@@ -35,6 +35,11 @@ services:
       mock-llm:
         condition: service_healthy
 
+  mail:
+    volumes:
+      # Permit concurrent benchmark sessions from the single synthetic account.
+      - ${BENCH_BENCHMARK:-../../../benchmark}/fixtures/dovecot.cf:/tmp/docker-mailserver/dovecot.cf:ro
+
   mock-llm:
     build:
       context: ${BENCH_ROOT:-../../..}
