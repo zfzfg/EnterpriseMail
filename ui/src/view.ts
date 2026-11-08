@@ -201,6 +201,7 @@ export interface MailView {
   setList(rows: MessageRow[], empty: string, error: string, more: boolean, searching: boolean): void;
   setReader(data: ReaderData | null, loading: string, error: string): void;
   setBulk(data: BulkData): void;
+  setSelectionCount(count: number): void;
   setChecks(visible: boolean): void;
   setRefreshing(busy: boolean): void;
   setAccounts(items: AccountItem[]): void;
@@ -387,8 +388,29 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
               <div class="menu menu-right" id="view-menu" role="menu" hidden></div>
             </div>
-            <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle auswählen" title="Alle auswählen (Strg+A)">${icon("select-all")}</button>
+            <div class="bar-more select-more">
+              <button type="button" class="icon-btn select-btn" data-action="m-select-all" aria-label="${esc(t("MESSAGE_LIST.BUTTON_SELECT_ALL", "Alle auswählen"))}" title="${esc(t("MESSAGE_LIST.BUTTON_SELECT_ALL", "Alle auswählen"))} (Strg+A)">${icon("select-all")}</button>
+              <button type="button" class="icon-btn select-menu-btn" data-action="select-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="select-menu" aria-label="${esc(t("GLOBAL.SELECTION", "Auswahlmenü"))}" title="${esc(t("GLOBAL.SELECTION", "Auswahlmenü"))}">${icon("chevron-down")}</button>
+              <div class="menu menu-right" id="select-menu" role="menu" hidden>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="all">${icon("checkbox-checked")}<span>${esc(t("MESSAGE_LIST.SELECT_ALL", "Alle"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="unread">${icon("mark-unread")}<span>${esc(t("SEARCH.UNSEEN", "Ungelesene"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="read">${icon("mark-read")}<span>${esc(t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Gelesene"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="flagged">${icon("flag-filled")}<span>${esc(t("SEARCH.FLAGGED", "Markierte"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="unflagged">${icon("flag")}<span>${esc(t("MESSAGE_LIST.FLAG_REMOVE", "Nicht markierte"))}</span></button>
+                <hr class="menu-sep">
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="none">${icon("close")}<span>${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
+              </div>
+            </div>
             <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
+            <div class="selection-head" id="selection-head" hidden>
+              <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
+              <span class="selection-count mono" id="selection-count">0 ausgewählt</span>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
+              <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
+              <button type="button" class="icon-btn" data-action="m-move" aria-label="${esc(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}" title="${esc(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}">${icon("move")}</button>
+              <button type="button" class="icon-btn" data-action="delete" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
+            </div>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
@@ -426,6 +448,17 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
+            <div class="bulk-bar" id="bulk-bar" hidden>
+              <button type="button" class="icon-btn" data-action="back" aria-label="${esc(t("GLOBAL.BACK", "Zurück"))}" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${icon("back")}</button>
+              <span class="bulk-bar-count mono" id="bulk-bar-count">0 ausgewählt</span>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
+              <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
+              <button type="button" class="icon-btn" data-action="m-move" aria-label="${esc(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}" title="${esc(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}">${icon("move")}</button>
+              <button type="button" class="icon-btn" data-action="archive" data-bulk-archive hidden aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="icon-btn" data-action="delete" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
+              <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
+            </div>
             <button type="button" class="text-btn bar-btn" data-action="back" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zurück"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
@@ -669,8 +702,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   function pane(name: string): void {
     if (!shell) return;
     shell.dataset.pane = name;
-    const back = shell.querySelector("[data-action='back']") as HTMLButtonElement;
-    back.hidden = wide() || name !== "reader";
+    shell.querySelectorAll<HTMLButtonElement>("[data-action='back']").forEach((back) => {
+      back.hidden = wide() || name !== "reader";
+    });
   }
 
   let expanded = false;
@@ -723,14 +757,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   }
 
   function closeMenu(): void {
-    shell?.querySelectorAll<HTMLElement>("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu").forEach((menu) => { menu.hidden = true; });
-    shell?.querySelectorAll<HTMLElement>("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu']").forEach((button) => {
+    shell?.querySelectorAll<HTMLElement>("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu, #select-menu").forEach((menu) => { menu.hidden = true; });
+    shell?.querySelectorAll<HTMLElement>("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu'], [data-action='select-menu']").forEach((button) => {
       button.setAttribute("aria-expanded", "false");
     });
   }
 
   function anyMenuOpen(): boolean {
-    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden])"));
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden]), #select-menu:not([hidden])"));
   }
 
   let addrTarget: { email: string; name: string } = { email: "", name: "" };
@@ -933,6 +967,20 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           menuReturn = target;
           (menuEl.querySelector(".menu-item") as HTMLElement | null)?.focus({ preventScroll: true });
         }
+      } else if (action === "select-menu") {
+        const menuEl = shell?.querySelector("#select-menu") as HTMLElement | null;
+        if (!menuEl) return;
+        const open = menuEl.hidden;
+        closeMenu();
+        if (open) {
+          menuEl.hidden = false;
+          target.setAttribute("aria-expanded", "true");
+          menuReturn = target;
+          (menuEl.querySelector(".menu-item") as HTMLElement | null)?.focus({ preventScroll: true });
+        }
+      } else if (action === "select-filter") {
+        closeMenu();
+        actions.act("select-filter", { filter: target.dataset.filter || "all" });
       } else if (action === "sort" || action === "threads-toggle" || action === "group-toggle") {
         closeMenu();
         (shell?.querySelector("[data-action='view-menu']") as HTMLElement | null)?.focus({ preventScroll: true });
@@ -966,6 +1014,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           body.scrollTop = top;
           (body.querySelector("[data-action='m-details']") as HTMLElement | null)?.focus({ preventScroll: true });
         }
+      } else if (action === "m-bulk-pane") {
+        if (!wide()) pane("reader");
       } else if (action === "m-fullscreen") {
         closeMenu();
         toggleFullscreen();
@@ -1393,6 +1443,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         }
         if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
         if (!docked() && shell?.dataset.sidebar === "open") { setSidebar(false); return; }
+        const selHead = shell?.querySelector("#selection-head:not([hidden])");
+        if (selHead) {
+          event.preventDefault();
+          actions.act("clear-selection", {});
+          return;
+        }
         const bookMenu = shell.querySelector<HTMLElement>("#book-menu:not([hidden]), #book-add:not([hidden])");
         if (bookMenu) {
           bookMenu.hidden = true;
@@ -2079,14 +2135,38 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </div>`;
         return;
       }
+      if (data) this.setSelectionCount(0);
       renderReader(body, data, expanded);
       body.scrollTop = 0;
     },
+    setSelectionCount(count) {
+      if (!shell) return;
+      const head = shell.querySelector("#selection-head") as HTMLElement | null;
+      const paneHead = shell.querySelector(".list-pane .pane-head") as HTMLElement | null;
+      const bulkBar = shell.querySelector("#bulk-bar") as HTMLElement | null;
+      const countLabel = shell.querySelector("#selection-count") as HTMLElement | null;
+      const bulkBarCount = shell.querySelector("#bulk-bar-count") as HTMLElement | null;
+      const on = count > 0;
+      paneHead?.classList.toggle("is-selecting", on);
+      if (head) head.hidden = !on;
+      if (bulkBar) bulkBar.hidden = !on;
+      const text = count === 1 ? "1 ausgewählt" : `${count} ausgewählt`;
+      if (countLabel) countLabel.textContent = text;
+      if (bulkBarCount) bulkBarCount.textContent = text;
+    },
     setBulk(data) {
+      if (shell) shell.dataset.reading = "0";
       const body = shell?.querySelector("#reader-body") as HTMLElement | null;
+      const readerPlace = shell?.querySelector("#reader-place") as HTMLElement | null;
+      const notice = shell?.querySelector("#notice") as HTMLElement | null;
+      if (readerPlace) readerPlace.textContent = "";
+      if (notice) notice.textContent = "";
+      this.setStrip(null);
       paintBar(null);
+      this.setSelectionCount(data.count);
+      const bulkArchive = shell?.querySelector("[data-bulk-archive]") as HTMLElement | null;
+      if (bulkArchive) bulkArchive.hidden = !data.place.archive;
       if (body) renderBulk(body, data);
-      if (!wide()) pane("reader");
     },
     setChecks(visible) {
       shell?.classList.toggle("with-checks", visible);
@@ -2237,10 +2317,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (line) line.textContent = dues;
     },
     setStrip(state) {
-      const strip = shell?.querySelector("#strip");
+      const strip = shell?.querySelector("#strip") as HTMLElement | null;
       if (!strip) return;
       strip.replaceChildren();
-      if (!state) return;
+      if (!state) {
+        strip.hidden = true;
+        return;
+      }
+      strip.hidden = false;
       if (state.loading) {
         const p = document.createElement("p");
         p.className = "assist-status quiet";

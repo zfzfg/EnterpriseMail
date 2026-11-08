@@ -4,7 +4,7 @@ import {
 } from "./api";
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
-import type { ReaderFile, ReaderPlace } from "./reader";
+import type { BulkAssistState, BulkMessageSummary, BulkReplyItem, BulkSummaryState, ReaderFile, ReaderPlace } from "./reader";
 import { applyDesk, loadDesk, readCaps, writeProp, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
 import type { ComposeValues } from "./compose";
 import {
@@ -242,6 +242,12 @@ class Session {
   private chatActions: Record<string, unknown>[] = [];
   private chatBusy = false;
   private replies: { label: string; body: string }[] = [];
+  private bulkSummary: BulkSummaryState | null = null;
+  private bulkSummaryLoading = "";
+  private bulkSummaryError = "";
+  private bulkRepliesList: BulkReplyItem[] = [];
+  private bulkRepliesLoading = "";
+  private bulkRepliesError = "";
   private draftBackup = "";
   private draftAbort: AbortController | null = null;
   private tagged = new Set<string>();
@@ -1752,13 +1758,69 @@ class Session {
       .map((row) => ({ fullName: row.info.fullName, name: this.folderName(row.info), depth: row.depth, role: row.role }));
   }
 
+  private clearBulkState(): void {
+    this.bulkSummary = null;
+    this.bulkSummaryLoading = "";
+    this.bulkSummaryError = "";
+    this.bulkRepliesList = [];
+    this.bulkRepliesLoading = "";
+    this.bulkRepliesError = "";
+  }
+
   private paintBulk(): void {
     if (!this.checked.size) {
+      this.clearBulkState();
+      this.view.setSelectionCount?.(0);
       if (this.current) void this.paintLetter();
       else this.view.setReader(null, "", "");
       return;
     }
-    this.view.setBulk({ count: this.checked.size, place: this.place(), zip: this.prefs.zip });
+    this.view.setStrip(null);
+    this.view.notice("");
+    if (this.bulkRepliesList.length) {
+      this.bulkRepliesList = this.bulkRepliesList.filter((r) => this.checked.has(r.uid));
+    }
+    const checkedUids = [...this.checked];
+    const selectedMsgs = checkedUids
+      .map((uid) => this.messages.find((m) => m.uid === uid))
+      .filter((m): m is Msg => Boolean(m));
+
+    const unseenCount = selectedMsgs.filter((m) => !seen(m.flags)).length;
+    const flaggedCount = selectedMsgs.filter((m) => hasFlag(m.flags, "\\flagged")).length;
+
+    const summaries: BulkMessageSummary[] = selectedMsgs.map((m) => ({
+      uid: m.uid,
+      who: label(m.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
+      subject: m.subject || "(ohne Betreff)",
+      when: when(m.date),
+      unseen: !seen(m.flags),
+      flagged: hasFlag(m.flags, "\\flagged")
+    }));
+
+    const assist: BulkAssistState | undefined = (this.assistFlags?.summarize || this.assistFlags?.replies)
+      ? {
+          summarize: Boolean(this.assistFlags?.summarize),
+          replies: Boolean(this.assistFlags?.replies),
+          loadingSummary: this.bulkSummaryLoading || undefined,
+          loadingReplies: this.bulkRepliesLoading || undefined,
+          error: this.bulkSummaryError || this.bulkRepliesError || undefined,
+          summary: this.bulkSummary,
+          repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : undefined
+        }
+      : undefined;
+
+    this.view.setSelectionCount?.(this.checked.size);
+    this.view.setBulk({
+      count: this.checked.size,
+      place: this.place(),
+      zip: this.prefs.zip,
+      folderName: this.folder,
+      totalInFolder: this.total,
+      unseenCount,
+      flaggedCount,
+      messages: summaries,
+      assist
+    });
   }
 
   private letterPrint(): { subject: string; from: string; to: string; cc: string; when: string; body: string; kind: "html" | "plain"; attachments: { name: string; href: string }[] } | null {
@@ -2002,6 +2064,31 @@ class Session {
         const order = this.visible().map((item) => item.uid);
         if (order.length && order.every((uid) => this.checked.has(uid))) this.checked.clear();
         else order.forEach((uid) => this.checked.add(uid));
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "select-filter": {
+        const filter = data.filter || "all";
+        const visibleMsgs = this.visible();
+        this.checked.clear();
+        if (filter === "all") {
+          visibleMsgs.forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "unread") {
+          visibleMsgs.filter((m) => !seen(m.flags)).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "read") {
+          visibleMsgs.filter((m) => seen(m.flags)).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "flagged") {
+          visibleMsgs.filter((m) => hasFlag(m.flags, "\\flagged")).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "unflagged") {
+          visibleMsgs.filter((m) => !hasFlag(m.flags, "\\flagged")).forEach((m) => this.checked.add(m.uid));
+        }
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "select-folder": {
+        this.messages.forEach((m) => this.checked.add(m.uid));
         this.paintList();
         this.paintBulk();
         return;
@@ -2362,6 +2449,15 @@ class Session {
           this.view.notice(explain(error));
         }
         return;
+      case "bulk-summarize":
+        await this.assist("bulk-summarize", data);
+        return;
+      case "bulk-replies":
+        await this.assist("bulk-replies", data);
+        return;
+      case "use-bulk-reply":
+        await this.assist("use-bulk-reply", data);
+        return;
       default:
         if (name.startsWith("f-")) await this.folderAction(name, data);
         return;
@@ -2561,6 +2657,98 @@ class Session {
         to: author ? address(author) : "",
         cc: "",
         subject: /^re:/i.test(this.current.subject) ? this.current.subject : `Re: ${this.current.subject}`,
+        body: reply.body
+      });
+      return;
+    }
+    if (name === "bulk-summarize") {
+      if (!this.checked.size) return;
+      if (!await this.consent()) return;
+      this.bulkSummaryLoading = t("AI_COPILOT.BULK_SUMMARIZING", "Ausgewählte Mails werden zusammengefasst …");
+      this.bulkSummaryError = "";
+      this.paintBulk();
+      try {
+        const result = await plugin<{ summary: { tldr?: string; points?: string[]; model?: string }; cached?: boolean }>("AiSummarize", {
+          folder: this.folder,
+          uids: [...this.checked],
+          force: data.force === "1",
+          sent: this.sentFolder
+        });
+        this.bulkSummary = {
+          tldr: result.summary?.tldr || "",
+          points: Array.isArray(result.summary?.points) ? result.summary.points : [],
+          cached: Boolean(result.cached),
+          model: result.summary?.model || this.assistFlags?.provider || ""
+        };
+        this.bulkSummaryLoading = "";
+      } catch (error) {
+        this.bulkSummaryLoading = "";
+        this.bulkSummaryError = explain(error);
+      }
+      this.paintBulk();
+      return;
+    }
+    if (name === "bulk-replies") {
+      if (!this.checked.size) return;
+      if (!await this.consent()) return;
+      this.bulkRepliesLoading = t("AI_COPILOT.GENERATING_BULK_REPLIES", "Antwortvorschläge für ausgewählte Mails werden erstellt …");
+      this.bulkRepliesError = "";
+      this.paintBulk();
+      const checkedUids = [...this.checked];
+      const targetMsgs = checkedUids
+        .map((uid) => this.messages.find((m) => m.uid === uid))
+        .filter((m): m is Msg => Boolean(m))
+        .slice(0, 10);
+      try {
+        const results = await Promise.allSettled(
+          targetMsgs.map(async (msg) => {
+            const res = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
+              folder: this.folder,
+              uids: [msg.uid],
+              sent: this.sentFolder
+            });
+            return {
+              uid: msg.uid,
+              subject: msg.subject || "(ohne Betreff)",
+              who: label(msg.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
+              replies: (res.replies || []).slice(0, 3)
+            };
+          })
+        );
+        const successful: BulkReplyItem[] = [];
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value.replies.length > 0) {
+            successful.push(r.value);
+          }
+        }
+        if (!successful.length) {
+          this.bulkRepliesError = t("AI_COPILOT.NO_REPLIES_GENERATED", "Keine Antwortvorschläge für die ausgewählten Mails erhalten.");
+        } else {
+          this.bulkRepliesList = successful;
+        }
+        this.bulkRepliesLoading = "";
+      } catch (error) {
+        this.bulkRepliesLoading = "";
+        this.bulkRepliesError = explain(error);
+      }
+      this.paintBulk();
+      return;
+    }
+    if (name === "use-bulk-reply") {
+      const uid = Number(data.uid || 0);
+      const index = Number(data.index || 0);
+      const item = this.bulkRepliesList.find((r) => r.uid === uid);
+      const reply = item?.replies[index];
+      if (!reply) return;
+      const msg = this.messages.find((m) => m.uid === uid);
+      const author = msg?.replyTo[0] || msg?.from[0];
+      const subject = msg?.subject ? (/^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}`) : "Re:";
+      this.view.openCompose({
+        title: reply.label || "Antworten",
+        mode: "reply",
+        to: author ? address(author) : "",
+        cc: "",
+        subject,
         body: reply.body
       });
       return;

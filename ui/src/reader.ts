@@ -71,10 +71,49 @@ export interface ReaderCrypto {
   text: string;
 }
 
+export interface BulkMessageSummary {
+  uid: number;
+  who: string;
+  subject: string;
+  when: string;
+  unseen: boolean;
+  flagged: boolean;
+}
+
+export interface BulkReplyItem {
+  uid: number;
+  subject: string;
+  who: string;
+  replies: { label: string; body: string }[];
+}
+
+export interface BulkSummaryState {
+  tldr: string;
+  points: string[];
+  cached?: boolean;
+  model?: string;
+}
+
+export interface BulkAssistState {
+  summarize: boolean;
+  replies: boolean;
+  loadingSummary?: string;
+  loadingReplies?: string;
+  error?: string;
+  summary?: BulkSummaryState | null;
+  repliesList?: BulkReplyItem[];
+}
+
 export interface BulkData {
   count: number;
   place: ReaderPlace;
   zip: boolean;
+  folderName?: string;
+  totalInFolder?: number;
+  unseenCount?: number;
+  flaggedCount?: number;
+  messages?: BulkMessageSummary[];
+  assist?: BulkAssistState | null;
 }
 
 function esc(value: string): string {
@@ -245,26 +284,167 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
   body.querySelector(".read-measure")?.append(frame);
 }
 
+function withAssist(label: string): string {
+  return `${icon("assist")}<span class="btn-label">${esc(label)}</span><span class="ai-tag" aria-hidden="true">KI</span>`;
+}
+
 export function renderBulk(body: HTMLElement, data: BulkData): void {
   const b = (action: string, name: IconName, label: string, danger = false) =>
     `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc(label)}</span></button>`;
-  body.innerHTML = `
-    <div class="bulk">
-      <p class="title title-md">${data.count} ${esc(t("MESSAGE_LIST.SELECTED_MAILS", "Mails ausgewählt"))}</p>
-      <div class="bulk-grid">
-        ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
-        ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
-        ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
-        ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
-        ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben …"))}
-        ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "Kopieren …"))}
-        ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
-        ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
-        ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
-        ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
-        ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen") : t("GLOBAL.DELETE", "Löschen"), true)}
-        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen"), true)}
+
+  const countText = data.count === 1
+    ? t("MESSAGE_LIST.ONE_MAIL_SELECTED", "1 Mail ausgewählt")
+    : t("MESSAGE_LIST.PLURAL_MAILS_SELECTED", "%COUNT% Mails ausgewählt").replace("%COUNT%", String(data.count));
+
+  const badges: string[] = [];
+  if (data.folderName) {
+    badges.push(`<span class="chip chip-static">${icon("folder")}<span>${esc(data.folderName)}</span></span>`);
+  }
+  if (data.unseenCount) {
+    badges.push(`<span class="chip chip-static">${icon("mark-unread")}<span>${data.unseenCount === 1 ? t("MESSAGE.ONE_UNREAD", "1 ungelesen") : `${data.unseenCount} ungelesen`}</span></span>`);
+  }
+  if (data.flaggedCount) {
+    badges.push(`<span class="chip chip-static">${icon("flag-filled")}<span>${data.flaggedCount === 1 ? t("MESSAGE.ONE_FLAGGED", "1 markiert") : `${data.flaggedCount} markiert`}</span></span>`);
+  }
+
+  const aiStatus = (data.assist && (data.assist.loadingSummary || data.assist.loadingReplies || data.assist.error)) ? `
+    <div class="bulk-ai-status ${data.assist.error ? "error" : "quiet"}" role="${data.assist.error ? "alert" : "status"}">
+      ${icon(data.assist.error ? "error" : "loading")}
+      <span>${esc(data.assist.error || data.assist.loadingSummary || data.assist.loadingReplies || "")}</span>
+    </div>` : "";
+
+  const aiSummary = data.assist?.summary ? `
+    <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung der ausgewählten Mails"))}">
+      <div class="bulk-ai-head">
+        <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}</span>
+        <span class="quiet">(${data.count} Mails)</span>
       </div>
-      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
+      <p class="bulk-summary-tldr">${esc(data.assist.summary.tldr)}</p>
+      ${data.assist.summary.points && data.assist.summary.points.length ? `
+        <ul class="bulk-summary-points">
+          ${data.assist.summary.points.map((pt) => `<li>${esc(pt)}</li>`).join("")}
+        </ul>` : ""}
+      <div class="bulk-summary-meta">
+        <button type="button" class="text-btn ai-action text-btn-sm" data-action="m-bulk-summarize" data-force="1">
+          ${withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"))}
+        </button>
+        ${data.assist.summary.cached ? `<span class="quiet text-xs">${esc(t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher"))}</span>` : ""}
+      </div>
+      <p class="quiet assist-caveat">${esc(t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit den Mails abgleichen: Zusammenfassungen können Angaben falsch interpretieren."))}</p>
+    </section>` : "";
+
+  const aiReplies = (data.assist?.repliesList && data.assist.repliesList.length) ? `
+    <section class="bulk-ai-card bulk-ai-replies" aria-label="${esc(t("AI_COPILOT.BULK_REPLIES_TITLE", "Antwortvorschläge für ausgewählte Mails"))}">
+      <div class="bulk-ai-head">
+        <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_REPLIES_TITLE", "Antwortvorschläge für ausgewählte Mails"))}</span>
+        <p class="quiet">${esc(t("AI_COPILOT.BULK_REPLIES_SUBTITLE", "Vorschlag auswählen, um eine Antwort auf die jeweilige Mail zu verfassen:"))}</p>
+      </div>
+      <div class="bulk-replies-list">
+        ${data.assist.repliesList.map((item) => `
+          <div class="bulk-reply-row">
+            <div class="bulk-reply-mail-head">
+              <span class="bulk-reply-icon">${icon("reply")}</span>
+              <strong class="bulk-reply-title">${esc(item.subject || "(ohne Betreff)")}</strong>
+              <span class="bulk-reply-sender quiet">${esc(item.who)}</span>
+            </div>
+            <div class="prompts reply-prompts">
+              ${item.replies.length ? item.replies.map((reply, rIndex) => `
+                <button type="button" class="prompt reply-chip" data-action="m-use-bulk-reply" data-uid="${item.uid}" data-index="${rIndex}" title="${esc(reply.body)}">
+                  ${esc(reply.label || "Antwort")}
+                </button>
+              `).join("") : `<span class="quiet">${esc(t("AI_COPILOT.NO_REPLIES_FOR_MAIL", "Keine Vorschläge für diese Mail."))}`}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </section>` : "";
+
+  const previewList = (data.messages && data.messages.length) ? `
+    <section class="bulk-preview" aria-label="${esc(t("BULK.PREVIEW_TITLE", "Ausgewählte Nachrichten"))}">
+      <div class="bulk-preview-head">
+        <h3 class="mono">${esc(t("BULK.PREVIEW_TITLE", "Ausgewählte Nachrichten"))} <span class="quiet">(${data.messages.length})</span></h3>
+      </div>
+      <ul class="bulk-msg-list">
+        ${data.messages.map((msg) => `
+          <li class="bulk-msg-item">
+            <span class="bulk-msg-status" aria-hidden="true">${msg.unseen ? '<span class="unread-mark"></span>' : ""}${msg.flagged ? icon("flag-filled") : ""}</span>
+            <div class="bulk-msg-meta">
+              <span class="bulk-msg-who">${esc(msg.who || "(unbekannt)")}</span>
+              <span class="bulk-msg-subj">${esc(msg.subject || "(ohne Betreff)")}</span>
+            </div>
+            <time class="bulk-msg-when quiet">${esc(msg.when)}</time>
+            <button type="button" class="icon-btn bulk-msg-remove" data-action="m-check" data-ref="${msg.uid}" aria-label="${esc(t("BULK.DESELECT_MAIL", "Aus Auswahl entfernen: %SUBJ%").replace("%SUBJ%", msg.subject || ""))}" title="${esc(t("BULK.DESELECT", "Aus Auswahl entfernen"))}">${icon("close")}</button>
+          </li>
+        `).join("")}
+      </ul>
+    </section>` : "";
+
+  body.innerHTML = `
+    <div class="bulk read-measure">
+      <header class="bulk-head">
+        <div class="bulk-title-row">
+          <div class="bulk-title-wrap">
+            <h2 class="title title-md">${esc(countText)}</h2>
+            ${badges.length ? `<div class="bulk-badges">${badges.join("")}</div>` : ""}
+          </div>
+          <button type="button" class="text-btn bulk-clear-btn" data-action="m-clear-selection" title="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">
+            ${icon("close")}
+            <span class="btn-label">${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="bulk-bento">
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc(t("BULK.STATUS_TITLE", "Status & Markierung"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
+            ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
+            ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
+            ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
+          </div>
+        </div>
+
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc(t("BULK.ORGANIZE_TITLE", "Ablage & Ordnung"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "In Ordner verschieben …"))}
+            ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "In Ordner kopieren …"))}
+            ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
+            ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
+          </div>
+        </div>
+
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc(t("BULK.EXPORT_TITLE", "Weiterleiten & Export"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
+            ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
+          </div>
+        </div>
+
+        ${(data.assist && (data.assist.summarize || data.assist.replies)) ? `
+          <div class="bulk-card bulk-card--ai">
+            <h3 class="bulk-card-title mono">${withAssist(t("AI_COPILOT.CARD_TITLE", "KI-Unterstützung"))}</h3>
+            <div class="bulk-btn-group">
+              ${data.assist.summarize ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-summarize" title="${esc(t("AI_COPILOT.BULK_SUMMARIZE_HINT", "Alle ausgewählten Mails mit KI zusammenfassen"))}">${withAssist(t("AI_COPILOT.BULK_SUMMARIZE", "Auswahl zusammenfassen"))}</button>` : ""}
+              ${data.assist.replies ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-replies" title="${esc(t("AI_COPILOT.BULK_REPLIES_HINT", "Antwortvorschläge für jede ausgewählte Mail erstellen"))}">${withAssist(t("AI_COPILOT.BULK_REPLIES", "Antworten für alle vorschlagen"))}</button>` : ""}
+            </div>
+          </div>` : ""}
+
+        <div class="bulk-card bulk-card--danger">
+          <h3 class="bulk-card-title mono">${esc(t("BULK.DANGER_TITLE", "Löschen"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen") : t("GLOBAL.DELETE", "In den Papierkorb verschieben"), true)}
+            ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endgültig löschen"), true)}
+          </div>
+        </div>
+      </div>
+
+      ${aiStatus}
+      ${aiSummary}
+      ${aiReplies}
+
+      ${previewList}
     </div>`;
 }

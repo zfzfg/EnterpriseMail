@@ -4642,26 +4642,157 @@ function renderReader(body, data, expanded) {
   frame.srcdoc = data.srcdoc;
   body.querySelector(".read-measure")?.append(frame);
 }
+function withAssist(label2) {
+  return `${icon("assist")}<span class="btn-label">${esc7(label2)}</span><span class="ai-tag" aria-hidden="true">KI</span>`;
+}
 function renderBulk(body, data) {
   const b = (action, name, label2, danger = false) => `<button type="button" class="${danger ? "danger" : "text-btn"} bulk-btn" data-action="${action}">${icon(name)}<span class="btn-label">${esc7(label2)}</span></button>`;
-  body.innerHTML = `
-    <div class="bulk">
-      <p class="title title-md">${data.count} ${esc7(t("MESSAGE_LIST.SELECTED_MAILS", "Mails ausgew\xE4hlt"))}</p>
-      <div class="bulk-grid">
-        ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
-        ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
-        ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
-        ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
-        ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben \u2026"))}
-        ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "Kopieren \u2026"))}
-        ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
-        ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
-        ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
-        ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
-        ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen") : t("GLOBAL.DELETE", "L\xF6schen"), true)}
-        ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen"), true)}
+  const countText = data.count === 1 ? t("MESSAGE_LIST.ONE_MAIL_SELECTED", "1 Mail ausgew\xE4hlt") : t("MESSAGE_LIST.PLURAL_MAILS_SELECTED", "%COUNT% Mails ausgew\xE4hlt").replace("%COUNT%", String(data.count));
+  const badges = [];
+  if (data.folderName) {
+    badges.push(`<span class="chip chip-static">${icon("folder")}<span>${esc7(data.folderName)}</span></span>`);
+  }
+  if (data.unseenCount) {
+    badges.push(`<span class="chip chip-static">${icon("mark-unread")}<span>${data.unseenCount === 1 ? t("MESSAGE.ONE_UNREAD", "1 ungelesen") : `${data.unseenCount} ungelesen`}</span></span>`);
+  }
+  if (data.flaggedCount) {
+    badges.push(`<span class="chip chip-static">${icon("flag-filled")}<span>${data.flaggedCount === 1 ? t("MESSAGE.ONE_FLAGGED", "1 markiert") : `${data.flaggedCount} markiert`}</span></span>`);
+  }
+  const aiStatus = data.assist && (data.assist.loadingSummary || data.assist.loadingReplies || data.assist.error) ? `
+    <div class="bulk-ai-status ${data.assist.error ? "error" : "quiet"}" role="${data.assist.error ? "alert" : "status"}">
+      ${icon(data.assist.error ? "error" : "loading")}
+      <span>${esc7(data.assist.error || data.assist.loadingSummary || data.assist.loadingReplies || "")}</span>
+    </div>` : "";
+  const aiSummary = data.assist?.summary ? `
+    <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc7(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung der ausgew\xE4hlten Mails"))}">
+      <div class="bulk-ai-head">
+        <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgew\xE4hlten Mails"))}</span>
+        <span class="quiet">(${data.count} Mails)</span>
       </div>
-      <button type="button" class="text-btn" data-action="m-clear-selection">${icon("close")}<span class="btn-label">${esc7(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
+      <p class="bulk-summary-tldr">${esc7(data.assist.summary.tldr)}</p>
+      ${data.assist.summary.points && data.assist.summary.points.length ? `
+        <ul class="bulk-summary-points">
+          ${data.assist.summary.points.map((pt) => `<li>${esc7(pt)}</li>`).join("")}
+        </ul>` : ""}
+      <div class="bulk-summary-meta">
+        <button type="button" class="text-btn ai-action text-btn-sm" data-action="m-bulk-summarize" data-force="1">
+          ${withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"))}
+        </button>
+        ${data.assist.summary.cached ? `<span class="quiet text-xs">${esc7(t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher"))}</span>` : ""}
+      </div>
+      <p class="quiet assist-caveat">${esc7(t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit den Mails abgleichen: Zusammenfassungen k\xF6nnen Angaben falsch interpretieren."))}</p>
+    </section>` : "";
+  const aiReplies = data.assist?.repliesList && data.assist.repliesList.length ? `
+    <section class="bulk-ai-card bulk-ai-replies" aria-label="${esc7(t("AI_COPILOT.BULK_REPLIES_TITLE", "Antwortvorschl\xE4ge f\xFCr ausgew\xE4hlte Mails"))}">
+      <div class="bulk-ai-head">
+        <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_REPLIES_TITLE", "Antwortvorschl\xE4ge f\xFCr ausgew\xE4hlte Mails"))}</span>
+        <p class="quiet">${esc7(t("AI_COPILOT.BULK_REPLIES_SUBTITLE", "Vorschlag ausw\xE4hlen, um eine Antwort auf die jeweilige Mail zu verfassen:"))}</p>
+      </div>
+      <div class="bulk-replies-list">
+        ${data.assist.repliesList.map((item) => `
+          <div class="bulk-reply-row">
+            <div class="bulk-reply-mail-head">
+              <span class="bulk-reply-icon">${icon("reply")}</span>
+              <strong class="bulk-reply-title">${esc7(item.subject || "(ohne Betreff)")}</strong>
+              <span class="bulk-reply-sender quiet">${esc7(item.who)}</span>
+            </div>
+            <div class="prompts reply-prompts">
+              ${item.replies.length ? item.replies.map((reply, rIndex) => `
+                <button type="button" class="prompt reply-chip" data-action="m-use-bulk-reply" data-uid="${item.uid}" data-index="${rIndex}" title="${esc7(reply.body)}">
+                  ${esc7(reply.label || "Antwort")}
+                </button>
+              `).join("") : `<span class="quiet">${esc7(t("AI_COPILOT.NO_REPLIES_FOR_MAIL", "Keine Vorschl\xE4ge f\xFCr diese Mail."))}`}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </section>` : "";
+  const previewList = data.messages && data.messages.length ? `
+    <section class="bulk-preview" aria-label="${esc7(t("BULK.PREVIEW_TITLE", "Ausgew\xE4hlte Nachrichten"))}">
+      <div class="bulk-preview-head">
+        <h3 class="mono">${esc7(t("BULK.PREVIEW_TITLE", "Ausgew\xE4hlte Nachrichten"))} <span class="quiet">(${data.messages.length})</span></h3>
+      </div>
+      <ul class="bulk-msg-list">
+        ${data.messages.map((msg) => `
+          <li class="bulk-msg-item">
+            <span class="bulk-msg-status" aria-hidden="true">${msg.unseen ? '<span class="unread-mark"></span>' : ""}${msg.flagged ? icon("flag-filled") : ""}</span>
+            <div class="bulk-msg-meta">
+              <span class="bulk-msg-who">${esc7(msg.who || "(unbekannt)")}</span>
+              <span class="bulk-msg-subj">${esc7(msg.subject || "(ohne Betreff)")}</span>
+            </div>
+            <time class="bulk-msg-when quiet">${esc7(msg.when)}</time>
+            <button type="button" class="icon-btn bulk-msg-remove" data-action="m-check" data-ref="${msg.uid}" aria-label="${esc7(t("BULK.DESELECT_MAIL", "Aus Auswahl entfernen: %SUBJ%").replace("%SUBJ%", msg.subject || ""))}" title="${esc7(t("BULK.DESELECT", "Aus Auswahl entfernen"))}">${icon("close")}</button>
+          </li>
+        `).join("")}
+      </ul>
+    </section>` : "";
+  body.innerHTML = `
+    <div class="bulk read-measure">
+      <header class="bulk-head">
+        <div class="bulk-title-row">
+          <div class="bulk-title-wrap">
+            <h2 class="title title-md">${esc7(countText)}</h2>
+            ${badges.length ? `<div class="bulk-badges">${badges.join("")}</div>` : ""}
+          </div>
+          <button type="button" class="text-btn bulk-clear-btn" data-action="m-clear-selection" title="${esc7(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">
+            ${icon("close")}
+            <span class="btn-label">${esc7(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="bulk-bento">
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc7(t("BULK.STATUS_TITLE", "Status & Markierung"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-read", "mark-read", t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Als gelesen markieren"))}
+            ${b("m-unread-all", "mark-unread", t("MESSAGE_LIST.BUTTON_MARK_AS_UNREAD", "Als ungelesen markieren"))}
+            ${b("m-flag-all", "flag-filled", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}
+            ${b("m-unflag-all", "flag", t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen"))}
+          </div>
+        </div>
+
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc7(t("BULK.ORGANIZE_TITLE", "Ablage & Ordnung"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-move", "move", t("MESSAGE_LIST.BUTTON_MOVE", "In Ordner verschieben \u2026"))}
+            ${b("m-copy", "copy", t("MESSAGE_LIST.BUTTON_COPY", "In Ordner kopieren \u2026"))}
+            ${data.place.archive ? b("m-archive", "archive", t("GLOBAL.TO_ARCHIVE", "Archivieren")) : ""}
+            ${data.place.inSpam ? b("m-notspam", "not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam")) : data.place.spam ? b("m-spam", "spam", t("MESSAGE.BUTTON_SPAM", "Spam")) : ""}
+          </div>
+        </div>
+
+        <div class="bulk-card">
+          <h3 class="bulk-card-title mono">${esc7(t("BULK.EXPORT_TITLE", "Weiterleiten & Export"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("m-forward-att", "forward-attachment", t("COMPOSE.TITLE_FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}
+            ${data.zip ? b("m-zip-mails", "download-zip", t("MESSAGE_LIST.BUTTON_DOWNLOAD_ZIP", "Als ZIP laden")) : ""}
+          </div>
+        </div>
+
+        ${data.assist && (data.assist.summarize || data.assist.replies) ? `
+          <div class="bulk-card bulk-card--ai">
+            <h3 class="bulk-card-title mono">${withAssist(t("AI_COPILOT.CARD_TITLE", "KI-Unterst\xFCtzung"))}</h3>
+            <div class="bulk-btn-group">
+              ${data.assist.summarize ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-summarize" title="${esc7(t("AI_COPILOT.BULK_SUMMARIZE_HINT", "Alle ausgew\xE4hlten Mails mit KI zusammenfassen"))}">${withAssist(t("AI_COPILOT.BULK_SUMMARIZE", "Auswahl zusammenfassen"))}</button>` : ""}
+              ${data.assist.replies ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-replies" title="${esc7(t("AI_COPILOT.BULK_REPLIES_HINT", "Antwortvorschl\xE4ge f\xFCr jede ausgew\xE4hlte Mail erstellen"))}">${withAssist(t("AI_COPILOT.BULK_REPLIES", "Antworten f\xFCr alle vorschlagen"))}</button>` : ""}
+            </div>
+          </div>` : ""}
+
+        <div class="bulk-card bulk-card--danger">
+          <h3 class="bulk-card-title mono">${esc7(t("BULK.DANGER_TITLE", "L\xF6schen"))}</h3>
+          <div class="bulk-btn-group">
+            ${b("delete", "delete", data.place.inTrash ? t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen") : t("GLOBAL.DELETE", "In den Papierkorb verschieben"), true)}
+            ${data.place.inTrash ? "" : b("m-delete-forever", "delete-forever", t("MESSAGE.CONFIRM_DELETE", "Endg\xFCltig l\xF6schen"), true)}
+          </div>
+        </div>
+      </div>
+
+      ${aiStatus}
+      ${aiSummary}
+      ${aiReplies}
+
+      ${previewList}
     </div>`;
 }
 
@@ -5444,7 +5575,7 @@ function esc9(value) {
 function withIcon(name, label2) {
   return `${icon(name)}<span class="btn-label">${esc9(label2)}</span>`;
 }
-function withAssist(label2) {
+function withAssist2(label2) {
   return `${withIcon("assist", label2)}<span class="ai-tag" aria-hidden="true">KI</span>`;
 }
 var ROLE_ICON2 = {
@@ -5613,8 +5744,29 @@ function createView(root3, actions) {
               <button type="button" class="icon-btn" data-action="view-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="${esc9(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" title="${esc9(t("FOLDERS_UI.VIEW_MENU", "Sortierung und Ansicht"))}" hidden>${icon("sort")}</button>
               <div class="menu menu-right" id="view-menu" role="menu" hidden></div>
             </div>
-            <button type="button" class="icon-btn" data-action="m-select-all" aria-label="Alle ausw\xE4hlen" title="Alle ausw\xE4hlen (Strg+A)">${icon("select-all")}</button>
+            <div class="bar-more select-more">
+              <button type="button" class="icon-btn select-btn" data-action="m-select-all" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_SELECT_ALL", "Alle ausw\xE4hlen"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_SELECT_ALL", "Alle ausw\xE4hlen"))} (Strg+A)">${icon("select-all")}</button>
+              <button type="button" class="icon-btn select-menu-btn" data-action="select-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="select-menu" aria-label="${esc9(t("GLOBAL.SELECTION", "Auswahlmen\xFC"))}" title="${esc9(t("GLOBAL.SELECTION", "Auswahlmen\xFC"))}">${icon("chevron-down")}</button>
+              <div class="menu menu-right" id="select-menu" role="menu" hidden>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="all">${icon("checkbox-checked")}<span>${esc9(t("MESSAGE_LIST.SELECT_ALL", "Alle"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="unread">${icon("mark-unread")}<span>${esc9(t("SEARCH.UNSEEN", "Ungelesene"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="read">${icon("mark-read")}<span>${esc9(t("MESSAGE_LIST.BUTTON_MARK_AS_READ", "Gelesene"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="flagged">${icon("flag-filled")}<span>${esc9(t("SEARCH.FLAGGED", "Markierte"))}</span></button>
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="unflagged">${icon("flag")}<span>${esc9(t("MESSAGE_LIST.FLAG_REMOVE", "Nicht markierte"))}</span></button>
+                <hr class="menu-sep">
+                <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="none">${icon("close")}<span>${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
+              </div>
+            </div>
             <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
+            <div class="selection-head" id="selection-head" hidden>
+              <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
+              <span class="selection-count mono" id="selection-count">0 ausgew\xE4hlt</span>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc9(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc9(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
+              <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
+              <button type="button" class="icon-btn" data-action="m-move" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}">${icon("move")}</button>
+              <button type="button" class="icon-btn" data-action="delete" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
+            </div>
           </div>
           <form class="search-wrap" data-action="search">
             <label class="sr" for="search">Suche</label>
@@ -5652,6 +5804,17 @@ function createView(root3, actions) {
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="Brief">
           <div class="reader-bar">
+            <div class="bulk-bar" id="bulk-bar" hidden>
+              <button type="button" class="icon-btn" data-action="back" aria-label="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${icon("back")}</button>
+              <span class="bulk-bar-count mono" id="bulk-bar-count">0 ausgew\xE4hlt</span>
+              <span class="spacer"></span>
+              <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc9(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc9(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
+              <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
+              <button type="button" class="icon-btn" data-action="m-move" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}">${icon("move")}</button>
+              <button type="button" class="icon-btn" data-action="archive" data-bulk-archive hidden aria-label="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="icon-btn" data-action="delete" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
+              <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
+            </div>
             <button type="button" class="text-btn bar-btn" data-action="back" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
             <span class="quiet" id="reader-place"></span>
             <span class="spacer"></span>
@@ -5899,8 +6062,9 @@ function createView(root3, actions) {
   function pane(name) {
     if (!shell) return;
     shell.dataset.pane = name;
-    const back = shell.querySelector("[data-action='back']");
-    back.hidden = wide() || name !== "reader";
+    shell.querySelectorAll("[data-action='back']").forEach((back) => {
+      back.hidden = wide() || name !== "reader";
+    });
   }
   let expanded = false;
   let keyHandler = null;
@@ -5954,15 +6118,15 @@ function createView(root3, actions) {
     if (shell) shell.dataset.sidebar = open ? "open" : "closed";
   }
   function closeMenu() {
-    shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu").forEach((menu) => {
+    shell?.querySelectorAll("#account-menu, #more-menu, #addr-menu, #folder-menu, #view-menu, #select-menu").forEach((menu) => {
       menu.hidden = true;
     });
-    shell?.querySelectorAll("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu']").forEach((button3) => {
+    shell?.querySelectorAll("[data-action='account'], [data-action='m-more'], [data-action='f-menu'], [data-action='view-menu'], [data-action='select-menu']").forEach((button3) => {
       button3.setAttribute("aria-expanded", "false");
     });
   }
   function anyMenuOpen() {
-    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden])"));
+    return Boolean(shell?.querySelector("#account-menu:not([hidden]), #more-menu:not([hidden]), #addr-menu:not([hidden]), #folder-menu:not([hidden]), #view-menu:not([hidden]), #select-menu:not([hidden])"));
   }
   let addrTarget = { email: "", name: "" };
   let menuReturn = null;
@@ -6153,6 +6317,20 @@ function createView(root3, actions) {
           menuReturn = target;
           menuEl.querySelector(".menu-item")?.focus({ preventScroll: true });
         }
+      } else if (action === "select-menu") {
+        const menuEl = shell?.querySelector("#select-menu");
+        if (!menuEl) return;
+        const open = menuEl.hidden;
+        closeMenu();
+        if (open) {
+          menuEl.hidden = false;
+          target.setAttribute("aria-expanded", "true");
+          menuReturn = target;
+          menuEl.querySelector(".menu-item")?.focus({ preventScroll: true });
+        }
+      } else if (action === "select-filter") {
+        closeMenu();
+        actions.act("select-filter", { filter: target.dataset.filter || "all" });
       } else if (action === "sort" || action === "threads-toggle" || action === "group-toggle") {
         closeMenu();
         shell?.querySelector("[data-action='view-menu']")?.focus({ preventScroll: true });
@@ -6191,6 +6369,8 @@ function createView(root3, actions) {
           body.scrollTop = top;
           body.querySelector("[data-action='m-details']")?.focus({ preventScroll: true });
         }
+      } else if (action === "m-bulk-pane") {
+        if (!wide()) pane("reader");
       } else if (action === "m-fullscreen") {
         closeMenu();
         toggleFullscreen();
@@ -6652,6 +6832,12 @@ function createView(root3, actions) {
           setSidebar(false);
           return;
         }
+        const selHead = shell?.querySelector("#selection-head:not([hidden])");
+        if (selHead) {
+          event.preventDefault();
+          actions.act("clear-selection", {});
+          return;
+        }
         const bookMenu = shell.querySelector("#book-menu:not([hidden]), #book-add:not([hidden])");
         if (bookMenu) {
           bookMenu.hidden = true;
@@ -6939,7 +7125,7 @@ function createView(root3, actions) {
         <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
         <p class="quiet" id="dues"></p>
-        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc9(deadlineHint)}" title="${esc9(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
+        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc9(deadlineHint)}" title="${esc9(deadlineHint)}">${withAssist2(deadlineLabel)}</button>`;
       shell.querySelector(".account")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
@@ -6952,7 +7138,7 @@ function createView(root3, actions) {
       const triageHint = t("AI_COPILOT.TRIAGE_LLM_HINT", "Mails dieser Seite mit KI einordnen");
       filters.innerHTML = cats.map(
         ([id, label2], index) => `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc9(id === "all" ? t("AI_COPILOT.TAB_ALL", label2) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label2))}</button>`
-      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc9(triageHint)}" title="${esc9(triageHint)}">${withAssist(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
+      ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc9(triageHint)}" title="${esc9(triageHint)}">${withAssist2(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
     }
     if (flags.search && searchForm) {
@@ -6962,7 +7148,7 @@ function createView(root3, actions) {
       button3.className = "text-btn ai-action";
       button3.dataset.action = "lang-search";
       button3.hidden = true;
-      button3.innerHTML = withAssist(t("AI_COPILOT.SEARCH_INTERPRET", "Suchanfrage mit KI interpretieren"));
+      button3.innerHTML = withAssist2(t("AI_COPILOT.SEARCH_INTERPRET", "Suchanfrage mit KI interpretieren"));
       button3.title = searchHint;
       button3.setAttribute("aria-label", searchHint);
       searchForm.append(button3);
@@ -6991,7 +7177,7 @@ function createView(root3, actions) {
       ask.type = "button";
       ask.className = "text-btn assist-trigger ai-action";
       ask.dataset.action = "open-sheet";
-      ask.innerHTML = withAssist(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
+      ask.innerHTML = withAssist2(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
       ask.classList.add("bar-btn", "primary");
       ask.title = askHint;
       ask.setAttribute("aria-label", askHint);
@@ -7041,7 +7227,7 @@ function createView(root3, actions) {
           ${tones.map(([id, label2], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc9(t("AI_COPILOT.TONE_" + id.toUpperCase(), label2))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc9(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist(t("AI_COPILOT.GENERATE", "Entwurf mit KI erzeugen"))}</button>
+          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc9(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist2(t("AI_COPILOT.GENERATE", "Entwurf mit KI erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>${esc9(t("AI_COPILOT.REVERT_DRAFT", "Vorherigen Text wiederherstellen"))}</button>
         </div>
@@ -7345,14 +7531,38 @@ function createView(root3, actions) {
           </div>`;
         return;
       }
+      if (data) this.setSelectionCount(0);
       renderReader(body, data, expanded);
       body.scrollTop = 0;
     },
+    setSelectionCount(count) {
+      if (!shell) return;
+      const head = shell.querySelector("#selection-head");
+      const paneHead = shell.querySelector(".list-pane .pane-head");
+      const bulkBar = shell.querySelector("#bulk-bar");
+      const countLabel = shell.querySelector("#selection-count");
+      const bulkBarCount = shell.querySelector("#bulk-bar-count");
+      const on2 = count > 0;
+      paneHead?.classList.toggle("is-selecting", on2);
+      if (head) head.hidden = !on2;
+      if (bulkBar) bulkBar.hidden = !on2;
+      const text2 = count === 1 ? "1 ausgew\xE4hlt" : `${count} ausgew\xE4hlt`;
+      if (countLabel) countLabel.textContent = text2;
+      if (bulkBarCount) bulkBarCount.textContent = text2;
+    },
     setBulk(data) {
+      if (shell) shell.dataset.reading = "0";
       const body = shell?.querySelector("#reader-body");
+      const readerPlace = shell?.querySelector("#reader-place");
+      const notice = shell?.querySelector("#notice");
+      if (readerPlace) readerPlace.textContent = "";
+      if (notice) notice.textContent = "";
+      this.setStrip(null);
       paintBar(null);
+      this.setSelectionCount(data.count);
+      const bulkArchive = shell?.querySelector("[data-bulk-archive]");
+      if (bulkArchive) bulkArchive.hidden = !data.place.archive;
       if (body) renderBulk(body, data);
-      if (!wide()) pane("reader");
     },
     setChecks(visible) {
       shell?.classList.toggle("with-checks", visible);
@@ -7514,7 +7724,11 @@ function createView(root3, actions) {
       const strip = shell?.querySelector("#strip");
       if (!strip) return;
       strip.replaceChildren();
-      if (!state) return;
+      if (!state) {
+        strip.hidden = true;
+        return;
+      }
+      strip.hidden = false;
       if (state.loading) {
         const p = document.createElement("p");
         p.className = "assist-status quiet";
@@ -7538,7 +7752,7 @@ function createView(root3, actions) {
         button3.type = "button";
         button3.className = "text-btn assist-action ai-action";
         button3.dataset.action = "summarize";
-        button3.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Mit KI zusammenfassen"));
+        button3.innerHTML = withAssist2(t("AI_COPILOT.SUMMARIZE", "Mit KI zusammenfassen"));
         button3.title = hint;
         button3.setAttribute("aria-label", hint);
         actions2.append(button3);
@@ -7549,7 +7763,7 @@ function createView(root3, actions) {
         replies.type = "button";
         replies.className = "text-btn assist-action ai-action";
         replies.dataset.action = "replies";
-        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antworten mit KI vorschlagen"));
+        replies.innerHTML = withAssist2(t("AI_COPILOT.QUICK_REPLIES", "Antworten mit KI vorschlagen"));
         replies.title = hint;
         replies.setAttribute("aria-label", hint);
         actions2.append(replies);
@@ -7572,7 +7786,7 @@ function createView(root3, actions) {
         again.className = "text-btn ai-action";
         again.dataset.action = "summarize";
         again.dataset.force = "1";
-        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"));
+        again.innerHTML = withAssist2(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"));
         again.title = hint;
         again.setAttribute("aria-label", hint);
         meta.append(again);
@@ -7936,6 +8150,12 @@ var Session = class {
   chatActions = [];
   chatBusy = false;
   replies = [];
+  bulkSummary = null;
+  bulkSummaryLoading = "";
+  bulkSummaryError = "";
+  bulkRepliesList = [];
+  bulkRepliesLoading = "";
+  bulkRepliesError = "";
   draftBackup = "";
   draftAbort = null;
   tagged = /* @__PURE__ */ new Set();
@@ -9486,13 +9706,60 @@ ${body}`
     });
     return rows2.filter((row2) => row2.info.selectable).map((row2) => ({ fullName: row2.info.fullName, name: this.folderName(row2.info), depth: row2.depth, role: row2.role }));
   }
+  clearBulkState() {
+    this.bulkSummary = null;
+    this.bulkSummaryLoading = "";
+    this.bulkSummaryError = "";
+    this.bulkRepliesList = [];
+    this.bulkRepliesLoading = "";
+    this.bulkRepliesError = "";
+  }
   paintBulk() {
     if (!this.checked.size) {
+      this.clearBulkState();
+      this.view.setSelectionCount?.(0);
       if (this.current) void this.paintLetter();
       else this.view.setReader(null, "", "");
       return;
     }
-    this.view.setBulk({ count: this.checked.size, place: this.place(), zip: this.prefs.zip });
+    this.view.setStrip(null);
+    this.view.notice("");
+    if (this.bulkRepliesList.length) {
+      this.bulkRepliesList = this.bulkRepliesList.filter((r) => this.checked.has(r.uid));
+    }
+    const checkedUids = [...this.checked];
+    const selectedMsgs = checkedUids.map((uid) => this.messages.find((m) => m.uid === uid)).filter((m) => Boolean(m));
+    const unseenCount = selectedMsgs.filter((m) => !seen(m.flags)).length;
+    const flaggedCount = selectedMsgs.filter((m) => hasFlag(m.flags, "\\flagged")).length;
+    const summaries = selectedMsgs.map((m) => ({
+      uid: m.uid,
+      who: label(m.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
+      subject: m.subject || "(ohne Betreff)",
+      when: when(m.date),
+      unseen: !seen(m.flags),
+      flagged: hasFlag(m.flags, "\\flagged")
+    }));
+    const assist = this.assistFlags?.summarize || this.assistFlags?.replies ? {
+      summarize: Boolean(this.assistFlags?.summarize),
+      replies: Boolean(this.assistFlags?.replies),
+      loadingSummary: this.bulkSummaryLoading || void 0,
+      loadingReplies: this.bulkRepliesLoading || void 0,
+      error: this.bulkSummaryError || this.bulkRepliesError || void 0,
+      summary: this.bulkSummary,
+      repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : void 0
+    } : void 0;
+    this.view.setSelectionCount?.(this.checked.size);
+    this.view.setBulk({
+      count: this.checked.size,
+      place: this.place(),
+      zip: this.prefs.zip,
+      folderName: this.folder,
+      totalInFolder: this.total,
+      unseenCount,
+      flaggedCount,
+      messages: summaries,
+      assist
+    });
   }
   letterPrint() {
     const message = this.current;
@@ -9738,6 +10005,31 @@ ${body}`
         const order = this.visible().map((item) => item.uid);
         if (order.length && order.every((uid) => this.checked.has(uid))) this.checked.clear();
         else order.forEach((uid) => this.checked.add(uid));
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "select-filter": {
+        const filter = data.filter || "all";
+        const visibleMsgs = this.visible();
+        this.checked.clear();
+        if (filter === "all") {
+          visibleMsgs.forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "unread") {
+          visibleMsgs.filter((m) => !seen(m.flags)).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "read") {
+          visibleMsgs.filter((m) => seen(m.flags)).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "flagged") {
+          visibleMsgs.filter((m) => hasFlag(m.flags, "\\flagged")).forEach((m) => this.checked.add(m.uid));
+        } else if (filter === "unflagged") {
+          visibleMsgs.filter((m) => !hasFlag(m.flags, "\\flagged")).forEach((m) => this.checked.add(m.uid));
+        }
+        this.paintList();
+        this.paintBulk();
+        return;
+      }
+      case "select-folder": {
+        this.messages.forEach((m) => this.checked.add(m.uid));
         this.paintList();
         this.paintBulk();
         return;
@@ -10116,6 +10408,15 @@ ${body}`
           this.view.notice(explain(error));
         }
         return;
+      case "bulk-summarize":
+        await this.assist("bulk-summarize", data);
+        return;
+      case "bulk-replies":
+        await this.assist("bulk-replies", data);
+        return;
+      case "use-bulk-reply":
+        await this.assist("use-bulk-reply", data);
+        return;
       default:
         if (name.startsWith("f-")) await this.folderAction(name, data);
         return;
@@ -10305,6 +10606,95 @@ ${body}`
         to: author ? address(author) : "",
         cc: "",
         subject: /^re:/i.test(this.current.subject) ? this.current.subject : `Re: ${this.current.subject}`,
+        body: reply.body
+      });
+      return;
+    }
+    if (name === "bulk-summarize") {
+      if (!this.checked.size) return;
+      if (!await this.consent()) return;
+      this.bulkSummaryLoading = t("AI_COPILOT.BULK_SUMMARIZING", "Ausgew\xE4hlte Mails werden zusammengefasst \u2026");
+      this.bulkSummaryError = "";
+      this.paintBulk();
+      try {
+        const result = await plugin("AiSummarize", {
+          folder: this.folder,
+          uids: [...this.checked],
+          force: data.force === "1",
+          sent: this.sentFolder
+        });
+        this.bulkSummary = {
+          tldr: result.summary?.tldr || "",
+          points: Array.isArray(result.summary?.points) ? result.summary.points : [],
+          cached: Boolean(result.cached),
+          model: result.summary?.model || this.assistFlags?.provider || ""
+        };
+        this.bulkSummaryLoading = "";
+      } catch (error) {
+        this.bulkSummaryLoading = "";
+        this.bulkSummaryError = explain(error);
+      }
+      this.paintBulk();
+      return;
+    }
+    if (name === "bulk-replies") {
+      if (!this.checked.size) return;
+      if (!await this.consent()) return;
+      this.bulkRepliesLoading = t("AI_COPILOT.GENERATING_BULK_REPLIES", "Antwortvorschl\xE4ge f\xFCr ausgew\xE4hlte Mails werden erstellt \u2026");
+      this.bulkRepliesError = "";
+      this.paintBulk();
+      const checkedUids = [...this.checked];
+      const targetMsgs = checkedUids.map((uid) => this.messages.find((m) => m.uid === uid)).filter((m) => Boolean(m)).slice(0, 10);
+      try {
+        const results = await Promise.allSettled(
+          targetMsgs.map(async (msg) => {
+            const res = await plugin("AiQuickReplies", {
+              folder: this.folder,
+              uids: [msg.uid],
+              sent: this.sentFolder
+            });
+            return {
+              uid: msg.uid,
+              subject: msg.subject || "(ohne Betreff)",
+              who: label(msg.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
+              replies: (res.replies || []).slice(0, 3)
+            };
+          })
+        );
+        const successful = [];
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value.replies.length > 0) {
+            successful.push(r.value);
+          }
+        }
+        if (!successful.length) {
+          this.bulkRepliesError = t("AI_COPILOT.NO_REPLIES_GENERATED", "Keine Antwortvorschl\xE4ge f\xFCr die ausgew\xE4hlten Mails erhalten.");
+        } else {
+          this.bulkRepliesList = successful;
+        }
+        this.bulkRepliesLoading = "";
+      } catch (error) {
+        this.bulkRepliesLoading = "";
+        this.bulkRepliesError = explain(error);
+      }
+      this.paintBulk();
+      return;
+    }
+    if (name === "use-bulk-reply") {
+      const uid = Number(data.uid || 0);
+      const index = Number(data.index || 0);
+      const item = this.bulkRepliesList.find((r) => r.uid === uid);
+      const reply = item?.replies[index];
+      if (!reply) return;
+      const msg = this.messages.find((m) => m.uid === uid);
+      const author = msg?.replyTo[0] || msg?.from[0];
+      const subject = msg?.subject ? /^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}` : "Re:";
+      this.view.openCompose({
+        title: reply.label || "Antworten",
+        mode: "reply",
+        to: author ? address(author) : "",
+        cc: "",
+        subject,
         body: reply.body
       });
       return;
