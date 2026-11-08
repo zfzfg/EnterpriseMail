@@ -49,8 +49,11 @@ Zero Data Retention (ZDR) ist ein vertragliches Provider-Merkmal von Mistral. De
 ## Prüfen
 
 - In `ui/`: `npx tsc --noEmit` und `npm run build`.
-- Token-Prüfung, wenn Styles dazukommen: `python` auf `scripts/check_tokens.py` aus dem Skill `mistral-design`, Schicht `app`, Ziel `ui/src`.
-- Eine Änderung an der sichtbaren Oberfläche im Browser nachsehen. Die Docker-Vorschau steht in `plugins/ai-copilot/dev` (http://localhost:8888, `test@example.com` / `test1234`). Ohne laufenden Mailserver den Stand als Mock kennzeichnen. Ein lebendes Modell nur ansprechen, wenn der Nutzer das will und ein Schlüssel da ist.
+- **Browser-Tests (Chrome Headless):** Änderungen an der sichtbaren Oberfläche und End-to-End-Prüfungen werden mit **Chrome Headless** durchgeführt (z. B. via Puppeteer / Playwright oder headless Chrome-CLI).
+  - **Entwicklungsumgebung & Testserver:** Unter `plugins/ai-copilot/dev` (`docker compose up -d` unter http://localhost:8888, Login: `test@example.com` / `test1234`).
+  - **Screenshots & Visuelle Verifikation:** Liegen bzw. gehören nach `plugins/ai-copilot/dev/shots/`.
+  - Ohne laufenden Mailserver den Stand als Mock kennzeichnen. Ein lebendes Modell nur ansprechen, wenn der Nutzer das will und ein Schlüssel da ist.
+- **Token-Prüfung:** Wenn Styles dazukommen: `python` auf `scripts/check_tokens.py` aus dem Skill `mistral-design`, Schicht `app`, Ziel `ui/src`.
 
 ## Git & Commits
 
