@@ -98,9 +98,7 @@ class ServiceActions
 				$token = Utils::GetCsrfToken();
 				if (isset($_SERVER['HTTP_X_SM_TOKEN'])) {
 					if ($_SERVER['HTTP_X_SM_TOKEN'] !== $token) {
-						$oAccount = $this->oActions->getAccountFromToken(false);
-						$sEmail = $oAccount ? $oAccount->Email() : 'guest';
-						$this->oActions->logWrite("{$_SERVER['HTTP_X_SM_TOKEN']} !== {$token} for {$sEmail}", \LOG_ERR, 'Token');
+						$this->oActions->logWrite('CSRF token mismatch', \LOG_ERR, 'Token');
 						throw new Exceptions\ClientException(Notifications::InvalidToken, null, 'HTTP Token mismatch');
 					}
 				} else {
@@ -111,9 +109,7 @@ class ServiceActions
 					// so this only affects headerless callers.
 					$xToken = $this->oHttp->IsPost() ? ($_POST['XToken'] ?? '') : ($_GET['XToken'] ?? '');
 					if (empty($xToken) || $xToken !== $token) {
-						$oAccount = $this->oActions->getAccountFromToken(false);
-						$sEmail = $oAccount ? $oAccount->Email() : 'guest';
-						$this->oActions->logWrite("{$xToken} !== {$token} for {$sEmail}", \LOG_ERR, 'XToken');
+						$this->oActions->logWrite('XToken mismatch', \LOG_ERR, 'XToken');
 						throw new Exceptions\ClientException(Notifications::InvalidToken, null, 'XToken mismatch');
 					}
 				}
@@ -129,15 +125,6 @@ class ServiceActions
 
 			if ($_POST) {
 				$this->oActions->SetActionParams($_POST, $sMethodName);
-				$aPost = $_POST;
-				foreach ($aPost as $key => $value) {
-					// password & passphrase
-					if (false !== \stripos($key, 'pass')) {
-						$aPost[$key] = '*******';
-//						$this->oActions->logMask($value);
-					}
-				}
-				$this->oActions->logWrite(Utils::jsonEncode($aPost), \LOG_INFO, 'POST');
 			} else if (3 < \count($this->aPaths) && $this->oHttp->IsGet()) {
 				$this->oActions->SetActionParams(array(
 					'RawKey' => empty($this->aPaths[3]) ? '' : $this->aPaths[3]
@@ -164,11 +151,7 @@ class ServiceActions
 		}
 		catch (\Throwable $oException)
 		{
-			\SnappyMail\Log::warning('SERVICE', "{$oException}");
-			if ($e = $oException->getPrevious()) {
-				\SnappyMail\Log::warning('SERVICE', "- {$e}");
-			}
-
+			\SnappyMail\Log::warning('SERVICE', 'JSON action failed: '.\get_class($oException));
 			$aResponse = $this->oActions->ExceptionResponse($oException);
 		}
 
@@ -191,16 +174,14 @@ class ServiceActions
 
 		if ($this->Logger()->IsEnabled()) {
 			if (\strlen($sObResult)) {
-				$this->oActions->logWrite($sObResult, \LOG_ERR, 'OB-DATA');
+				$this->oActions->logWrite('Unexpected output discarded ('.\strlen($sObResult).' bytes)', \LOG_ERR, 'OB-DATA');
 			}
 
 			if ($oException) {
-				$this->oActions->logException($oException, \LOG_ERR);
+				$this->oActions->logWrite('JSON action failed: '.\get_class($oException), \LOG_ERR, 'JSON');
 			}
 
-			$iLimit = (int) $this->Config()->Get('logs', 'json_response_write_limit', 0);
-			$this->oActions->logWrite(0 < $iLimit && $iLimit < \strlen($sResult)
-					? \substr($sResult, 0, $iLimit).'...' : $sResult, \LOG_INFO, 'JSON');
+			$this->oActions->logWrite('JSON response prepared ('.\strlen($sResult).' bytes)', \LOG_INFO, 'JSON');
 		}
 
 		return $sResult;
@@ -259,10 +240,10 @@ class ServiceActions
 
 		$sObResult = \ob_get_clean();
 		if (\strlen($sObResult)) {
-			$this->oActions->logWrite($sObResult, \LOG_ERR, 'OB-DATA');
+			$this->oActions->logWrite('Unexpected upload output discarded ('.\strlen($sObResult).' bytes)', \LOG_ERR, 'OB-DATA');
 		}
 
-		$this->oActions->logWrite($sResult, \LOG_INFO, 'UPLOAD');
+		$this->oActions->logWrite('Upload response prepared ('.\strlen($sResult).' bytes)', \LOG_INFO, 'UPLOAD');
 
 		return $sResult;
 	}
@@ -343,8 +324,8 @@ class ServiceActions
 							\fpassthru($tmp);
 							exit;
 						} catch (\Throwable $e) {
-							\header("X-Content-Error: {$e->getMessage()}");
-							\SnappyMail\Log::error('Proxy', \get_class($HTTP) . ': ' . $e->getMessage());
+							\header('X-Content-Error: Response streaming failed');
+							\SnappyMail\Log::error('Proxy', 'Response streaming failed: '.\get_class($e));
 						}
 					} else {
 						\header("X-Content-Error: {$oResponse->status} {$sContentType}");
@@ -393,11 +374,11 @@ class ServiceActions
 							$sRawError = 'False result';
 						}
 					} else {
-						$sRawError = 'Unknown action "'.$sAction.'"';
+						$sRawError = 'Unknown action';
 					}
 				} catch (\Throwable $e) {
-//					error_log(print_r($e,1));
-					$sRawError = $e->getMessage();
+					$oException = $e;
+					$sRawError = 'Raw action failed';
 				}
 			} else {
 				$sRawError = 'Empty action';
@@ -415,12 +396,11 @@ class ServiceActions
 		}
 
 		if (\strlen($sRawError)) {
-			$this->oActions->logWrite($sRawError, \LOG_ERR);
-			$this->Logger()->WriteDump($this->aPaths, \LOG_ERR, 'PATHS');
+			$this->oActions->logWrite($sRawError, \LOG_ERR, 'RAW');
 		}
 
 		if ($oException) {
-			$this->oActions->logException($oException, \LOG_ERR, 'RAW');
+			$this->oActions->logWrite('Raw action failed: '.\get_class($oException), \LOG_ERR, 'RAW');
 		}
 
 		return $sResult;
@@ -529,7 +509,7 @@ class ServiceActions
 				}
 				catch (\Throwable $oException)
 				{
-					$this->oActions->logException($oException, \LOG_ERR, 'LESS');
+					$this->oActions->logWrite('Theme compilation failed: '.\get_class($oException), \LOG_ERR, 'LESS');
 				}
 			}
 
@@ -640,7 +620,7 @@ class ServiceActions
 					}
 					catch (\Throwable $oException)
 					{
-						$this->oActions->logException($oException);
+						$this->oActions->logWrite('SSO login failed: '.\get_class($oException), \LOG_ERR, 'SSO');
 					}
 				}
 			}

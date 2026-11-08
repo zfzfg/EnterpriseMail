@@ -56,7 +56,8 @@ trait Response
 			$iExceptionCode = $oException->getCode();
 		}
 
-		$this->logException($oException->getPrevious() ?: $oException);
+		// Exception messages and stack traces can contain request or mail content.
+		$this->logWrite('Action failed: '.\get_class($oException->getPrevious() ?: $oException), \LOG_ERR, 'RESPONSE');
 
 		return $this->DefaultResponse(false, [
 			'code' => $iErrorCode,
