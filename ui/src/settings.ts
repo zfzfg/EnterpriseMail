@@ -179,25 +179,34 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
     assistTones: []
   };
 
-  const desk = await tryCall<{ Accounts?: { email?: string; name?: string }[]; Identities?: Record<string, unknown>[] }>("AccountsAndIdentities");
-  if (desk.error) snap.notes.accounts = desk.error;
-  else if (desk.value) {
-    const extra = values(desk.value.Accounts).map((item) => {
-      const row = item as { email?: string; name?: string };
-      const email = text(row.email);
-      return { email, name: text(row.name), current: email === currentEmail, main: false, unread: null as number | null };
-    }).filter((row) => row.email && row.email !== main);
-    snap.accounts = snap.accounts.concat(extra);
-    snap.identities = values(desk.value.Identities).map((item) => identityOf(item as Record<string, unknown>));
-    const named = snap.identities.find((item) => item.email === main && item.name);
-    if (named) snap.accounts[0].name = named.name;
-  }
+  try {
+    const [desk, filters, keys, gnu, stored, certs, two, via] = await Promise.all([
+      tryCall<{ Accounts?: { email?: string; name?: string }[]; Identities?: Record<string, unknown>[] }>("AccountsAndIdentities"),
+      caps.sieve ? tryCall<{ Scripts?: unknown; Capa?: unknown }>("Filters") : Promise.resolve({ value: null, error: "" }),
+      tryCall<unknown>("GetPGPKeys"),
+      tryCall<{ public?: unknown; private?: unknown }>("GnupgGetKeys"),
+      tryCall<{ public?: { id?: string; value?: string }[]; private?: { id?: string; value?: string }[] }>("GetStoredPGPKeys"),
+      tryCall<unknown>("SMimeGetCertificates"),
+      plugins["two-factor-auth"] ? tryCall<Record<string, unknown>>("GetTwoFactorInfo") : Promise.resolve({ value: null, error: "" }),
+      plugins["ai-copilot"] ? pluginSafe() : Promise.resolve({ settings: null, tones: [] })
+    ]);
 
-  if (caps.sieve) {
-    const filters = await tryCall<{ Scripts?: unknown }>("Filters");
+    if (desk.error) snap.notes.accounts = desk.error;
+    else if (desk.value) {
+      const extra = values(desk.value.Accounts).map((item) => {
+        const row = item as { email?: string; name?: string };
+        const email = text(row.email);
+        return { email, name: text(row.name), current: email === currentEmail, main: false, unread: null as number | null };
+      }).filter((row) => row.email && row.email !== main);
+      snap.accounts = snap.accounts.concat(extra);
+      snap.identities = values(desk.value.Identities).map((item) => identityOf(item as Record<string, unknown>));
+      const named = snap.identities.find((item) => item.email === main && item.name);
+      if (named) snap.accounts[0].name = named.name;
+    }
+
     if (filters.error) snap.notes.filters = filters.error;
     else if (filters.value) {
-      const bag = filters.value as { Scripts?: unknown; Capa?: unknown };
+      const bag = filters.value;
       snap.sieveCapa = values(bag.Capa).map((item) => text(item)).filter(Boolean);
       snap.scripts = values(bag.Scripts).map((item) => {
         const row = item as { name?: string; active?: boolean; body?: string };
@@ -208,65 +217,60 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
         snap.folderNames = parseFolders(tree.value).folders.filter((item) => item.selectable).map((item) => item.fullName);
       }
     }
-  }
 
-  const keys = await tryCall<unknown>("GetPGPKeys");
-  if (keys.error) snap.notes.keys = keys.error;
-  else snap.keys = values(keys.value).map((item) => text(item)).filter(Boolean).map((item) => keyRow(item));
+    if (keys.error) snap.notes.keys = keys.error;
+    else snap.keys = values(keys.value).map((item) => text(item)).filter(Boolean).map((item) => keyRow(item));
 
-  const gnu = await tryCall<{ public?: unknown; private?: unknown }>("GnupgGetKeys");
-  if (!gnu.error && gnu.value) {
-    const fromBag = (bag: unknown, secret: boolean): KeyRow[] => values(bag).map((item) => {
-      const row = item as { uids?: { email?: string; name?: string }[]; subkeys?: { fingerprint?: string; keyid?: string }[] };
-      const sub = values(row.subkeys)[0] as { fingerprint?: string; keyid?: string } | undefined;
-      const uid = values(row.uids)[0] as { email?: string; name?: string } | undefined;
-      const id = text(sub?.fingerprint || sub?.keyid);
-      const email = text(uid?.email);
-      if (!id) return null;
-      return keyRow(text(uid?.name) || email || id, "gnupg", id, email, secret);
-    }).filter((item): item is KeyRow => Boolean(item));
-    const listed = [...fromBag(gnu.value.private, true), ...fromBag(gnu.value.public, false)];
-    const ids = new Set(listed.map((item) => item.id));
-    snap.keys = listed.concat(snap.keys.filter((item) => !item.id || !ids.has(item.id)));
-  }
+    if (!gnu.error && gnu.value) {
+      const fromBag = (bag: unknown, secret: boolean): KeyRow[] => values(bag).map((item) => {
+        const row = item as { uids?: { email?: string; name?: string }[]; subkeys?: { fingerprint?: string; keyid?: string }[] };
+        const sub = values(row.subkeys)[0] as { fingerprint?: string; keyid?: string } | undefined;
+        const uid = values(row.uids)[0] as { email?: string; name?: string } | undefined;
+        const id = text(sub?.fingerprint || sub?.keyid);
+        const email = text(uid?.email);
+        if (!id) return null;
+        return keyRow(text(uid?.name) || email || id, "gnupg", id, email, secret);
+      }).filter((item): item is KeyRow => Boolean(item));
+      const listed = [...fromBag(gnu.value.private, true), ...fromBag(gnu.value.public, false)];
+      const ids = new Set(listed.map((item) => item.id));
+      snap.keys = listed.concat(snap.keys.filter((item) => !item.id || !ids.has(item.id)));
+    }
 
-  const stored = await tryCall<{ public?: { id?: string; value?: string }[]; private?: { id?: string; value?: string }[] }>("GetStoredPGPKeys");
-  if (!stored.error && stored.value) {
-    const add = (list: { id?: string; value?: string }[] | undefined, secret: boolean) => values(list).forEach((item) => {
-      const row = item as { id?: string; value?: string };
-      const armored = text(row.value);
-      const id = text(row.id);
-      if (!armored || snap.keys.some((key) => key.id && key.id === id)) return;
-      snap.keys.push(keyRow(armored, "stored", id, "", secret));
-    });
-    add(stored.value.public, false);
-    add(stored.value.private, true);
-  }
+    if (!stored.error && stored.value) {
+      const add = (list: { id?: string; value?: string }[] | undefined, secret: boolean) => values(list).forEach((item) => {
+        const row = item as { id?: string; value?: string };
+        const armored = text(row.value);
+        const id = text(row.id);
+        if (!armored || snap.keys.some((key) => key.id && key.id === id)) return;
+        snap.keys.push(keyRow(armored, "stored", id, "", secret));
+      });
+      add(stored.value.public, false);
+      add(stored.value.private, true);
+    }
 
-  const certs = await tryCall<unknown>("SMimeGetCertificates");
-  if (certs.error) snap.notes.certs = certs.error;
-  else {
-    snap.certs = values(certs.value).map((item) => {
-      const row = item as { id?: string; CN?: string; emailAddress?: string; validTo_time_t?: number };
-      const until = Number(row.validTo_time_t || 0);
-      return {
-        id: text(row.id),
-        name: text(row.CN),
-        email: text(row.emailAddress),
-        until: until ? new Date(until * 1000).toLocaleDateString() : ""
-      };
-    });
-  }
+    if (certs.error) snap.notes.certs = certs.error;
+    else {
+      snap.certs = values(certs.value).map((item) => {
+        const row = item as { id?: string; CN?: string; emailAddress?: string; validTo_time_t?: number };
+        const until = Number(row.validTo_time_t || 0);
+        return {
+          id: text(row.id),
+          name: text(row.CN),
+          email: text(row.emailAddress),
+          until: until ? new Date(until * 1000).toLocaleDateString() : ""
+        };
+      });
+    }
 
-  await Promise.all(snap.accounts.filter((item) => !item.current && !item.main).map(async (item) => {
-    const info = await tryCall<{ unreadEmails?: number }>("AccountUnread", { email: item.email });
-    if (!info.error && info.value) item.unread = Number(info.value.unreadEmails || 0);
-  }));
+    if (snap.accounts.length > 1) {
+      await Promise.all(snap.accounts.filter((item) => !item.current && !item.main).map(async (item) => {
+        const info = await tryCall<{ unreadEmails?: number }>("AccountUnread", { email: item.email });
+        if (!info.error && info.value) item.unread = Number(info.value.unreadEmails || 0);
+      }));
+    }
 
-  if (plugins["two-factor-auth"]) {
-    const info = await tryCall<Record<string, unknown>>("GetTwoFactorInfo");
-    const value = info.value;
-    if (value && typeof value === "object") {
+    if (two.value && typeof two.value === "object") {
+      const value = two.value;
       snap.twoFactor = {
         enabled: Boolean(value.Enable),
         ready: Boolean(value.IsSet),
@@ -275,12 +279,13 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
         qr: text(value.QRCode)
       };
     }
-  }
 
-  if (plugins["ai-copilot"]) {
-    const via = await pluginSafe();
-    snap.assist = via.settings;
-    snap.assistTones = via.tones;
+    if (via.settings) {
+      snap.assist = via.settings;
+      snap.assistTones = via.tones;
+    }
+  } catch (err) {
+    snap.notes.accounts = (err as Error).message || String(err);
   }
 
   return snap;
@@ -591,13 +596,75 @@ function prefCheck(name: string, label: string, on: boolean): string {
   return `<label class="check"><input type="checkbox" data-pref="${name}"${on ? " checked" : ""}> ${esc(label)}</label>`;
 }
 
+function prefToggle(name: string, label: string, desc = "", on = false): string {
+  return `
+    <div class="pref-row">
+      <div class="pref-info">
+        <span class="pref-label">${esc(label)}</span>
+        ${desc ? `<span class="quiet pref-desc">${esc(desc)}</span>` : ""}
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" data-pref="${name}"${on ? " checked" : ""}>
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
+    </div>`;
+}
+
 function prefSelect(name: string, label: string, current: string, options: [string, string][]): string {
   const items = options.map(([value, textValue]) => `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(textValue)}</option>`).join("");
   return `<label class="field"><span>${esc(label)}</span><select data-pref="${name}">${items}</select></label>`;
 }
 
+function prefSelectRow(name: string, label: string, desc: string, current: string, options: [string, string][]): string {
+  const items = options.map(([value, textValue]) => `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(textValue)}</option>`).join("");
+  return `
+    <div class="pref-row">
+      <div class="pref-info">
+        <span class="pref-label">${esc(label)}</span>
+        ${desc ? `<span class="quiet pref-desc">${esc(desc)}</span>` : ""}
+      </div>
+      <div class="pref-control">
+        <select data-pref="${name}">${items}</select>
+      </div>
+    </div>`;
+}
+
+function layoutCards(current: string): string {
+  const isColumns = current !== "0";
+  return `
+    <div class="pref-info" style="margin-bottom:8px">
+      <span class="pref-label">${esc(t("SETTINGS_GENERAL.LAYOUT", "Layout"))}</span>
+      <span class="quiet pref-desc">${esc(t("SETTINGS_GENERAL.LAYOUT_DESC", "Anordnung von Nachrichtenliste und Lesebereich"))}</span>
+    </div>
+    <div class="layout-cards">
+      <label class="layout-card${isColumns ? " is-active" : ""}">
+        <input type="radio" name="Layout" data-pref="Layout" value="1"${isColumns ? " checked" : ""}>
+        <div class="layout-preview layout-prev-columns" aria-hidden="true">
+          <span class="lp-col lp-nav"></span>
+          <span class="lp-col lp-list"></span>
+          <span class="lp-col lp-reader"></span>
+        </div>
+        <span class="layout-label">
+          <strong>${esc(t("SETTINGS_GENERAL.LAYOUT_COLUMNS", "Spalten"))}</strong>
+          <span class="quiet">${esc(t("SETTINGS_GENERAL.LAYOUT_COLUMNS_DESC", "Liste und Brief nebeneinander"))}</span>
+        </span>
+      </label>
+      <label class="layout-card${!isColumns ? " is-active" : ""}">
+        <input type="radio" name="Layout" data-pref="Layout" value="0"${!isColumns ? " checked" : ""}>
+        <div class="layout-preview layout-prev-nosplit" aria-hidden="true">
+          <span class="lp-col lp-nav"></span>
+          <span class="lp-col lp-full"></span>
+        </div>
+        <span class="layout-label">
+          <strong>${esc(t("SETTINGS_GENERAL.LAYOUT_NO_SPLIT", "Ohne Teilung"))}</strong>
+          <span class="quiet">${esc(t("SETTINGS_GENERAL.LAYOUT_NO_SPLIT_DESC", "Brief öffnet seitenfüllend"))}</span>
+        </span>
+      </label>
+    </div>`;
+}
+
 function group(title: string, body: string): string {
-  return `<p class="mono">${esc(title)}</p><div class="fields">${body}</div>`;
+  return `<section class="settings-card"><h3 class="mono">${esc(title)}</h3><div class="fields">${body}</div></section>`;
 }
 
 export function renderGeneral(app: Record<string, unknown>): string {
@@ -609,7 +676,8 @@ export function renderGeneral(app: Record<string, unknown>): string {
   ] as [string, string]);
   const language = String(app.language || "");
   const hour = String(app.hourCycle || "");
-  const layout = String(num(app, "Layout", 1));
+  const rawLayout = num(app, "Layout", 1);
+  const layout = String(rawLayout === 2 ? 1 : rawLayout);
   const perPage = String(num(app, "MessagesPerPage", 25));
   const interval = String(num(app, "CheckMailInterval", 15));
   const minInterval = String(Math.max(1, num(app, "minRefreshInterval", 5)));
@@ -622,70 +690,73 @@ export function renderGeneral(app: Record<string, unknown>): string {
   const permission = typeof Notification === "undefined" ? "" : Notification.permission;
   const denied = permission === "denied" ? `<p class="quiet">${esc(t("SETTINGS_GENERAL.CHROME_NOTIFICATION_DESC_DENIED", "Der Browser hat Hinweise abgelehnt. Die Freigabe liegt in den Browser-Einstellungen."))}</p>` : "";
   const lang = flag(app, "allowLanguagesOnSettings", true) && langOptions.length
-    ? prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), language, langOptions)
+    ? prefSelectRow("language", t("GLOBAL.LANGUAGE", "Sprache"), "", language, langOptions)
     : "";
   return `
     ${group(t("SETTINGS_GENERAL.LEGEND_TIME", "Sprache und Zeit"), `
       ${lang}
-      ${prefSelect("hourCycle", t("SETTINGS_GENERAL.HOUR_CYCLE", "Uhrzeit"), hour, [["", t("SETTINGS_GENERAL.HOUR_AUTO", "Wie im System")], ["h23", t("SETTINGS_GENERAL.HOUR_24", "24 Stunden")], ["h12", t("SETTINGS_GENERAL.HOUR_12", "12 Stunden")]])}
+      ${prefSelectRow("hourCycle", t("SETTINGS_GENERAL.HOUR_CYCLE", "Uhrzeit"), "", hour, [["", t("SETTINGS_GENERAL.HOUR_AUTO", "Wie im System")], ["h23", t("SETTINGS_GENERAL.HOUR_24", "24 Stunden")], ["h12", t("SETTINGS_GENERAL.HOUR_12", "12 Stunden")]])}
     `)}
     ${group(t("SETTINGS_LABELS.FOLDERS", "Postfach"), `
-      <fieldset class="choices">
-        <legend class="quiet">${esc(t("SETTINGS_GENERAL.LAYOUT", "Layout"))}</legend>
-        ${choice("Layout", "0", t("SETTINGS_GENERAL.LAYOUT_NO_SPLIT", "Ohne Teilung"), layout)}
-        ${choice("Layout", "1", t("SETTINGS_GENERAL.LAYOUT_COLUMNS", "Spalten"), layout)}
-        ${choice("Layout", "2", t("SETTINGS_GENERAL.LAYOUT_BOTTOM", "Brief unten"), layout)}
-      </fieldset>
-      ${prefSelect("MessagesPerPage", t("SETTINGS_GENERAL.MESSAGES_PER_PAGE", "Mails pro Seite"), perPage, ["10", "20", "25", "50", "100"].map((value) => [value, value]))}
-      ${prefSelect("CheckMailInterval", t("SETTINGS_GENERAL.CHECK_INTERVAL", "Abrufintervall"), interval, ["5", "10", "15", "30", "60"].filter((value) => Number(value) >= Number(minInterval)).map((value) => [value, `${value} min`]))}
-      ${prefSelect("defaultSort", t("MESSAGE_LIST.SORT", "Sortierung"), sort, [["", t("MESSAGE_LIST.SORT_DATE", "Datum")], ["DATE", t("MESSAGE_LIST.SORT_DATE", "Datum")], ["FROM", t("MESSAGE_LIST.SORT_FROM", "Absender")], ["SUBJECT", t("MESSAGE_LIST.SORT_SUBJECT", "Betreff")], ["SIZE", t("MESSAGE_LIST.SORT_SIZE", "Größe")]])}
-      ${prefCheck("UseThreads", t("SETTINGS_GENERAL.THREADS", "Unterhaltungen"), flag(app, "useThreads") || flag(app, "UseThreads"))}
-      ${prefSelect("threadAlgorithm", t("SETTINGS_GENERAL.THREAD_ALGORITHM", "Thread-Verfahren"), thread, [["", t("SETTINGS_GENERAL.THREAD_SERVER", "Wie der Server")], ["REFERENCES", "References"], ["ORDEREDSUBJECT", "Subject"]])}
-      ${prefCheck("UseCheckboxesInList", t("SETTINGS_GENERAL.CHECKBOXES", "Kontrollkästchen in der Liste"), flag(app, "UseCheckboxesInList", true))}
-      ${prefCheck("listGrouped", t("SETTINGS_GENERAL.GROUPED", "Nach Datum gruppieren"), flag(app, "listGrouped"))}
-      ${prefCheck("HideDeleted", t("SETTINGS_GENERAL.HIDE_DELETED", "Gelöschte ausblenden"), flag(app, "HideDeleted", true))}
-      ${prefCheck("HideUnsubscribed", t("SETTINGS_GENERAL.HIDE_UNSUB", "Nicht abonnierte ausblenden"), flag(app, "HideUnsubscribed"))}
-      ${prefCheck("ShowUnreadCount", t("SETTINGS_GENERAL.UNREAD_TITLE", "Ungelesen im Fenstertitel"), flag(app, "ShowUnreadCount"))}
+      ${layoutCards(layout)}
+      ${prefSelectRow("MessagesPerPage", t("SETTINGS_GENERAL.MESSAGES_PER_PAGE", "Mails pro Seite"), "", perPage, ["10", "20", "25", "50", "100"].map((value) => [value, value]))}
+      ${prefSelectRow("CheckMailInterval", t("SETTINGS_GENERAL.CHECK_INTERVAL", "Abrufintervall"), "", interval, ["5", "10", "15", "30", "60"].filter((value) => Number(value) >= Number(minInterval)).map((value) => [value, `${value} min`]))}
+      ${prefSelectRow("defaultSort", t("MESSAGE_LIST.SORT", "Sortierung"), "", sort, [["", t("MESSAGE_LIST.SORT_DATE", "Datum")], ["DATE", t("MESSAGE_LIST.SORT_DATE", "Datum")], ["FROM", t("MESSAGE_LIST.SORT_FROM", "Absender")], ["SUBJECT", t("MESSAGE_LIST.SORT_SUBJECT", "Betreff")], ["SIZE", t("MESSAGE_LIST.SORT_SIZE", "Größe")]])}
+      ${prefToggle("UseThreads", t("SETTINGS_GENERAL.THREADS", "Unterhaltungen"), t("SETTINGS_GENERAL.THREADS_DESC", "Zusammengehörige Mails als Konversation gruppieren"), flag(app, "useThreads") || flag(app, "UseThreads"))}
+      ${prefSelectRow("threadAlgorithm", t("SETTINGS_GENERAL.THREAD_ALGORITHM", "Thread-Verfahren"), "", thread, [["", t("SETTINGS_GENERAL.THREAD_SERVER", "Wie der Server")], ["REFERENCES", "References"], ["ORDEREDSUBJECT", "Subject"]])}
+      ${prefToggle("UseCheckboxesInList", t("SETTINGS_GENERAL.CHECKBOXES", "Kontrollkästchen in der Liste"), t("SETTINGS_GENERAL.CHECKBOXES_DESC", "Auswahlkästchen für Mehrfachauswahl einblenden"), flag(app, "UseCheckboxesInList", true))}
+      ${prefToggle("listGrouped", t("SETTINGS_GENERAL.GROUPED", "Nach Datum gruppieren"), t("SETTINGS_GENERAL.GROUPED_DESC", "Heute, Gestern, Diese Woche"), flag(app, "listGrouped"))}
+      ${prefToggle("HideDeleted", t("SETTINGS_GENERAL.HIDE_DELETED", "Gelöschte ausblenden"), "", flag(app, "HideDeleted", true))}
+      ${prefToggle("HideUnsubscribed", t("SETTINGS_GENERAL.HIDE_UNSUB", "Nicht abonnierte ausblenden"), "", flag(app, "HideUnsubscribed"))}
+      ${prefToggle("ShowUnreadCount", t("SETTINGS_GENERAL.UNREAD_TITLE", "Ungelesen im Fenstertitel"), t("SETTINGS_GENERAL.UNREAD_TITLE_DESC", "Anzahl ungelesener Mails im Browser-Tab anzeigen"), flag(app, "ShowUnreadCount"))}
     `)}
     ${group(t("SETTINGS_GENERAL.LEGEND_READ", "Lesen"), `
-      ${prefCheck("messageReadAuto", t("SETTINGS_GENERAL.READ_AUTO", "Beim Lesen als gelesen markieren"), flag(app, "messageReadAuto", true))}
-      ${prefSelect("MessageReadDelay", t("SETTINGS_GENERAL.READ_DELAY", "Gelesen nach"), String(num(app, "MessageReadDelay", 5)), [["0", t("SETTINGS_GENERAL.READ_NOW", "Sofort")], ["2", "2 s"], ["5", "5 s"], ["10", "10 s"]])}
-      ${prefCheck("showNextMessage", t("SETTINGS_GENERAL.SHOW_NEXT", "Nach dem Löschen die nächste Mail öffnen"), flag(app, "showNextMessage"))}
-      ${prefCheck("messageNewWindow", t("SETTINGS_GENERAL.NEW_WINDOW", "Brief in einem neuen Fenster"), flag(app, "messageNewWindow"))}
-      ${prefSelect("MsgDefaultAction", t("SETTINGS_GENERAL.DEFAULT_REPLY", "Standard-Antwort"), String(num(app, "MsgDefaultAction", 1)), [["1", t("MESSAGE.BUTTON_REPLY", "Antworten")], ["2", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten")]])}
-      ${prefCheck("ViewHTML", t("SETTINGS_GENERAL.VIEW_HTML", "HTML bevorzugen"), flag(app, "ViewHTML", true))}
-      ${prefSelect("ViewImages", t("SETTINGS_GENERAL.VIEW_IMAGES", "Externe Bilder"), images, [["ask", t("SETTINGS_GENERAL.IMAGES_ASK", "Fragen")], ["always", t("SETTINGS_GENERAL.IMAGES_ALWAYS", "Immer laden")], ["match", t("SETTINGS_GENERAL.IMAGES_LIST", "Nur die Liste")], ["never", t("SETTINGS_GENERAL.IMAGES_NEVER", "Nie")]])}
-      <label class="field"><span>${esc(t("SETTINGS_GENERAL.IMAGE_LIST", "Liste für externe Bilder"))}</span><textarea data-pref="ViewImagesWhitelist">${esc(String(app.ViewImagesWhitelist || ""))}</textarea></label>
-      ${prefCheck("RemoveColors", t("SETTINGS_GENERAL.REMOVE_COLORS", "Farben entfernen"), flag(app, "RemoveColors"))}
-      ${prefCheck("AllowStyles", t("SETTINGS_GENERAL.ALLOW_STYLES", "Stile erlauben"), flag(app, "AllowStyles"))}
-      ${prefSelect("minFontSize", t("SETTINGS_GENERAL.MIN_FONT", "Mindestschrift"), String(num(app, "minFontSize", 5)), ["5", "8", "10", "12", "14"].map((value) => [value, `${value} px`]))}
-      ${prefCheck("CollapseBlockquotes", t("SETTINGS_GENERAL.COLLAPSE_QUOTES", "Zitate einklappen"), flag(app, "CollapseBlockquotes", true))}
-      ${prefSelect("MaxBlockquotesLevel", t("SETTINGS_GENERAL.QUOTE_LEVEL", "Zitate ab Ebene"), String(num(app, "MaxBlockquotesLevel", 0)), [["0", t("SETTINGS_GENERAL.QUOTE_ALL", "Alle")], ["1", "1"], ["2", "2"], ["3", "3"]])}
-      ${prefCheck("ListInlineAttachments", t("SETTINGS_GENERAL.INLINE", "Eingebettete Anhänge listen"), flag(app, "ListInlineAttachments"))}
-      ${prefCheck("simpleAttachmentsList", t("SETTINGS_GENERAL.SIMPLE_FILES", "Einfache Anhangsliste"), flag(app, "simpleAttachmentsList"))}
+      ${prefToggle("messageReadAuto", t("SETTINGS_GENERAL.READ_AUTO", "Beim Lesen als gelesen markieren"), "", flag(app, "messageReadAuto", true))}
+      ${prefSelectRow("MessageReadDelay", t("SETTINGS_GENERAL.READ_DELAY", "Gelesen nach"), "", String(num(app, "MessageReadDelay", 5)), [["0", t("SETTINGS_GENERAL.READ_NOW", "Sofort")], ["2", "2 s"], ["5", "5 s"], ["10", "10 s"]])}
+      ${prefToggle("showNextMessage", t("SETTINGS_GENERAL.SHOW_NEXT", "Nach dem Löschen die nächste Mail öffnen"), "", flag(app, "showNextMessage"))}
+      ${prefToggle("messageNewWindow", t("SETTINGS_GENERAL.NEW_WINDOW", "Brief in einem neuen Fenster"), "", flag(app, "messageNewWindow"))}
+      ${prefSelectRow("MsgDefaultAction", t("SETTINGS_GENERAL.DEFAULT_REPLY", "Standard-Antwort"), "", String(num(app, "MsgDefaultAction", 1)), [["1", t("MESSAGE.BUTTON_REPLY", "Antworten")], ["2", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten")]])}
+      ${prefToggle("ViewHTML", t("SETTINGS_GENERAL.VIEW_HTML", "HTML bevorzugen"), t("SETTINGS_GENERAL.VIEW_HTML_DESC", "Formatierte HTML-Nachrichten darstellen"), flag(app, "ViewHTML", true))}
+      ${prefSelectRow("ViewImages", t("SETTINGS_GENERAL.VIEW_IMAGES", "Externe Bilder"), "", images, [["ask", t("SETTINGS_GENERAL.IMAGES_ASK", "Fragen")], ["always", t("SETTINGS_GENERAL.IMAGES_ALWAYS", "Immer laden")], ["match", t("SETTINGS_GENERAL.IMAGES_LIST", "Nur die Liste")], ["never", t("SETTINGS_GENERAL.IMAGES_NEVER", "Nie")]])}
+      <label class="field"><span>${esc(t("SETTINGS_GENERAL.IMAGE_LIST", "Liste für externe Bilder"))}</span><textarea data-pref="ViewImagesWhitelist" class="short" placeholder="domain.tld, absender@example.com">${esc(String(app.ViewImagesWhitelist || ""))}</textarea></label>
+      ${prefToggle("RemoveColors", t("SETTINGS_GENERAL.REMOVE_COLORS", "Farben entfernen"), "", flag(app, "RemoveColors"))}
+      ${prefToggle("AllowStyles", t("SETTINGS_GENERAL.ALLOW_STYLES", "Stile erlauben"), "", flag(app, "AllowStyles"))}
+      ${prefSelectRow("minFontSize", t("SETTINGS_GENERAL.MIN_FONT", "Mindestschrift"), "", String(num(app, "minFontSize", 5)), ["5", "8", "10", "12", "14"].map((value) => [value, `${value} px`]))}
+      ${prefToggle("CollapseBlockquotes", t("SETTINGS_GENERAL.COLLAPSE_QUOTES", "Zitate einklappen"), "", flag(app, "CollapseBlockquotes", true))}
+      ${prefSelectRow("MaxBlockquotesLevel", t("SETTINGS_GENERAL.QUOTE_LEVEL", "Zitate ab Ebene"), "", String(num(app, "MaxBlockquotesLevel", 0)), [["0", t("SETTINGS_GENERAL.QUOTE_ALL", "Alle")], ["1", "1"], ["2", "2"], ["3", "3"]])}
+      ${prefToggle("ListInlineAttachments", t("SETTINGS_GENERAL.INLINE", "Eingebettete Anhänge listen"), "", flag(app, "ListInlineAttachments"))}
+      ${prefToggle("simpleAttachmentsList", t("SETTINGS_GENERAL.SIMPLE_FILES", "Einfache Anhangsliste"), "", flag(app, "simpleAttachmentsList"))}
     `)}
     ${group(t("SETTINGS_GENERAL.LEGEND_WRITE", "Schreiben"), `
-      ${prefSelect("EditorDefaultType", t("SETTINGS_GENERAL.EDITOR", "Editor"), editor, [["Plain", t("COMPOSE.TOGGLE_TO_PLAIN", "Text")], ["Html", "HTML"]])}
-      ${prefCheck("markdown", "Markdown", flag(app, "markdown"))}
-      ${prefCheck("allowSpellcheck", t("SETTINGS_GENERAL.SPELLCHECK", "Rechtschreibung"), flag(app, "allowSpellcheck"))}
-      ${prefCheck("AllowDraftAutosave", t("SETTINGS_GENERAL.AUTOSAVE", "Entwürfe automatisch speichern"), flag(app, "AllowDraftAutosave", true))}
-      ${prefCheck("ReplySameFolder", t("SETTINGS_GENERAL.REPLY_SAME", "In denselben Ordner antworten"), flag(app, "ReplySameFolder"))}
-      ${prefCheck("ContactsAutosave", t("SETTINGS_GENERAL.CONTACTS_SAVE", "Empfänger als Kontakte merken"), flag(app, "ContactsAutosave", true))}
-      ${prefCheck("requestReadReceipt", t("SETTINGS_GENERAL.RECEIPT", "Lesebestätigung anfragen"), flag(app, "requestReadReceipt"))}
-      ${prefCheck("requestDsn", t("SETTINGS_GENERAL.DSN", "Zustellbestätigung anfragen"), flag(app, "requestDsn"))}
-      ${prefCheck("requireTLS", "TLS", flag(app, "requireTLS"))}
-      ${prefCheck("pgpSign", t("CRYPTO.SIGN", "Unterschreiben"), flag(app, "pgpSign"))}
-      ${prefCheck("pgpEncrypt", t("CRYPTO.ENCRYPT", "Verschlüsseln"), flag(app, "pgpEncrypt"))}
-      <p class="quiet">${esc(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links können direkt hier eine neue Nachricht öffnen."))}</p>
-      <button type="button" class="text-btn" data-action="mailto-register">${icon("external")}<span>${esc(t("SETTINGS_GENERAL.MAILTO", "Als Programm für mailto:-Links registrieren"))}</span></button>
+      ${prefSelectRow("EditorDefaultType", t("SETTINGS_GENERAL.EDITOR", "Editor"), "", editor, [["Plain", t("COMPOSE.TOGGLE_TO_PLAIN", "Text")], ["Html", "HTML"]])}
+      ${prefToggle("markdown", "Markdown", t("SETTINGS_GENERAL.MARKDOWN_DESC", "Markdown-Formatierung im Text-Editor unterstützen"), flag(app, "markdown"))}
+      ${prefToggle("allowSpellcheck", t("SETTINGS_GENERAL.SPELLCHECK", "Rechtschreibung"), "", flag(app, "allowSpellcheck"))}
+      ${prefToggle("AllowDraftAutosave", t("SETTINGS_GENERAL.AUTOSAVE", "Entwürfe automatisch speichern"), "", flag(app, "AllowDraftAutosave", true))}
+      ${prefToggle("ReplySameFolder", t("SETTINGS_GENERAL.REPLY_SAME", "In denselben Ordner antworten"), "", flag(app, "ReplySameFolder"))}
+      ${prefToggle("ContactsAutosave", t("SETTINGS_GENERAL.CONTACTS_SAVE", "Empfänger als Kontakte merken"), "", flag(app, "ContactsAutosave", true))}
+      ${prefToggle("requestReadReceipt", t("SETTINGS_GENERAL.RECEIPT", "Lesebestätigung anfragen"), "", flag(app, "requestReadReceipt"))}
+      ${prefToggle("requestDsn", t("SETTINGS_GENERAL.DSN", "Zustellbestätigung anfragen"), "", flag(app, "requestDsn"))}
+      ${prefToggle("requireTLS", "TLS", t("SETTINGS_GENERAL.TLS_DESC", "Sichere TLS-Verbindung für den Mailversand verlangen"), flag(app, "requireTLS"))}
+      ${prefToggle("pgpSign", t("CRYPTO.SIGN", "Unterschreiben"), t("SETTINGS_GENERAL.PGP_SIGN_DESC", "Mails standardmäßig mit PGP signieren"), flag(app, "pgpSign"))}
+      ${prefToggle("pgpEncrypt", t("CRYPTO.ENCRYPT", "Verschlüsseln"), t("SETTINGS_GENERAL.PGP_ENCRYPT_DESC", "Mails standardmäßig mit PGP verschlüsseln"), flag(app, "pgpEncrypt"))}
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <p class="quiet" style="margin-bottom:8px">${esc(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links können direkt hier eine neue Nachricht öffnen."))}</p>
+        <button type="button" class="text-btn" data-action="mailto-register">${icon("external")}<span>${esc(t("SETTINGS_GENERAL.MAILTO", "Als Programm für mailto:-Links registrieren"))}</span></button>
+      </div>
     `)}
     ${group(t("SETTINGS_GENERAL.LEGEND_NOTIFY", "Benachrichtigungen"), `
-      ${prefCheck("DesktopNotifications", t("SETTINGS_GENERAL.DESKTOP", "Hinweis auf dem Desktop"), flag(app, "DesktopNotifications", true))}
-      <p class="quiet">${esc(permission === "granted" ? t("SETTINGS_GENERAL.NOTIFY_OK", "Der Browser erlaubt Hinweise.") : permission === "denied" ? "" : t("SETTINGS_GENERAL.NOTIFY_ASK", "Der Browser fragt beim Einschalten."))}</p>
+      ${prefToggle("DesktopNotifications", t("SETTINGS_GENERAL.DESKTOP", "Hinweis auf dem Desktop"), permission === "granted" ? t("SETTINGS_GENERAL.NOTIFY_OK", "Der Browser erlaubt Hinweise.") : permission === "denied" ? "" : t("SETTINGS_GENERAL.NOTIFY_ASK", "Der Browser fragt beim Einschalten."), flag(app, "DesktopNotifications", true))}
       ${denied}
-      ${prefCheck("SoundNotification", t("SETTINGS_GENERAL.SOUND", "Ton"), flag(app, "SoundNotification", true))}
-      ${prefSelect("NotificationSound", t("SETTINGS_GENERAL.SOUND_NAME", "Klang"), sound, sounds.map((name) => [name, name]))}
-      <button type="button" class="text-btn" data-action="preview-sound">${icon("external")}<span>${esc(t("SETTINGS_GENERAL.SOUND_PREVIEW", "Probehören"))}</span></button>
+      ${prefToggle("SoundNotification", t("SETTINGS_GENERAL.SOUND", "Hinweiston"), "", flag(app, "SoundNotification", true))}
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">${esc(t("SETTINGS_GENERAL.SOUND_NAME", "Klang"))}</span>
+        </div>
+        <div class="pref-control" style="display:flex;gap:8px;align-items:center">
+          <select data-pref="NotificationSound">${sounds.map((name) => `<option value="${esc(name)}"${name === sound ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
+          <button type="button" class="icon-btn" data-action="preview-sound" aria-label="${esc(t("SETTINGS_GENERAL.SOUND_PREVIEW", "Probehören"))}" title="${esc(t("SETTINGS_GENERAL.SOUND_PREVIEW", "Probehören"))}">${icon("bell")}</button>
+        </div>
+      </div>
     `)}`;
 }
 
@@ -693,27 +764,32 @@ export function renderSecurity(snap: SettingsSnapshot): string {
   const app = snap.app;
   const logout = String(num(app, "AutoLogout", 30));
   const forget = String(num(app, "keyPassForget", 15));
-  const password = snap.passwordPlugin ? form("change-password", `
-    ${field(t("GLOBAL.PASSWORD", "Passwort"), "PrevPassword", "", "password", "autocomplete=\"current-password\" required")}
-    ${field(t("SETTINGS_SECURITY.NEW_PASSWORD", "Neues Passwort"), "NewPassword", "", "password", "autocomplete=\"new-password\" required")}
-    ${field(t("SETTINGS_SECURITY.REPEAT", "Wiederholen"), "Repeat", "", "password", "autocomplete=\"new-password\" required")}
-  `, t("SETTINGS_SECURITY.CHANGE", "Passwort ändern"), false) : "";
+  const password = snap.passwordPlugin ? `
+    <div class="settings-card">
+      <h3 class="mono">${esc(t("SETTINGS_SECURITY.PASSWORD", "Passwort"))}</h3>
+      ${form("change-password", `
+        ${field(t("GLOBAL.PASSWORD", "Passwort"), "PrevPassword", "", "password", "autocomplete=\"current-password\" required")}
+        ${field(t("SETTINGS_SECURITY.NEW_PASSWORD", "Neues Passwort"), "NewPassword", "", "password", "autocomplete=\"new-password\" required")}
+        ${field(t("SETTINGS_SECURITY.REPEAT", "Wiederholen"), "Repeat", "", "password", "autocomplete=\"new-password\" required")}
+      `, t("SETTINGS_SECURITY.CHANGE", "Passwort ändern"), false)}
+    </div>` : "";
   const factor = snap.twoFactor ? `
-    <p class="mono">${esc(t("SETTINGS_SECURITY.TWO_FACTOR", "Zwei-Faktor"))}</p>
-    <p class="quiet">${esc(snap.twoFactor.enabled ? t("SETTINGS_SECURITY.TWO_ON", "Eingeschaltet.") : t("SETTINGS_SECURITY.TWO_OFF", "Ausgeschaltet."))}</p>
-    ${snap.twoFactor.secret ? `<p class="quiet">${esc(snap.twoFactor.secret)}</p>` : ""}
-    ${snap.twoFactor.codes ? `<p class="quiet">${esc(t("SETTINGS_SECURITY.BACKUP", "Ersatzcodes"))}: ${esc(snap.twoFactor.codes)}</p>` : ""}
-    ${form("two-factor-create", field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", ""), t("SETTINGS_SECURITY.NEW_SECRET", "Neues Geheimnis"), false)}
-    ${form("two-factor-enable", `
-      ${check("Enable", t("SETTINGS_SECURITY.TWO_ENABLE", "Zwei-Faktor einschalten"), snap.twoFactor.enabled)}
-      ${field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", "")}
-    `, t("GLOBAL.SAVE", "Speichern"), false)}
-    ${form("two-factor-clear", field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", ""), t("SETTINGS_SECURITY.CLEAR", "Zwei-Faktor löschen"), false)}
-  ` : "";
+    <div class="settings-card">
+      <h3 class="mono">${esc(t("SETTINGS_SECURITY.TWO_FACTOR", "Zwei-Faktor"))}</h3>
+      <p class="quiet">${esc(snap.twoFactor.enabled ? t("SETTINGS_SECURITY.TWO_ON", "Eingeschaltet.") : t("SETTINGS_SECURITY.TWO_OFF", "Ausgeschaltet."))}</p>
+      ${snap.twoFactor.secret ? `<p class="quiet">${esc(snap.twoFactor.secret)}</p>` : ""}
+      ${snap.twoFactor.codes ? `<p class="quiet">${esc(t("SETTINGS_SECURITY.BACKUP", "Ersatzcodes"))}: ${esc(snap.twoFactor.codes)}</p>` : ""}
+      ${form("two-factor-create", field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", ""), t("SETTINGS_SECURITY.NEW_SECRET", "Neues Geheimnis"), false)}
+      ${form("two-factor-enable", `
+        ${check("Enable", t("SETTINGS_SECURITY.TWO_ENABLE", "Zwei-Faktor einschalten"), snap.twoFactor.enabled)}
+        ${field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", "")}
+      `, t("GLOBAL.SAVE", "Speichern"), false)}
+      ${form("two-factor-clear", field(t("SETTINGS_SECURITY.CURRENT_CODE", "Aktueller Code"), "Code", ""), t("SETTINGS_SECURITY.CLEAR", "Zwei-Faktor löschen"), false)}
+    </div>` : "";
   return `
     ${group(t("SETTINGS_SECURITY.LEGEND", "Sitzung"), `
-      ${prefSelect("AutoLogout", t("SETTINGS_SECURITY.AUTO_LOGOUT", "Automatisch abmelden nach"), logout, [["0", t("SETTINGS_SECURITY.NEVER", "Nie")], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 h"], ["120", "2 h"]])}
-      ${prefSelect("keyPassForget", t("SETTINGS_SECURITY.KEY_FORGET", "Schlüssel-Passwort vergessen nach"), forget, [["0", t("SETTINGS_SECURITY.NEVER", "Nie")], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 h"]])}
+      ${prefSelectRow("AutoLogout", t("SETTINGS_SECURITY.AUTO_LOGOUT", "Automatisch abmelden nach"), "", logout, [["0", t("SETTINGS_SECURITY.NEVER", "Nie")], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 h"], ["120", "2 h"]])}
+      ${prefSelectRow("keyPassForget", t("SETTINGS_SECURITY.KEY_FORGET", "Schlüssel-Passwort vergessen nach"), "", forget, [["0", t("SETTINGS_SECURITY.NEVER", "Nie")], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 h"]])}
     `)}
     ${password}
     ${factor}`;
@@ -761,18 +837,34 @@ export function renderAssistant(snap: SettingsSnapshot): string {
 
 function lookSection(): string {
   const current = readAppearance();
-  const choice = (value: Appearance, label: string) =>
-    `<label class="check"><input type="radio" name="appearance" value="${value}"${current === value ? " checked" : ""}> ${label}</label>`;
   return `
     <p class="mono">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
-    <fieldset class="choices">
-      ${choice("system", t("SETTINGS_DESK.SYSTEM", "System"))}
-      ${choice("light", t("SETTINGS_DESK.LIGHT", "Hell"))}
-      ${choice("dark", t("SETTINGS_DESK.DARK", "Dunkel"))}
-    </fieldset>
-    <p class="mono">${esc(t("SETTINGS_GENERAL.MAILTO_LINKS", "E-Mail-Adressen"))}</p>
-    <p class="quiet">${esc(t("SETTINGS_GENERAL.MAILTO_DESC", "mailto:-Links können direkt hier eine neue Nachricht öffnen."))}</p>
-    <button type="button" class="text-btn" data-action="mailto-register">${icon("external")}<span>${esc(t("SETTINGS_GENERAL.MAILTO", "Als Programm für mailto:-Links registrieren"))}</span></button>`;
+    <div class="settings-card">
+      <div class="theme-cards">
+        <label class="theme-card${current === "system" ? " is-active" : ""}">
+          <input type="radio" name="appearance" value="system"${current === "system" ? " checked" : ""}>
+          <div class="theme-preview theme-preview-system" aria-hidden="true">
+            <div class="theme-prev-half prev-light"><span class="prev-nav"></span><span class="prev-main"></span></div>
+            <div class="theme-prev-half prev-dark"><span class="prev-nav"></span><span class="prev-main"></span></div>
+          </div>
+          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.SYSTEM", "System"))}</strong><span class="quiet">${esc(t("SETTINGS_DESK.SYSTEM_DESC", "Folgt dem System"))}</span></span>
+        </label>
+        <label class="theme-card${current === "light" ? " is-active" : ""}">
+          <input type="radio" name="appearance" value="light"${current === "light" ? " checked" : ""}>
+          <div class="theme-preview theme-preview-light" aria-hidden="true">
+            <span class="prev-nav"></span><span class="prev-main"><span class="prev-line"></span><span class="prev-line short"></span></span>
+          </div>
+          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.LIGHT", "Hell"))}</strong><span class="quiet">${esc(t("SETTINGS_DESK.LIGHT_DESC", "Warmes Papier"))}</span></span>
+        </label>
+        <label class="theme-card${current === "dark" ? " is-active" : ""}">
+          <input type="radio" name="appearance" value="dark"${current === "dark" ? " checked" : ""}>
+          <div class="theme-preview theme-preview-dark" aria-hidden="true">
+            <span class="prev-nav"></span><span class="prev-main"><span class="prev-line"></span><span class="prev-line short"></span></span>
+          </div>
+          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.DARK", "Dunkel"))}</strong><span class="quiet">${esc(t("SETTINGS_DESK.DARK_DESC", "Deep Steel"))}</span></span>
+        </label>
+      </div>
+    </div>`;
 }
 
 export function renderDesk(section: string, snap: SettingsSnapshot | null, edit: DeskEdit | null): string {

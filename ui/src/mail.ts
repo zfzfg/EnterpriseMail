@@ -484,8 +484,29 @@ class Session {
     this.view.showMail(this.email, "Posteingang", this.assistFlags);
     const sync = data.ContactsSync;
     this.view.setBook(this.caps.contacts, Boolean(sync && typeof sync === "object"), Number((sync as { Mode?: unknown } | null)?.Mode || 0));
-    this.view.setLayout(Number(data.Layout ?? 1));
+    const layoutMode = Number(data.Layout ?? 1);
+    this.view.setLayout(layoutMode === 2 ? 1 : layoutMode);
     this.view.setChecks(this.prefs.useChecks);
+    this.desk = {
+      caps: this.caps,
+      mainEmail: this.mainEmail,
+      currentEmail: this.email,
+      accounts: [{ email: this.mainEmail, name: "", current: true, main: true, unread: null }],
+      identities: [],
+      scripts: this.caps.sieve ? [] : null,
+      sieveCapa: [],
+      folderNames: [],
+      keys: [],
+      certs: [],
+      notes: { accounts: "", contacts: "", filters: "", keys: "", certs: "" },
+      app: this.composeData,
+      twoFactor: null,
+      passwordPlugin: Boolean(((this.composeData.Plugins || {}) as Record<string, unknown>)["change-password"]),
+      assist: null,
+      assistTones: []
+    };
+    this.view.showSettings(this.desk);
+    this.view.setFolderDesk(this.folderDesk());
     this.armLogout();
     if (this.assistFlags?.alerts) void this.loadAlerts();
     await this.loadFolders();
@@ -528,6 +549,8 @@ class Session {
         return;
       }
       if (name === "open") {
+        if (this.desk) this.view.showSettings(this.desk);
+        this.view.setFolderDesk(this.folderDesk());
         this.desk = await loadDesk(this.caps, this.email, this.mainEmail, this.composeData);
         this.view.showSettings(this.desk);
         return;
@@ -1687,7 +1710,10 @@ class Session {
     this.composeData[key] = numeric.includes(key) ? Number(raw) : bools.includes(key) ? raw === "1" : raw;
     if (key === "UseThreads") this.composeData.useThreads = raw === "1";
     if (key === "hourCycle") hourCycle = raw === "h12" || raw === "h23" ? raw : undefined;
-    if (key === "Layout") this.view.setLayout(Number(raw));
+    if (key === "Layout") {
+      const mode = Number(raw);
+      this.view.setLayout(mode === 2 ? 1 : mode);
+    }
     if (key === "UseCheckboxesInList") this.view.setChecks(raw === "1");
     if (key === "MessagesPerPage") this.pageSize = Math.min(100, Math.max(10, Number(raw) || 25));
     if (key === "defaultSort") this.sort = raw;

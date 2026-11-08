@@ -521,29 +521,40 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", "Suche")}</button>
           <button type="button" class="ink-btn" data-action="compose">${withIcon("compose", t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
         </nav>
-        <dialog id="settings" class="dialog-wide" aria-labelledby="settings-title">
-          <div class="dialog-body">
-            <div class="settings-sticky">
-              <div class="sheet-head" style="padding:0;border:0;min-height:0">
-                <h2 id="settings-title" class="title title-md">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
-                <span class="spacer"></span>
-                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
-              </div>
-              <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
-                <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="general">${withIcon("settings", t("SETTINGS_LABELS.GENERAL", "Allgemein"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="security">${withIcon("key", t("SETTINGS_LABELS.SECURITY", "Sicherheit"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="assistant" hidden>${withIcon("assist", t("AI_COPILOT.TITLE", "Assistent"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${withIcon("filter", t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
-                <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${withIcon("key", t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
-              </nav>
+        <dialog id="settings" class="dialog-wide dialog-settings" aria-labelledby="settings-title">
+          <div class="settings-frame">
+            <div class="settings-head">
+              <h2 id="settings-title" class="title title-md">${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}</h2>
+              <span class="spacer"></span>
+              <p class="quiet live" id="settings-live" aria-live="polite"></p>
+              <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
-            <p class="quiet live" id="settings-live" aria-live="polite"></p>
-            <div id="settings-panel"></div>
+            <div class="settings-body">
+              <aside class="settings-sidebar">
+                <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
+                  <span class="settings-nav-category" data-cat="personal">Persönlich</span>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="general">${withIcon("settings", t("SETTINGS_LABELS.GENERAL", "Allgemein"))}</button>
+
+                  <span class="settings-nav-category" data-cat="account">Konto</span>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="security">${withIcon("key", t("SETTINGS_LABELS.SECURITY", "Sicherheit"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
+
+                  <span class="settings-nav-category" data-cat="mail">Postfach</span>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${withIcon("filter", t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
+
+                  <span class="settings-nav-category" data-cat="advanced">Erweitert</span>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="assistant" hidden>${withIcon("assist", t("AI_COPILOT.TITLE", "Assistent"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
+                  <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${withIcon("key", t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
+                </nav>
+              </aside>
+              <div class="settings-main dialog-body">
+                <div id="settings-panel"></div>
+              </div>
+            </div>
           </div>
         </dialog>
         <dialog id="keys" aria-labelledby="keys-title">
@@ -1028,10 +1039,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         closeMenu();
         section = "look";
         edit = null;
-        snap = null;
         paintSettings();
         (shell?.querySelector("#settings") as HTMLDialogElement).showModal();
         void actions.settings?.("open", {});
+        actions.act("f-desk", {});
       } else if (action === "preview-sound") {
         const name = (shell?.querySelector("[data-pref='NotificationSound']") as HTMLSelectElement | null)?.value || "new-mail";
         const audio = new Audio(`${location.pathname.replace(/\/+$/, "")}/snappymail/v/0.0.0/static/sounds/${encodeURIComponent(name)}.mp3`);
@@ -1606,6 +1617,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       dlg.addEventListener("cancel", (e) => {
         e.preventDefault();
         closeDialogWithAnimation(dlg);
+      });
+      dlg.addEventListener("click", (e) => {
+        if (e.target === dlg) closeDialogWithAnimation(dlg);
       });
     });
 
@@ -2585,7 +2599,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       return Boolean(shell?.isConnected);
     },
     setLayout(mode) {
-      if (shell) shell.dataset.layout = String(mode);
+      const validMode = mode === 2 ? 1 : mode;
+      if (shell) shell.dataset.layout = String(validMode);
     },
     composerOpen() {
       return Boolean(shell?.querySelector(".composer:not([hidden])"));
@@ -2607,8 +2622,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     settingsSaved() {
       const slot = shell?.querySelector("#settings-live") as HTMLElement | null;
       if (!slot) return;
-      slot.textContent = "";
-      slot.textContent = t("GLOBAL.SAVED", "Gespeichert");
+      slot.innerHTML = `${icon("check")} <span>${esc(t("GLOBAL.SAVED", "Gespeichert"))}</span>`;
+      slot.classList.add("visible");
+      window.clearTimeout((slot as unknown as { _timer?: number })._timer);
+      (slot as unknown as { _timer?: number })._timer = window.setTimeout(() => {
+        slot.classList.remove("visible");
+      }, 2500);
     },
     showSettings(next) {
       snap = next;

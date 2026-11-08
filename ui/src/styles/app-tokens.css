@@ -53,6 +53,13 @@
   --sidebar-border: #e0ded7;
   --sidebar-ring: #a1a1a1;
 
+  --theme-prev-light-bg: #fbfbf8;
+  --theme-prev-light-nav: #ebe9e0;
+  --theme-prev-light-border: #e4e3de;
+  --theme-prev-dark-bg: #111113;
+  --theme-prev-dark-nav: #1e1e22;
+  --theme-prev-dark-border: #27272b;
+
   --code-background: #f5f4ef;
   --syntax-keyword: var(--primary);
   --syntax-string: #00a544;

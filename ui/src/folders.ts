@@ -214,8 +214,37 @@ export function displayName(folder: FolderInfo, role: string): string {
   return system && folder.depth === 0 ? t(system[0], system[1]) : folder.name;
 }
 
-export function folderPath(folder: FolderInfo): string {
-  return folder.delimiter ? folder.fullName.split(folder.delimiter).join(" / ") : folder.fullName;
+/**
+ * Vollständiger lesbarer Pfad eines Ordners für Tooltips und Pfadangaben.
+ * Übersetzt Systemordner (wie INBOX, Gesendet, Papierkorb etc.) in die Oberflächensprache.
+ */
+export function folderDisplayPath(folder: FolderInfo, role?: string): string {
+  const currentRole = role || folder.role;
+  const system = SYSTEM_NAME[currentRole];
+  if (folder.delimiter) {
+    const parts = folder.fullName.split(folder.delimiter);
+    const translated = parts.map((part, index) => {
+      if (index === 0 && part.toUpperCase() === "INBOX") {
+        return t("FOLDER_LIST.INBOX_NAME", "Posteingang");
+      }
+      if (index === parts.length - 1 && system && (parts.length === 1 || folder.depth <= 1)) {
+        return t(system[0], system[1]);
+      }
+      return part;
+    });
+    return translated.join(" / ");
+  }
+  if (system && folder.depth === 0) {
+    return t(system[0], system[1]);
+  }
+  if (folder.fullName.toUpperCase() === "INBOX") {
+    return t("FOLDER_LIST.INBOX_NAME", "Posteingang");
+  }
+  return folder.fullName;
+}
+
+export function folderPath(folder: FolderInfo, role?: string): string {
+  return folderDisplayPath(folder, role);
 }
 
 /**
@@ -396,7 +425,7 @@ export function renderFolderDesk(desk: FolderDesk | null, edit: { kind: string; 
       row.canDelete ? deskButton("f-delete", "delete", t("GLOBAL.DELETE", "Löschen"), { target: row.info.fullName }, true, undefined, true) : ""
     ].join("");
     const indent = `style="padding-left:${row.depth * 16}px"`;
-    return `<li class="set-row folder-set-row"><span class="grow" ${indent}><strong title="${esc(folderPath(row.info))}">${icon(ROLE_ICON[row.role] || "folder")} ${esc(name)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span>${actions}</li>${editing === row ? "<!--EDIT-->" : ""}`;
+    return `<li class="set-row folder-set-row"><span class="grow" ${indent}><strong title="${esc(folderPath(row.info, row.role))}">${icon(ROLE_ICON[row.role] || "folder")} ${esc(name)}</strong>${meta ? `<span class="quiet">${esc(meta)}</span>` : ""}</span>${actions}</li>${editing === row ? "<!--EDIT-->" : ""}`;
   }).join("");
 
   const subscribeLabel = t("FOLDERS_UI.SUBSCRIBE", "Abonnieren");
@@ -410,7 +439,7 @@ export function renderFolderDesk(desk: FolderDesk | null, edit: { kind: string; 
 
   const kolabTypes = desk.kolab ? Object.keys(KOLAB_TYPES) : [];
   const editForm = editing ? `<form class="fields" data-action="settings-form" data-kind="folder-save">
-      <p class="mono">${esc(folderPath(editing.info))}</p>
+      <p class="mono">${esc(folderPath(editing.info, editing.role))}</p>
       <input type="hidden" name="oldName" value="${esc(editing.info.fullName)}">
       ${editing.canRename ? `<label class="field"><span>${esc(t("GLOBAL.NAME", "Name"))}</span><input name="name" type="text" value="${esc(editing.info.name)}" required autocomplete="off"></label>
       ${select("parent", t("POPUPS_CREATE_FOLDER.LABEL_PARENT", "Übergeordneter Ordner"), parentOptions(desk.rows, editing.info.parent, editing.info.fullName))}` : `<input type="hidden" name="name" value="${esc(editing.info.name)}"><input type="hidden" name="parent" value="${esc(editing.info.parent)}"><p class="quiet">${esc(t("FOLDERS_UI.SYSTEM_NO_RENAME", "Systemordner werden nicht umbenannt."))}</p>`}
