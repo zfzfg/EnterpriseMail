@@ -194,11 +194,12 @@ abstract class Host
 		$ips = \array_map(fn($ip) => self::NormalizeNumericIPv4($ip) ?: $ip, $ips);
 
 		// Check them all
-		if (\array_all($ips, fn($ip) => self::IsPublicIP($ip))) {
-			return true;
+		foreach ($ips as $ip) {
+			if (!self::IsPublicIP($ip)) {
+				return false;
+			}
 		}
-
-		return false;
+		return true;
 	}
 
 	private static ?array $aLocalAddresses = null;

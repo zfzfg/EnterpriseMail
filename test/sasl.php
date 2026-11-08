@@ -1,25 +1,29 @@
 <?php
-//$_ENV['SNAPPYMAIL_INCLUDE_AS_API'] = true;
-//require '../index.php';
 
-define('SNAPPYMAIL_LIBRARIES_PATH', dirname(__DIR__) . '/snappymail/v/0.0.0/app/libraries');
-if (false === set_include_path(SNAPPYMAIL_LIBRARIES_PATH . PATH_SEPARATOR . get_include_path())) {
-	exit('set_include_path() failed. Probably due to Apache config using php_admin_value instead of php_value');
-}
-spl_autoload_extensions('.php');
-/** lowercase autoloader */
-spl_autoload_register();
-/** case-sensitive autoloader */
-spl_autoload_register(function($sClassName){
-	$file = SNAPPYMAIL_LIBRARIES_PATH . strtr($sClassName, '\\', DIRECTORY_SEPARATOR) . '.php';
-//		if ($file = stream_resolve_include_path(strtr($sClassName, '\\', DIRECTORY_SEPARATOR) . '.php')) {
-	if (is_file($file)) {
-		include_once $file;
+$_ENV['SNAPPYMAIL_INCLUDE_AS_API'] = true;
+require dirname(__DIR__) . '/index.php';
+
+$assertions = 0;
+function check(bool $condition, string $message): void
+{
+	global $assertions;
+	++$assertions;
+	if (!$condition) {
+		throw new RuntimeException($message);
 	}
-});
+}
 
-$LOGIN = new \SnappyMail\SASL\Login;
-$LOGIN->base64 = true;
-var_dump($LOGIN->authenticate('john', 'doe', 'VXNlcm5hbWU6'));
-var_dump($LOGIN->authenticate('john', 'doe', 'VXNlcm5hbWU6CG'));
-var_dump($LOGIN->authenticate('john', 'doe', 'UGFzc3dvcmQ6'));
+$login = new \SnappyMail\SASL\Login();
+$login->base64 = true;
+check('am9obg==' === $login->authenticate('john', 'doe', 'VXNlcm5hbWU6'), 'LOGIN username challenge failed');
+check('am9obg==' === $login->authenticate('john', 'doe', 'VXNlcm5hbWU6CG'), 'LOGIN compatibility challenge failed');
+check('ZG9l' === $login->challenge('UGFzc3dvcmQ6'), 'LOGIN password challenge failed');
+
+try {
+	$login->authenticate('john', 'doe', 'UGFzc3dvcmQ6');
+	throw new RuntimeException('LOGIN accepted a password prompt as the username prompt');
+} catch (Exception $error) {
+	check(str_contains($error->getMessage(), 'Invalid response'), 'LOGIN rejected the wrong prompt for an unexpected reason');
+}
+
+echo 'sasl: ok (' . $assertions . " assertions)\n";

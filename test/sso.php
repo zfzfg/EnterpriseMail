@@ -4,18 +4,16 @@
 $_ENV['SNAPPYMAIL_INCLUDE_AS_API'] = true;
 require __DIR__ . '/../index.php';
 
-/**
- * Get SSO hash
- */
-$aAdditionalOptions = array(
-	// One of /snappymail/v/0.0.0/app/localization/*
-//	'Language' = 'en-US'
+$ssoHash = \RainLoop\Api::CreateUserSsoHash(
+	'sso-test@example.invalid',
+	'local-test-passphrase',
+	array('Language' => 'en-US'),
+	true
 );
-$bUseTimeout = true; // 10 seconds
-$ssoHash = \RainLoop\Api::CreateUserSsoHash($sEmail, $sPassword, $aAdditionalOptions, $bUseTimeout);
-
-// redirect to webmail sso url
-\header('Location: https://yourdomain.com/snappymail/?sso&hash='.$ssoHash);
-
-// Destroy the SSO hash
-//\RainLoop\Api::ClearUserSsoHash($ssoHash);
+if (!is_string($ssoHash) || '' === $ssoHash) {
+	throw new RuntimeException('SSO hash creation failed');
+}
+if (!\RainLoop\Api::ClearUserSsoHash($ssoHash)) {
+	throw new RuntimeException('SSO hash cleanup failed');
+}
+echo "sso: ok\n";

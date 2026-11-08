@@ -105,7 +105,13 @@ abstract class Api
 
 	public static function ClearUserSsoHash(string $sSsoHash) : bool
 	{
-		return static::Actions()->Cacher()->Delete(KeyPathHelper::SsoCacherKey($sSsoHash));
+		$oCacher = static::Actions()->Cacher();
+		if (!$oCacher->IsInited()) {
+			return false;
+		}
+		$sKey = KeyPathHelper::SsoCacherKey($sSsoHash);
+		$oCacher->Delete($sKey);
+		return !$oCacher->Exists($sKey);
 	}
 
 	public static function ClearUserData(string $sEmail) : bool

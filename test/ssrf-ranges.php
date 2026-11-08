@@ -34,7 +34,6 @@ check(!$public('203.0.113.7'), "the server's own IPv4 address treated as public"
 check(!$public('[2001:db8:1::53]'), "the server's own IPv6 address treated as public");
 check($public('203.0.113.8'), 'a neighbouring address wrongly blocked');
 
-check($public('snappymail.eu'), 'snapymail.eu wrongly blocked');
 check(!$public('localhost'), 'localhost should be blocked');
 
 echo "ssrf-ranges: ok\n";

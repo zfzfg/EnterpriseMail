@@ -7,7 +7,6 @@ require $dir . '/snappymail/v/0.0.0/app/libraries/snappymail/http/response.php';
 require $dir . '/snappymail/v/0.0.0/app/libraries/snappymail/http/request.php';
 require $dir . '/snappymail/v/0.0.0/app/libraries/snappymail/http/request/curl.php';
 require $dir . '/snappymail/v/0.0.0/app/libraries/snappymail/http/request/socket.php';
-require $dir . '/snappymail/v/0.0.0/app/libraries/RainLoop/Common/PdoAbstract.php';
 require $dir . '/snappymail/v/0.0.0/app/libraries/RainLoop/Providers/AddressBook/CardDAV.php';
 require $dir . '/snappymail/v/0.0.0/app/libraries/MailSo/Base/DateTimeHelper.php';
 
@@ -27,6 +26,8 @@ class Logger
 class PdoAddressBook
 {
 	use \RainLoop\Providers\AddressBook\CardDAV;
+
+	public $oLogger;
 
 	public function Sync(string $sEmail, string $sUrl, string $sUser, string $sPassword, string $sProxy = '') : bool
 	{

@@ -94,6 +94,7 @@ abstract class Crypt
 		} else {
 			Log::warning('Crypt', 'Decrypt() invalid $data');
 		}
+		return null;
 	}
 
 	public static function DecryptFromJSON(string $data,

@@ -89,7 +89,7 @@ abstract class DNS
 			}
 		}
 		if (!$ips) {
-			$ips = \gethostbynamel($host);
+			$ips = \gethostbynamel($domain);
 		}
 		return $ips ?: array();
 	}
