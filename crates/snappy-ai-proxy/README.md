@@ -218,11 +218,13 @@ cargo test --all-targets --locked
 cargo build --release --locked
 ```
 
-The lockfile resolves exact crates.io versions with registry checksums and no git-sourced dependencies. Release and verification builds use `--locked`. This supply-chain review is not a vulnerability or license audit, and it does not pin every container base image by digest.
+The lockfile resolves exact crates.io versions with registry checksums and no git-sourced dependencies. Release and verification builds use `--locked`. The supply-chain gate additionally runs `cargo-audit` 0.22.2 with warnings denied and `cargo-deny` 0.20.2 against `deny.toml`: vulnerabilities, unmaintained or unsound crates, yanked versions, unapproved licenses, unknown sources, and wildcard dependencies fail; duplicate versions are reported as warnings. License checking includes development and build dependencies. This does not pin every container base image by digest.
+
+From the repository root, run the same x86_64 Linux check locally with `bash scripts/ci/rust-supply-chain.sh`, or use the digest-pinned Rust container with `bash scripts/ci/rust-supply-chain-docker.sh`. The scripts download only the two official musl release archives and verify their committed SHA-256 hashes. Reports are written to `build/local/release/rust-supply-chain/`: tool/input provenance, RustSec audit JSON, per-crate license JSON, and the complete policy result. CI uploads the same reports as `rust-supply-chain-reports`, including on a failed audit. Advisory results intentionally change as the RustSec database is updated; tool archives and application dependency versions do not.
 
 Unsafe Rust is forbidden and `clippy::all` is denied. Tests use only in-process/loopback mocks and never contact a live provider. Coverage includes arbitrary parser splits, CRLF, malformed JSON/shapes, incomplete EOF, reasoning tags, content arrays, subject/Unicode/whitespace compatibility, authorization failures with zero provider calls, body limits, redirect rejection, idle timeout, slow consumers, disconnect cancellation, global/per-account saturation, and permit return to baseline.
 
-With Docker on an MSYS shell, prefix container commands with `MSYS_NO_PATHCONV=1` and mount this crate at `/work`.
+With Docker on an MSYS shell, prefix container commands with `MSYS_NO_PATHCONV=1` and mount this crate at `/work`. The supply-chain Docker wrapper handles this path conversion itself.
 
 The isolated release fixture under `.docker/release/test/phase5/` builds the real image and exercises PHP, Nginx, Rust, and Supervisor against an isolated mock provider, including an external-prefix proxy. Its compose project, ports, volumes, and mock listener are separate from existing development environments. Run `python .docker/release/test/phase5/integration.py` from the repository root; do not add `-v` when stopping the fixture, so its volumes are preserved.
 
@@ -233,4 +235,4 @@ Verified for this integration: Rust formatting, Clippy with warnings denied, all
 - Only draft streaming is implemented. Synchronous completions, summaries, chat, quick replies, search, triage, alerts, caching, and tools remain in PHP.
 - No automatic fallback to legacy PHP occurs after a possible provider dispatch; a deliberate new user action is required.
 - No heartbeats are emitted; configured upstream idle timeouts apply.
-- No live-provider or multi-architecture verification is claimed. Dependency vulnerability/license scanning and broader release-image hardening remain release-pipeline responsibilities.
+- No live-provider or multi-architecture verification is claimed. Broader release-image hardening remains a release-pipeline responsibility.

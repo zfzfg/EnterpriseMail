@@ -104,6 +104,9 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Run locked Rust tests
         run: cargo test --locked
+      - name: Verify Rust dependency supply chain
+        id: supply_chain
+        run: bash ../../scripts/ci/rust-supply-chain.sh
       - name: Record locked dependency metadata
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/build/local/release"
@@ -115,6 +118,14 @@ jobs:
           path: build/local/release/rust-metadata.json
           if-no-files-found: error
           retention-days: 14
+      - name: Upload Rust supply-chain reports
+        if: always() && steps.supply_chain.outcome != ''
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: rust-supply-chain-reports
+          path: build/local/release/rust-supply-chain/
+          if-no-files-found: warn
+          retention-days: 30
 
   integration:
     needs: [frontend, php, rust]

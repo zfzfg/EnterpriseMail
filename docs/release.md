@@ -7,7 +7,7 @@ Dieser Fork veröffentlicht Container ausschließlich unter `ghcr.io/zfzfg/snapp
 - Die Node-Version steht in `.node-version`; die Frontend-Abhängigkeiten kommen aus `ui/package-lock.json`.
 - Die Rust-Version und ihre Komponenten stehen in `crates/snappy-ai-proxy/rust-toolchain.toml`; Cargo wird mit `--locked` ausgeführt.
 - GitHub Actions, Container-Basisimages, die Testwerkzeuge, externe Integrationsfixtures und die PECL-Erweiterungen sind auf Commits, Digests oder feste Versionen festgelegt.
-- CI baut die TypeScript-Quellen neu und vergleicht die erzeugten Schriften, Symbole, CSS- und JS-Dateien mit dem committeten Stand. Anschließend laufen Bundle-Budgets, PHP-Syntax-/Offline-Tests, Rust-Tests und die isolierte HTTP-Integration.
+- CI baut die TypeScript-Quellen neu und vergleicht die erzeugten Schriften, Symbole, CSS- und JS-Dateien mit dem committeten Stand. Anschließend laufen Bundle-Budgets, PHP-Syntax-/Offline-Tests, Rust-Tests und die isolierte HTTP-Integration. Die Rust-Supply-Chain-Prüfung blockiert bei RustSec-Meldungen, nicht gepflegten oder unsicheren Crates, zurückgezogenen Versionen, unerlaubten Lizenzen oder Quellen sowie Wildcard-Abhängigkeiten. Sie verwendet die auf Version und SHA-256 festgelegten Werkzeuge aus `scripts/ci/rust-supply-chain.sh`; Audit-, Lizenz- und Herkunftsberichte werden als `rust-supply-chain-reports` archiviert.
 - `php cli/release.php --frontend-dist` packt bewusst die geprüften, committeten Frontend-Artefakte. `--skip-gulp` bleibt nur als veralteter Alias bestehen.
 
 Ein Release-Tag muss exakt `v` plus der Version aus `package.json` lauten. Bei Version `3.0.0` ist also nur `v3.0.0` gültig. Der Workflow erzeugt daraus die GHCR-Tags `v3.0.0` und `3.0.0`; ein abweichender Tag bricht vor den Container-Tests ab.
