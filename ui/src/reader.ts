@@ -146,23 +146,8 @@ function textButton(action: string, label: string, extra = ""): string {
   return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc(label)}</button>`;
 }
 
-export function renderReader(body: HTMLElement, data: ReaderData, expanded: boolean): void {
-  const tags = data.keywords.map((tag) =>
-    `<span class="tag">${icon("tag")}<span>${esc(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc(tag)}" aria-label="${esc(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
-  ).join("");
-  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted)
-    ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ungültig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ungültig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>`
-    : "";
-  const from = data.from[0];
-  const summary = `
-    <div class="head-line head-main">
-      <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
-      <span class="spacer"></span>
-      ${secBadge}
-      <time class="quiet" title="${esc(data.whenFull)}">${esc(data.when)}</time>
-      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen")}" title="${esc(t("MESSAGE.DETAILS_EXPAND", "Details anzeigen"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
-    </div>`;
-  const details = expanded ? `
+function detailsMarkup(data: ReaderData, expanded: boolean, secBadge: string): string {
+  if (expanded) return `
     <div class="head-details">
       ${line(t("MESSAGE.FORWARD_FROM", "Von"), data.from)}
       ${line(t("MESSAGE.FORWARD_TO", "An"), data.to)}
@@ -170,30 +155,80 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
       ${line("Bcc", data.bcc)}
       ${line(t("MESSAGE.REPLY_TO", "Antwort an"), data.replyTo)}
       <div class="head-line"><span class="head-key mono">${esc(t("MESSAGE.FORWARD_DATE", "Datum"))}</span><span class="head-val">${esc(data.whenFull)}</span></div>
-      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">${esc(t("CRYPTO.STANDARD", "Standard"))}</span>`}</span></div>` : ""}
       ${data.size ? `<div class="head-line"><span class="head-key mono">${esc(t("MESSAGE_LIST.SORT_SIZE", "Größe"))}</span><span class="head-val">${esc(data.size)}</span></div>` : ""}
-    </div>` : (data.to.length ? `<div class="head-line quiet"><span class="head-key mono">${esc(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "");
+    </div>`;
+  return data.to.length ? `<div class="head-line head-summary quiet"><span class="head-key mono">${esc(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
+}
+
+/** Nur Metadaten und Schalter aktualisieren; Brief und Hinweise bleiben unangetastet. */
+export function paintReaderDetails(body: HTMLElement, data: ReaderData, expanded: boolean): void {
+  const secBadge = body.querySelector(".head-main .badge-sec")?.outerHTML || "";
+  const slot = body.querySelector(".head-details-slot");
+  if (slot) slot.innerHTML = detailsMarkup(data, expanded, secBadge);
+  const button = body.querySelector("[data-action='m-details']") as HTMLElement | null;
+  if (!button) return;
+  const label = expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen");
+  button.setAttribute("aria-expanded", expanded ? "true" : "false");
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = icon(expanded ? "chevron-up" : "chevron-down");
+}
+
+export function paintReaderFiles(body: HTMLElement, showAll: boolean): void {
+  body.querySelectorAll<HTMLElement>(".file-overflow").forEach((file) => { file.hidden = !showAll; });
+  const button = body.querySelector("[data-action='m-files-toggle']") as HTMLElement | null;
+  if (!button) return;
+  const count = Number(button.dataset.count || 0);
+  const label = showAll
+    ? t("MESSAGE.ATTACHMENTS_SHOW_LESS", "Weniger Anhänge anzeigen")
+    : t("MESSAGE.ATTACHMENTS_SHOW_ALL", "Alle %COUNT% Anhänge anzeigen").replace("%COUNT%", String(count));
+  button.setAttribute("aria-expanded", showAll ? "true" : "false");
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = `${icon(showAll ? "chevron-up" : "chevron-down")}<span class="btn-label">${esc(label)}</span>`;
+}
+
+export function renderReader(body: HTMLElement, data: ReaderData, expanded: boolean, showAllFiles = false): void {
+  const tags = data.keywords.map((tag) =>
+    `<span class="tag">${icon("tag")}<span>${esc(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc(tag)}" aria-label="${esc(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}" title="${esc(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
+  ).join("");
+  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted)
+    ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ungültig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ungültig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>`
+    : "";
+  const from = data.from[0];
+  const detailsLabel = expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen");
+  const summary = `
+    <div class="head-line head-main">
+      <span class="head-val">${from ? person(from) : `<span class="quiet">${esc(t("MESSAGE.UNKNOWN_SENDER", "(unbekannt)"))}</span>`}</span>
+      <span class="spacer"></span>
+      ${secBadge}
+      <time class="quiet" title="${esc(data.whenFull)}">${esc(data.when)}</time>
+      <button type="button" class="icon-btn details-toggle" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-controls="reader-details" aria-label="${esc(detailsLabel)}" title="${esc(detailsLabel)}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
+    </div>`;
 
   const bars: string[] = [];
   if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gelöscht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
-  if (data.blocked) {
-    bars.push(bar("images", "image-blocked",
-      data.blocked === 1 ? "Ein externes Bild wurde blockiert." : `${data.blocked} externe Bilder wurden blockiert.`,
-      textButton("m-images", "Anzeigen") + (from ? textButton("m-images-always", "Immer für diesen Absender") : "")));
-  }
-  if (data.failed) {
-    bars.push(bar("images", "image-blocked",
-      data.failed === 1 ? "Ein externes Bild ist nicht erreichbar." : `${data.failed} externe Bilder sind nicht erreichbar.`, ""));
+  if (data.blocked || data.failed) {
+    const notes: string[] = [];
+    if (data.blocked) notes.push(data.blocked === 1
+      ? t("MESSAGE.IMAGES_BLOCKED_ONE", "Ein externes Bild blockiert")
+      : t("MESSAGE.IMAGES_BLOCKED_MANY", "%COUNT% externe Bilder blockiert").replace("%COUNT%", String(data.blocked)));
+    if (data.failed) notes.push(data.failed === 1
+      ? t("MESSAGE.IMAGES_FAILED_ONE", "Ein Bild nicht erreichbar")
+      : t("MESSAGE.IMAGES_FAILED_MANY", "%COUNT% Bilder nicht erreichbar").replace("%COUNT%", String(data.failed)));
+    bars.push(bar("images", "image-blocked", `${notes.join(" · ")}.`,
+      data.blocked ? textButton("m-images", t("MESSAGE.SHOW_IMAGES", "Anzeigen")) + (from ? textButton("m-images-always", t("MESSAGE.SHOW_IMAGES_FOR_SENDER", "Immer für diesen Absender")) : "") : ""));
   }
   if (data.tracking) {
     bars.push(bar("tracking", "shield-check",
-      data.originalLinks ? "Links zeigen auf die Originaladressen mit Tracking." : "Tracking in Links und Bildern wurde entfernt.",
-      textButton("m-links", data.originalLinks ? "Bereinigte Links" : "Originallinks")));
+      data.originalLinks ? t("MESSAGE.TRACKING_ORIGINAL", "Links zeigen auf die Originaladressen mit Tracking.") : t("MESSAGE.TRACKING_REMOVED", "Tracking in Links und Bildern wurde entfernt."),
+      textButton("m-links", data.originalLinks ? t("MESSAGE.CLEANED_LINKS", "Bereinigte Links") : t("MESSAGE.ORIGINAL_LINKS", "Originallinks"))));
   }
   if (data.receipt) {
-    bars.push(bar("receipt", "receipt", `Der Absender bittet um eine Lesebestätigung an ${data.receipt}.`,
-      textButton("m-receipt", "Bestätigung senden") + textButton("m-receipt-skip", "Nicht senden")));
+    bars.push(bar("receipt", "receipt", t("MESSAGE.RECEIPT_REQUEST", "Der Absender bittet um eine Lesebestätigung an %ADDRESS%.").replace("%ADDRESS%", data.receipt),
+      textButton("m-receipt", t("MESSAGE.SEND_RECEIPT", "Bestätigung senden")) + textButton("m-receipt-skip", t("MESSAGE.SKIP_RECEIPT", "Nicht senden"))));
   }
   if (data.crypto && (data.crypto.encrypted || data.crypto.signed || data.crypto.autocrypt)) {
     const actions = [
@@ -210,30 +245,31 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
         : data.crypto.signed
           ? t("CRYPTO.SIGNED", "Diese Mail ist signiert.")
           : t("CRYPTO.AUTOCRYPT", "Der Absender legt einen Schlüssel bei.");
-    bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
+    if (actions || data.crypto.state !== "ok") bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
   }
 
   const cal = data.calendar ? `
-    <section class="cal-card" aria-label="Termin">
-      ${icon("calendar", "Termin")}
+    <section class="cal-card" aria-label="${esc(t("MESSAGE.CALENDAR_EVENT", "Termin"))}">
+      ${icon("calendar", t("MESSAGE.CALENDAR_EVENT", "Termin"))}
       <div class="grow">
-        <p class="cal-title">${esc(data.calendar.summary || "Termin")}</p>
+        <p class="cal-title">${esc(data.calendar.summary || t("MESSAGE.CALENDAR_EVENT", "Termin"))}</p>
         <p class="quiet">${esc([data.calendar.start, data.calendar.end].filter(Boolean).join(" – "))}</p>
         ${data.calendar.location ? `<p class="quiet">${esc(data.calendar.location)}</p>` : ""}
-        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc(data.calendar.organizer)}</p>` : ""}
+        ${data.calendar.organizer ? `<p class="quiet">${esc(t("MESSAGE.CALENDAR_ORGANIZER", "Organisiert von %NAME%").replace("%NAME%", data.calendar.organizer))}</p>` : ""}
       </div>
     </section>` : "";
 
   const files = data.files.length ? `
-    <section class="files" aria-label="Anhänge">
+    <section class="files" aria-label="${esc(t("MESSAGE.PRINT_LABEL_ATTACHMENTS", "Anhänge"))}">
       <div class="files-head"><span class="mono">${data.files.length === 1 ? t("MESSAGE.ATTACHMENT_ONE", "1 Anhang") : t("MESSAGE.ATTACHMENTS_COUNT", "%COUNT% Anhänge").replace("%COUNT%", String(data.files.length))}</span><span class="spacer"></span>
+        ${data.files.length > 4 ? `<button type="button" class="text-btn files-toggle" data-action="m-files-toggle" data-count="${data.files.length}" aria-expanded="${showAllFiles ? "true" : "false"}" aria-controls="reader-files">${icon(showAllFiles ? "chevron-up" : "chevron-down")}<span class="btn-label">${esc(showAllFiles ? t("MESSAGE.ATTACHMENTS_SHOW_LESS", "Weniger Anhänge anzeigen") : t("MESSAGE.ATTACHMENTS_SHOW_ALL", "Alle %COUNT% Anhänge anzeigen").replace("%COUNT%", String(data.files.length)))}</span></button>` : ""}
         ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">${esc(t("MESSAGE.ALL_AS_ZIP", "Alle als ZIP"))}</span></button>` : ""}
       </div>
-      <ul class="file-list${data.simpleFiles ? " simple" : ""}">
-        ${data.files.map((file) => `
-          <li class="file">
+      <ul class="file-list${data.simpleFiles ? " simple" : ""}" id="reader-files">
+        ${data.files.map((file, fileIndex) => `
+          <li class="file${fileIndex >= 4 ? " file-overflow" : ""}"${fileIndex >= 4 && !showAllFiles ? " hidden" : ""}>
             ${file.thumb && !data.simpleFiles
-              ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc(file.name)} ansehen"><img src="${esc(file.thumb)}" alt="" loading="lazy"></button>`
+              ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc(t("MESSAGE.ATTACHMENT_VIEW", "%NAME% ansehen").replace("%NAME%", file.name))}"><img src="${esc(file.thumb)}" alt="" loading="lazy"></button>`
               : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">
               ${file.kind === "image" || file.kind === "pdf" || file.kind === "text"
@@ -249,22 +285,23 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
   body.innerHTML = `
     <div class="read-measure">
     <header class="letter-head">
-      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", t("SEARCH.FLAGGED", "Markiert"))}</span>` : ""}${esc(data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</h2>
       ${summary}
-      ${details}
-      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">${esc(t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"))}</span></button></div>
+      <div class="head-details-slot" id="reader-details"></div>
+      ${tags ? `<div class="tags">${tags}</div>` : ""}
     </header>
-    ${bars.join("")}
+    ${bars.length ? `<div class="reader-notices" aria-label="${esc(t("MESSAGE.NOTICES", "Hinweise zu dieser Mail"))}">${bars.join("")}</div>` : ""}
     ${cal}
     ${files}
     </div>`;
+  paintReaderDetails(body, data, expanded);
   const frame = document.createElement("iframe");
   frame.className = "letter";
   // Ohne Skripte im Brief darf der Leser die Dokumenthöhe auslesen. So scrollt
   // die Mail mit dem äußeren Leserbereich statt in einem abgeschnittenen iframe.
   frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
-  frame.title = "Brief";
+  frame.title = t("MESSAGE.LETTER_FRAME", "Brief: %SUBJECT%").replace("%SUBJECT%", data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"));
   const fit = () => {
     const doc = frame.contentDocument;
     if (!doc) return;

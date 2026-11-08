@@ -798,6 +798,7 @@ function srcdoc(body, kind, look) {
     ":root{--background:#ffffff;--foreground:rgb(28 25 23);}",
     `html{color-scheme:${scheme}}`,
     `body{margin:0;padding:16px;${paper};font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
+    "@media(min-width:600px){body{padding:24px}}",
     kind === "plain" ? "body{white-space:pre-wrap;max-width:72ch}" : "",
     "img{max-width:100%;height:auto}",
     "table{max-width:100%}",
@@ -4619,21 +4620,8 @@ function bar(kind, iconName, text2, actions) {
 function textButton(action, label2, extra = "") {
   return `<button type="button" class="text-btn" data-action="${action}"${extra}>${esc7(label2)}</button>`;
 }
-function renderReader(body, data, expanded) {
-  const tags = data.keywords.map(
-    (tag) => `<span class="tag">${icon("tag")}<span>${esc7(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc7(tag)}" aria-label="${esc7(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
-  ).join("");
-  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted) ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc7(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ung\xFCltig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc7(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ung\xFCltig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>` : "";
-  const from = data.from[0];
-  const summary = `
-    <div class="head-line head-main">
-      <span class="head-val">${from ? person(from) : '<span class="quiet">(unbekannt)</span>'}</span>
-      <span class="spacer"></span>
-      ${secBadge}
-      <time class="quiet" title="${esc7(data.whenFull)}">${esc7(data.when)}</time>
-      <button type="button" class="icon-btn" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen")}" title="${esc7(t("MESSAGE.DETAILS_EXPAND", "Details anzeigen"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
-    </div>`;
-  const details = expanded ? `
+function detailsMarkup(data, expanded, secBadge) {
+  if (expanded) return `
     <div class="head-details">
       ${line(t("MESSAGE.FORWARD_FROM", "Von"), data.from)}
       ${line(t("MESSAGE.FORWARD_TO", "An"), data.to)}
@@ -4641,42 +4629,79 @@ function renderReader(body, data, expanded) {
       ${line("Bcc", data.bcc)}
       ${line(t("MESSAGE.REPLY_TO", "Antwort an"), data.replyTo)}
       <div class="head-line"><span class="head-key mono">${esc7(t("MESSAGE.FORWARD_DATE", "Datum"))}</span><span class="head-val">${esc7(data.whenFull)}</span></div>
-      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc7(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">Standard</span>`}</span></div>` : ""}
+      ${data.crypto ? `<div class="head-line"><span class="head-key mono">${esc7(t("CRYPTO.TITLE_SECURITY", "Sicherheit"))}</span><span class="head-val">${secBadge || `<span class="quiet">${esc7(t("CRYPTO.STANDARD", "Standard"))}</span>`}</span></div>` : ""}
       ${data.size ? `<div class="head-line"><span class="head-key mono">${esc7(t("MESSAGE_LIST.SORT_SIZE", "Gr\xF6\xDFe"))}</span><span class="head-val">${esc7(data.size)}</span></div>` : ""}
-    </div>` : data.to.length ? `<div class="head-line quiet"><span class="head-key mono">${esc7(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
+    </div>`;
+  return data.to.length ? `<div class="head-line head-summary quiet"><span class="head-key mono">${esc7(t("MESSAGE.FORWARD_TO", "An"))}</span><span class="head-val">${people(data.to.slice(0, 3))}${data.to.length + data.cc.length > 3 ? ` <span class="quiet">+${data.to.length + data.cc.length - 3}</span>` : ""}</span></div>` : "";
+}
+function paintReaderDetails(body, data, expanded) {
+  const secBadge = body.querySelector(".head-main .badge-sec")?.outerHTML || "";
+  const slot = body.querySelector(".head-details-slot");
+  if (slot) slot.innerHTML = detailsMarkup(data, expanded, secBadge);
+  const button3 = body.querySelector("[data-action='m-details']");
+  if (!button3) return;
+  const label2 = expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen");
+  button3.setAttribute("aria-expanded", expanded ? "true" : "false");
+  button3.setAttribute("aria-label", label2);
+  button3.title = label2;
+  button3.innerHTML = icon(expanded ? "chevron-up" : "chevron-down");
+}
+function paintReaderFiles(body, showAll) {
+  body.querySelectorAll(".file-overflow").forEach((file) => {
+    file.hidden = !showAll;
+  });
+  const button3 = body.querySelector("[data-action='m-files-toggle']");
+  if (!button3) return;
+  const count = Number(button3.dataset.count || 0);
+  const label2 = showAll ? t("MESSAGE.ATTACHMENTS_SHOW_LESS", "Weniger Anh\xE4nge anzeigen") : t("MESSAGE.ATTACHMENTS_SHOW_ALL", "Alle %COUNT% Anh\xE4nge anzeigen").replace("%COUNT%", String(count));
+  button3.setAttribute("aria-expanded", showAll ? "true" : "false");
+  button3.setAttribute("aria-label", label2);
+  button3.title = label2;
+  button3.innerHTML = `${icon(showAll ? "chevron-up" : "chevron-down")}<span class="btn-label">${esc7(label2)}</span>`;
+}
+function renderReader(body, data, expanded, showAllFiles = false) {
+  const tags = data.keywords.map(
+    (tag) => `<span class="tag">${icon("tag")}<span>${esc7(tag)}</span><button type="button" class="tag-x" data-action="m-untag" data-tag="${esc7(tag)}" aria-label="${esc7(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}" title="${esc7(t("MESSAGE_TAGS.REMOVE_TAG", "Schlagwort %TAG% entfernen").replace("%TAG%", tag))}">${icon("close")}</button></span>`
+  ).join("");
+  const secBadge = data.crypto && (data.crypto.signed || data.crypto.encrypted) ? `<span class="badge-sec ${data.crypto.state === "bad" ? "badge-sec--bad" : "badge-sec--ok"}" title="${esc7(data.crypto.text || (data.crypto.state === "bad" ? t("CRYPTO.VERIFY_BAD", "Signatur ung\xFCltig") : t("CRYPTO.VERIFY_OK", "Kryptografisch verifiziert")))}">${icon(data.crypto.state === "bad" ? "shield-alert" : "shield-check")}<span>${esc7(data.crypto.state === "bad" ? t("CRYPTO.INVALID", "Ung\xFCltig") : t("CRYPTO.VERIFIED", "Verifiziert"))}</span></span>` : "";
+  const from = data.from[0];
+  const detailsLabel = expanded ? t("MESSAGE.DETAILS_COLLAPSE", "Details ausblenden") : t("MESSAGE.DETAILS_EXPAND", "Details anzeigen");
+  const summary = `
+    <div class="head-line head-main">
+      <span class="head-val">${from ? person(from) : `<span class="quiet">${esc7(t("MESSAGE.UNKNOWN_SENDER", "(unbekannt)"))}</span>`}</span>
+      <span class="spacer"></span>
+      ${secBadge}
+      <time class="quiet" title="${esc7(data.whenFull)}">${esc7(data.when)}</time>
+      <button type="button" class="icon-btn details-toggle" data-action="m-details" aria-expanded="${expanded ? "true" : "false"}" aria-controls="reader-details" aria-label="${esc7(detailsLabel)}" title="${esc7(detailsLabel)}">${icon(expanded ? "chevron-up" : "chevron-down")}</button>
+    </div>`;
   const bars = [];
   if (data.deleted) bars.push(bar("deleted", "trash", t("MESSAGE.MARKED_AS_DELETED", "Als gel\xF6scht markiert."), textButton("m-restore", t("MESSAGE.RESTORED", "Wiederherstellen"))));
   if (data.spam) bars.push(bar("spam", "spam", data.spam, ""));
-  if (data.blocked) {
+  if (data.blocked || data.failed) {
+    const notes = [];
+    if (data.blocked) notes.push(data.blocked === 1 ? t("MESSAGE.IMAGES_BLOCKED_ONE", "Ein externes Bild blockiert") : t("MESSAGE.IMAGES_BLOCKED_MANY", "%COUNT% externe Bilder blockiert").replace("%COUNT%", String(data.blocked)));
+    if (data.failed) notes.push(data.failed === 1 ? t("MESSAGE.IMAGES_FAILED_ONE", "Ein Bild nicht erreichbar") : t("MESSAGE.IMAGES_FAILED_MANY", "%COUNT% Bilder nicht erreichbar").replace("%COUNT%", String(data.failed)));
     bars.push(bar(
       "images",
       "image-blocked",
-      data.blocked === 1 ? "Ein externes Bild wurde blockiert." : `${data.blocked} externe Bilder wurden blockiert.`,
-      textButton("m-images", "Anzeigen") + (from ? textButton("m-images-always", "Immer f\xFCr diesen Absender") : "")
-    ));
-  }
-  if (data.failed) {
-    bars.push(bar(
-      "images",
-      "image-blocked",
-      data.failed === 1 ? "Ein externes Bild ist nicht erreichbar." : `${data.failed} externe Bilder sind nicht erreichbar.`,
-      ""
+      `${notes.join(" \xB7 ")}.`,
+      data.blocked ? textButton("m-images", t("MESSAGE.SHOW_IMAGES", "Anzeigen")) + (from ? textButton("m-images-always", t("MESSAGE.SHOW_IMAGES_FOR_SENDER", "Immer f\xFCr diesen Absender")) : "") : ""
     ));
   }
   if (data.tracking) {
     bars.push(bar(
       "tracking",
       "shield-check",
-      data.originalLinks ? "Links zeigen auf die Originaladressen mit Tracking." : "Tracking in Links und Bildern wurde entfernt.",
-      textButton("m-links", data.originalLinks ? "Bereinigte Links" : "Originallinks")
+      data.originalLinks ? t("MESSAGE.TRACKING_ORIGINAL", "Links zeigen auf die Originaladressen mit Tracking.") : t("MESSAGE.TRACKING_REMOVED", "Tracking in Links und Bildern wurde entfernt."),
+      textButton("m-links", data.originalLinks ? t("MESSAGE.CLEANED_LINKS", "Bereinigte Links") : t("MESSAGE.ORIGINAL_LINKS", "Originallinks"))
     ));
   }
   if (data.receipt) {
     bars.push(bar(
       "receipt",
       "receipt",
-      `Der Absender bittet um eine Lesebest\xE4tigung an ${data.receipt}.`,
-      textButton("m-receipt", "Best\xE4tigung senden") + textButton("m-receipt-skip", "Nicht senden")
+      t("MESSAGE.RECEIPT_REQUEST", "Der Absender bittet um eine Lesebest\xE4tigung an %ADDRESS%.").replace("%ADDRESS%", data.receipt),
+      textButton("m-receipt", t("MESSAGE.SEND_RECEIPT", "Best\xE4tigung senden")) + textButton("m-receipt-skip", t("MESSAGE.SKIP_RECEIPT", "Nicht senden"))
     ));
   }
   if (data.crypto && (data.crypto.encrypted || data.crypto.signed || data.crypto.autocrypt)) {
@@ -4688,27 +4713,28 @@ function renderReader(body, data, expanded) {
     ].join("");
     const mark = data.crypto.state === "bad" ? "shield-alert" : "shield-check";
     const fallback = data.crypto.encrypted && data.crypto.signed ? t("CRYPTO.BOTH", "Diese Mail ist verschl\xFCsselt und signiert.") : data.crypto.encrypted ? t("CRYPTO.ENCRYPTED", "Diese Mail ist verschl\xFCsselt.") : data.crypto.signed ? t("CRYPTO.SIGNED", "Diese Mail ist signiert.") : t("CRYPTO.AUTOCRYPT", "Der Absender legt einen Schl\xFCssel bei.");
-    bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
+    if (actions || data.crypto.state !== "ok") bars.push(bar("crypto", mark, data.crypto.text || fallback, actions));
   }
   const cal = data.calendar ? `
-    <section class="cal-card" aria-label="Termin">
-      ${icon("calendar", "Termin")}
+    <section class="cal-card" aria-label="${esc7(t("MESSAGE.CALENDAR_EVENT", "Termin"))}">
+      ${icon("calendar", t("MESSAGE.CALENDAR_EVENT", "Termin"))}
       <div class="grow">
-        <p class="cal-title">${esc7(data.calendar.summary || "Termin")}</p>
+        <p class="cal-title">${esc7(data.calendar.summary || t("MESSAGE.CALENDAR_EVENT", "Termin"))}</p>
         <p class="quiet">${esc7([data.calendar.start, data.calendar.end].filter(Boolean).join(" \u2013 "))}</p>
         ${data.calendar.location ? `<p class="quiet">${esc7(data.calendar.location)}</p>` : ""}
-        ${data.calendar.organizer ? `<p class="quiet">Organisiert von ${esc7(data.calendar.organizer)}</p>` : ""}
+        ${data.calendar.organizer ? `<p class="quiet">${esc7(t("MESSAGE.CALENDAR_ORGANIZER", "Organisiert von %NAME%").replace("%NAME%", data.calendar.organizer))}</p>` : ""}
       </div>
     </section>` : "";
   const files = data.files.length ? `
-    <section class="files" aria-label="Anh\xE4nge">
+    <section class="files" aria-label="${esc7(t("MESSAGE.PRINT_LABEL_ATTACHMENTS", "Anh\xE4nge"))}">
       <div class="files-head"><span class="mono">${data.files.length === 1 ? t("MESSAGE.ATTACHMENT_ONE", "1 Anhang") : t("MESSAGE.ATTACHMENTS_COUNT", "%COUNT% Anh\xE4nge").replace("%COUNT%", String(data.files.length))}</span><span class="spacer"></span>
+        ${data.files.length > 4 ? `<button type="button" class="text-btn files-toggle" data-action="m-files-toggle" data-count="${data.files.length}" aria-expanded="${showAllFiles ? "true" : "false"}" aria-controls="reader-files">${icon(showAllFiles ? "chevron-up" : "chevron-down")}<span class="btn-label">${esc7(showAllFiles ? t("MESSAGE.ATTACHMENTS_SHOW_LESS", "Weniger Anh\xE4nge anzeigen") : t("MESSAGE.ATTACHMENTS_SHOW_ALL", "Alle %COUNT% Anh\xE4nge anzeigen").replace("%COUNT%", String(data.files.length)))}</span></button>` : ""}
         ${data.zip && data.files.length > 1 ? `<button type="button" class="text-btn" data-action="m-zip">${icon("download-zip")}<span class="btn-label">${esc7(t("MESSAGE.ALL_AS_ZIP", "Alle als ZIP"))}</span></button>` : ""}
       </div>
-      <ul class="file-list${data.simpleFiles ? " simple" : ""}">
-        ${data.files.map((file) => `
-          <li class="file">
-            ${file.thumb && !data.simpleFiles ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc7(file.name)} ansehen"><img src="${esc7(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
+      <ul class="file-list${data.simpleFiles ? " simple" : ""}" id="reader-files">
+        ${data.files.map((file, fileIndex) => `
+          <li class="file${fileIndex >= 4 ? " file-overflow" : ""}"${fileIndex >= 4 && !showAllFiles ? " hidden" : ""}>
+            ${file.thumb && !data.simpleFiles ? `<button type="button" class="file-thumb" data-action="m-preview" data-index="${file.index}" aria-label="${esc7(t("MESSAGE.ATTACHMENT_VIEW", "%NAME% ansehen").replace("%NAME%", file.name))}"><img src="${esc7(file.thumb)}" alt="" loading="lazy"></button>` : `<span class="file-icon">${icon(FILE_ICON[file.kind])}</span>`}
             <span class="file-meta">
               ${file.kind === "image" || file.kind === "pdf" || file.kind === "text" ? `<button type="button" class="file-name" data-action="m-preview" data-index="${file.index}" title="${esc7(file.name)}">${esc7(file.name)}</button>` : `<span class="file-name" title="${esc7(file.name)}">${esc7(file.name)}</span>`}
               <span class="quiet">${esc7(file.size)}</span>
@@ -4720,20 +4746,21 @@ function renderReader(body, data, expanded) {
   body.innerHTML = `
     <div class="read-measure">
     <header class="letter-head">
-      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", "Markiert")}</span>` : ""}${esc7(data.subject || "(ohne Betreff)")}</h2>
+      <h2 class="title">${data.flagged ? `<span class="flag-mark">${icon("flag-filled", t("SEARCH.FLAGGED", "Markiert"))}</span>` : ""}${esc7(data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</h2>
       ${summary}
-      ${details}
-      <div class="tags">${tags}<button type="button" class="text-btn tag-add" data-action="m-tag">${icon("plus")}<span class="btn-label">${esc7(t("MESSAGE_TAGS.LABEL_NAME", "Schlagwort"))}</span></button></div>
+      <div class="head-details-slot" id="reader-details"></div>
+      ${tags ? `<div class="tags">${tags}</div>` : ""}
     </header>
-    ${bars.join("")}
+    ${bars.length ? `<div class="reader-notices" aria-label="${esc7(t("MESSAGE.NOTICES", "Hinweise zu dieser Mail"))}">${bars.join("")}</div>` : ""}
     ${cal}
     ${files}
     </div>`;
+  paintReaderDetails(body, data, expanded);
   const frame = document.createElement("iframe");
   frame.className = "letter";
   frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
   frame.referrerPolicy = "no-referrer";
-  frame.title = "Brief";
+  frame.title = t("MESSAGE.LETTER_FRAME", "Brief: %SUBJECT%").replace("%SUBJECT%", data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"));
   const fit = () => {
     const doc = frame.contentDocument;
     if (!doc) return;
@@ -5912,8 +5939,8 @@ function createView(root3, actions) {
           </div>
         </section>
         <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
-        <section class="reader" aria-label="Brief">
-          <div class="reader-bar">
+        <section class="reader" aria-label="${esc9(t("GLOBAL.MESSAGE", "Brief"))}">
+          <div class="reader-bar" role="toolbar" aria-label="${esc9(t("MESSAGE.TOOLBAR", "Aktionen f\xFCr die ge\xF6ffnete Mail"))}">
             <div class="bulk-bar" id="bulk-bar" hidden>
               <button type="button" class="icon-btn" data-action="back" aria-label="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${icon("back")}</button>
               <span class="bulk-bar-count mono" id="bulk-bar-count">0 ausgew\xE4hlt</span>
@@ -5925,51 +5952,64 @@ function createView(root3, actions) {
               <button type="button" class="icon-btn" data-action="delete" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
               <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc9(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
             </div>
-            <button type="button" class="text-btn bar-btn" data-action="back" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
-            <span class="quiet" id="reader-place"></span>
-            <span class="spacer"></span>
-            <button type="button" class="text-btn bar-btn reply-main" data-action="reply" title="${esc9(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="reply-all" title="${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="forward" title="${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
-            <button type="button" class="text-btn bar-btn" data-action="archive" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="unread" title="Ungelesen" hidden>${withIcon("mark-unread", "Ungelesen")}</button>
-            <span class="bar-sep" aria-hidden="true"></span>
-            <button type="button" class="text-btn bar-btn" data-action="delete" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="m-flag" data-one="1" title="Markieren (I)" aria-pressed="false" hidden>${withIcon("flag", "Markieren")}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="m-move" data-one="1" title="Verschieben (M)" hidden>${withIcon("move", "Verschieben")}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="m-spam" data-one="1" title="Spam" hidden>${withIcon("spam", "Spam")}</button>
-            <button type="button" class="text-btn bar-btn wide-only" data-action="m-notspam" data-one="1" title="Kein Spam" hidden>${withIcon("not-spam", "Kein Spam")}</button>
-            <div class="bar-more">
-              <button type="button" class="icon-btn" data-action="m-more" data-one="1" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="Weitere Aktionen" hidden>${icon("more")}</button>
-              <div class="menu menu-right" id="more-menu" role="menu" hidden>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>Gelesen / ungelesen</span></button>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>Markieren</span></button>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>Verschieben \u2026</span></button>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-spam" data-narrow="spam">${icon("spam")}<span>Spam</span></button>
-                <button type="button" class="menu-item narrow" role="menuitem" data-action="m-notspam" data-narrow="notspam">${icon("not-spam")}<span>Kein Spam</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>Entwurf bearbeiten</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>Als neu bearbeiten</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>Als Anhang weiterleiten</span></button>
-                <hr class="menu-sep">
-                <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>Kopieren nach \u2026</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>Schlagwort hinzuf\xFCgen</span></button>
-                <hr class="menu-sep">
-                <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>Nur Text anzeigen</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>Farben umkehren</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>Vom Verteiler abmelden</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>Drucken</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>In neuem Fenster</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>Vollbild</span></button>
-                <hr class="menu-sep">
-                <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>Quelltext anzeigen</span></button>
-                <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>Als .eml laden</span></button>
-                <hr class="menu-sep">
-                <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>Endg\xFCltig l\xF6schen</span></button>
-              </div>
+            <div class="bar-group bar-navigation">
+              <button type="button" class="text-btn bar-btn" data-action="back" aria-label="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" title="${esc9(t("GLOBAL.BACK", "Zur\xFCck"))}" hidden>${withIcon("back", t("GLOBAL.BACK", "Zur\xFCck"))}</button>
+              <span class="quiet" id="reader-place"></span>
             </div>
-            <button type="button" class="icon-btn wide-only" data-action="m-prev" data-one="1" aria-label="Vorige Mail (K)" title="Vorige Mail (K)" hidden>${icon("chevron-up")}</button>
-            <button type="button" class="icon-btn wide-only" data-action="m-next" data-one="1" aria-label="N\xE4chste Mail (J)" title="N\xE4chste Mail (J)" hidden>${icon("chevron-down")}</button>
+            <span class="spacer"></span>
+            <div class="bar-group bar-primary" role="group" aria-label="${esc9(t("MESSAGE.REPLY_ACTIONS", "Antworten und Weiterleiten"))}">
+              <button type="button" class="text-btn bar-btn reply-main" data-direct="1" data-action="reply" title="${esc9(t("MESSAGE.BUTTON_REPLY", "Antworten"))}" hidden>${withIcon("reply", t("MESSAGE.BUTTON_REPLY", "Antworten"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="reply-all" title="${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}" hidden>${withIcon("reply-all", t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="forward" title="${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}" hidden>${withIcon("forward", t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</button>
+            </div>
+            <div class="bar-group bar-organize" role="group" aria-label="${esc9(t("MESSAGE.ORGANIZE_ACTIONS", "Bearbeiten und Ablage"))}">
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="archive" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}" hidden>${withIcon("archive", t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="unread" title="${esc9(t("MESSAGE.BUTTON_UNREAD", "Ungelesen"))}" hidden>${withIcon("mark-unread", t("MESSAGE.BUTTON_UNREAD", "Ungelesen"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="delete" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}" hidden>${withIcon("delete", t("GLOBAL.DELETE", "L\xF6schen"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-flag" data-one="1" title="${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))} (I)" aria-pressed="false" hidden>${withIcon("flag", t("MESSAGE_LIST.FLAG_SET", "Markieren"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-move" data-one="1" title="${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))} (M)" hidden>${withIcon("move", t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-spam" data-one="1" title="${esc9(t("MESSAGE.BUTTON_SPAM", "Spam"))}" hidden>${withIcon("spam", t("MESSAGE.BUTTON_SPAM", "Spam"))}</button>
+              <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-notspam" data-one="1" title="${esc9(t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam"))}" hidden>${withIcon("not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam"))}</button>
+            </div>
+            <div class="bar-group bar-assist"></div>
+            <div class="bar-group bar-end" role="group" aria-label="${esc9(t("MESSAGE.MORE_AND_NAVIGATION", "Weitere Aktionen und Navigation"))}">
+              <div class="bar-more">
+                <button type="button" class="icon-btn" data-direct="1" data-action="m-more" data-one="1" aria-label="${esc9(t("MESSAGE.MORE_ACTIONS", "Weitere Aktionen"))}" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="${esc9(t("MESSAGE.MORE_ACTIONS", "Weitere Aktionen"))}" hidden>${icon("more")}</button>
+                <div class="menu menu-right" id="more-menu" role="menu" hidden>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="reply-all">${icon("reply-all")}<span>${esc9(t("MESSAGE.BUTTON_REPLY_ALL", "Allen antworten"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="forward">${icon("forward")}<span>${esc9(t("MESSAGE.BUTTON_FORWARD", "Weiterleiten"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="archive">${icon("archive")}<span>${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="unread" data-narrow="unread">${icon("mark-unread")}<span>${esc9(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-flag">${icon("flag")}<span>${esc9(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-move">${icon("move")}<span>${esc9(t("MESSAGE_LIST.BUTTON_MOVE", "Verschieben \u2026"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-spam" data-narrow="spam">${icon("spam")}<span>${esc9(t("MESSAGE.BUTTON_SPAM", "Spam"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-notspam" data-narrow="notspam">${icon("not-spam")}<span>${esc9(t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="delete">${icon("delete")}<span>${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-prev">${icon("chevron-up")}<span>${esc9(t("MESSAGE.PREVIOUS", "Vorige Mail"))} (K)</span></button>
+                  <button type="button" class="menu-item narrow" role="menuitem" data-action="m-next">${icon("chevron-down")}<span>${esc9(t("MESSAGE.NEXT", "N\xE4chste Mail"))} (J)</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-edit-draft" hidden>${icon("compose")}<span>${esc9(t("MESSAGE.EDIT_DRAFT", "Entwurf bearbeiten"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-edit-new">${icon("edit-as-new")}<span>${esc9(t("MESSAGE.EDIT_AS_NEW", "Als neu bearbeiten"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-forward-att">${icon("forward-attachment")}<span>${esc9(t("MESSAGE.FORWARD_ATTACHMENT", "Als Anhang weiterleiten"))}</span></button>
+                  <hr class="menu-sep">
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-copy">${icon("copy")}<span>${esc9(t("MESSAGE_LIST.BUTTON_COPY", "Kopieren nach \u2026"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-tag">${icon("tag")}<span>${esc9(t("MESSAGE.ACTION_ADD_TAG", "Schlagwort hinzuf\xFCgen"))}</span></button>
+                  <hr class="menu-sep">
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-mode" data-mode-item="1">${icon("source")}<span>${esc9(t("MESSAGE.VIEW_PLAIN", "Nur Text anzeigen"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-swap">${icon("eye")}<span>${esc9(t("MESSAGE.SWAP_COLORS", "Farben umkehren"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-unsubscribe" hidden>${icon("unsubscribe")}<span>${esc9(t("MESSAGE.UNSUBSCRIBE_TITLE", "Vom Verteiler abmelden"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-print">${icon("print")}<span>${esc9(t("GLOBAL.PRINT", "Drucken"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-window">${icon("external")}<span>${esc9(t("MESSAGE.NEW_WINDOW", "In neuem Fenster"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-fullscreen">${icon("fullscreen")}<span>${esc9(t("MESSAGE.FULLSCREEN", "Vollbild"))}</span></button>
+                  <hr class="menu-sep">
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-source">${icon("code")}<span>${esc9(t("MESSAGE.VIEW_SOURCE", "Quelltext anzeigen"))}</span></button>
+                  <button type="button" class="menu-item" role="menuitem" data-action="m-eml">${icon("download")}<span>${esc9(t("MESSAGE.DOWNLOAD_EML", "Als .eml laden"))}</span></button>
+                  <hr class="menu-sep">
+                  <button type="button" class="menu-item danger-item" role="menuitem" data-action="m-delete-forever">${icon("delete-forever")}<span>${esc9(t("GLOBAL.DELETE_FOREVER", "Endg\xFCltig l\xF6schen"))}</span></button>
+                </div>
+              </div>
+              <button type="button" class="icon-btn" data-direct="1" data-action="m-prev" data-one="1" aria-label="${esc9(t("MESSAGE.PREVIOUS", "Vorige Mail"))} (K)" title="${esc9(t("MESSAGE.PREVIOUS", "Vorige Mail"))} (K)" hidden>${icon("chevron-up")}</button>
+              <button type="button" class="icon-btn" data-direct="1" data-action="m-next" data-one="1" aria-label="${esc9(t("MESSAGE.NEXT", "N\xE4chste Mail"))} (J)" title="${esc9(t("MESSAGE.NEXT", "N\xE4chste Mail"))} (J)" hidden>${icon("chevron-down")}</button>
+            </div>
           </div>
           <p class="quiet live" id="notice" aria-live="polite"></p>
           <div class="pane-body" id="reader-body">
@@ -6188,52 +6228,82 @@ function createView(root3, actions) {
     });
   }
   let expanded = false;
+  let filesExpanded = false;
   let keyHandler = null;
   let lastReader = null;
   function paintBar(data) {
     lastReader = data;
     if (!shell) return;
-    const show = (name, on2) => {
-      shell?.querySelectorAll(`.reader-bar > [data-action='${name}'], .reader-bar > .bar-more > [data-action='${name}']`).forEach((button3) => {
-        button3.hidden = !on2;
-      });
-    };
     const one = Boolean(data);
-    ["reply", "reply-all", "forward", "delete", "m-flag", "m-move", "m-more", "m-prev", "m-next", "unread"].forEach((name) => show(name, one));
-    show("archive", one && Boolean(data?.place.archive));
-    show("m-spam", one && Boolean(data?.place.spam) && !data?.place.inSpam);
-    show("m-notspam", one && Boolean(data?.place.inSpam));
-    if (!data) return;
-    const flag2 = shell.querySelector(".reader-bar > [data-action='m-flag']");
-    if (flag2) {
-      flag2.setAttribute("aria-pressed", data.flagged ? "true" : "false");
-      flag2.innerHTML = withIcon(data.flagged ? "flag-filled" : "flag", data.flagged ? "Markiert" : "Markieren");
-    }
-    const unread = shell.querySelector(".reader-bar > [data-action='unread']");
-    if (unread) {
-      unread.innerHTML = withIcon(data.seen ? "mark-unread" : "mark-read", data.seen ? "Ungelesen" : "Gelesen");
-      unread.title = data.seen ? "Als ungelesen markieren (U)" : "Als gelesen markieren (U)";
-    }
-    const del = shell.querySelector(".reader-bar > [data-action='delete']");
-    if (del) del.title = data.place.inTrash ? "Endg\xFCltig l\xF6schen" : t("GLOBAL.DELETE", "L\xF6schen");
+    const width = shell.querySelector(".reader")?.clientWidth || 0;
+    const available = {
+      reply: one,
+      "reply-all": one,
+      forward: one,
+      archive: one && Boolean(data?.place.archive),
+      unread: one,
+      delete: one,
+      "m-flag": one,
+      "m-move": one,
+      "m-spam": one && Boolean(data?.place.spam) && !data?.place.inSpam,
+      "m-notspam": one && Boolean(data?.place.inSpam),
+      "m-prev": one,
+      "m-next": one
+    };
+    const direct = {
+      reply: true,
+      "reply-all": width >= 480,
+      forward: true,
+      archive: width >= 520,
+      unread: width >= 900,
+      delete: width >= 520,
+      "m-flag": width >= 900,
+      "m-move": width >= 900,
+      "m-spam": width >= 1120,
+      "m-notspam": width >= 1120,
+      "m-prev": width >= 560,
+      "m-next": width >= 560
+    };
+    Object.entries(available).forEach(([name, on2]) => {
+      const button3 = shell?.querySelector(`.reader-bar [data-direct='1'][data-action='${name}']`);
+      const item = shell?.querySelector(`#more-menu .narrow[data-action='${name}']`);
+      if (button3) button3.hidden = !(on2 && direct[name]);
+      if (item) item.hidden = !(on2 && !direct[name]);
+    });
+    const more = shell.querySelector(".reader-bar [data-direct='1'][data-action='m-more']");
+    if (more) more.hidden = !one;
     const menuShow = (name, on2) => {
       const item = shell?.querySelector(`#more-menu [data-action='${name}']`);
       if (item) item.hidden = !on2;
     };
-    menuShow("m-edit-draft", data.place.inDrafts);
-    shell.querySelectorAll("#more-menu [data-narrow='spam']").forEach((item) => {
-      item.hidden = !(data.place.spam && !data.place.inSpam);
+    menuShow("m-edit-draft", Boolean(data?.place.inDrafts));
+    menuShow("m-unsubscribe", Boolean(data?.unsubscribe));
+    menuShow("m-mode", Boolean(data?.canToggleMode));
+    menuShow("m-delete-forever", Boolean(data && !data.place.inTrash));
+    if (!data) return;
+    const flagLabel = data.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren");
+    shell.querySelectorAll(".reader-bar [data-action='m-flag']").forEach((flag2) => {
+      flag2.setAttribute("aria-pressed", data.flagged ? "true" : "false");
+      flag2.setAttribute("aria-label", flagLabel);
+      flag2.title = `${flagLabel} (I)`;
+      flag2.innerHTML = withIcon(data.flagged ? "flag-filled" : "flag", flagLabel);
     });
-    shell.querySelectorAll("#more-menu [data-narrow='notspam']").forEach((item) => {
-      item.hidden = !data.place.inSpam;
+    const unreadLabel = data.seen ? t("MESSAGE.MARK_UNREAD", "Als ungelesen markieren") : t("MESSAGE.MARK_READ", "Als gelesen markieren");
+    shell.querySelectorAll(".reader-bar [data-action='unread']").forEach((unread) => {
+      unread.innerHTML = withIcon(data.seen ? "mark-unread" : "mark-read", unreadLabel);
+      unread.title = `${unreadLabel} (U)`;
+      unread.setAttribute("aria-label", unreadLabel);
     });
-    menuShow("m-unsubscribe", data.unsubscribe);
-    menuShow("m-mode", data.canToggleMode);
-    menuShow("m-delete-forever", !data.place.inTrash);
+    const deleteLabel = data.place.inTrash ? t("GLOBAL.DELETE_FOREVER", "Endg\xFCltig l\xF6schen") : t("GLOBAL.DELETE", "L\xF6schen");
+    shell.querySelectorAll(".reader-bar [data-action='delete']").forEach((del) => {
+      del.title = deleteLabel;
+      del.setAttribute("aria-label", deleteLabel);
+      del.innerHTML = withIcon(data.place.inTrash ? "delete-forever" : "delete", deleteLabel);
+    });
     const mode = shell.querySelector("#more-menu [data-action='m-mode']");
-    if (mode) mode.innerHTML = `${icon("source")}<span>${data.mode === "html" ? "Nur Text anzeigen" : "HTML anzeigen"}</span>`;
+    if (mode) mode.innerHTML = `${icon("source")}<span>${esc9(data.mode === "html" ? t("MESSAGE.VIEW_PLAIN", "Nur Text anzeigen") : t("MESSAGE.VIEW_HTML", "HTML anzeigen"))}</span>`;
     const swap = shell.querySelector("#more-menu [data-action='m-swap']");
-    if (swap) swap.innerHTML = `${icon("eye")}<span>${data.swap ? "Originalfarben" : "Farben umkehren"}</span>`;
+    if (swap) swap.innerHTML = `${icon("eye")}<span>${esc9(data.swap ? t("MESSAGE.ORIGINAL_COLORS", "Originalfarben") : t("MESSAGE.SWAP_COLORS", "Farben umkehren"))}</span>`;
   }
   function setSidebar(open) {
     if (shell) shell.dataset.sidebar = open ? "open" : "closed";
@@ -6302,6 +6372,7 @@ function createView(root3, actions) {
     menu.style.left = `${Math.max(8, Math.min(rect.left - box.left, box.width - 240))}px`;
     menu.style.top = `${rect.bottom - box.top + 4}px`;
     menu.hidden = false;
+    menuReturn = target;
     menu.querySelector("button")?.focus({ preventScroll: true });
   }
   function openLayer(layer, from) {
@@ -6350,6 +6421,8 @@ function createView(root3, actions) {
     const accountBtn = shell.querySelector("[data-action='account']");
     const list = shell.querySelector(".list-pane");
     const separator = shell.querySelector(".splitter");
+    const reader = shell.querySelector(".reader");
+    new ResizeObserver(() => paintBar(lastReader)).observe(reader);
     const setListWidth = (px2) => {
       const next = Math.min(640, Math.max(288, Math.round(px2)));
       shell?.style.setProperty("--list-w", `${next}px`);
@@ -6410,6 +6483,7 @@ function createView(root3, actions) {
         closeMenu();
         more.hidden = !open;
         target.setAttribute("aria-expanded", open ? "true" : "false");
+        menuReturn = target;
         if (open) more.querySelector(".menu-item:not([hidden])")?.focus({ preventScroll: true });
       } else if (action === "f-toggle") {
         actions.act("f-toggle", { target: target.dataset.target || "" });
@@ -6486,9 +6560,16 @@ function createView(root3, actions) {
         const body = shell?.querySelector("#reader-body");
         if (body && lastReader) {
           const top = body.scrollTop;
-          renderReader(body, lastReader, expanded);
+          paintReaderDetails(body, lastReader, expanded);
           body.scrollTop = top;
           body.querySelector("[data-action='m-details']")?.focus({ preventScroll: true });
+        }
+      } else if (action === "m-files-toggle") {
+        filesExpanded = !filesExpanded;
+        const body = shell?.querySelector("#reader-body");
+        if (body) {
+          paintReaderFiles(body, filesExpanded);
+          body.querySelector("[data-action='m-files-toggle']")?.focus({ preventScroll: true });
         }
       } else if (action === "m-bulk-pane") {
         if (!wide()) pane("reader");
@@ -7305,7 +7386,7 @@ function createView(root3, actions) {
       ask.classList.add("bar-btn", "primary");
       ask.title = askHint;
       ask.setAttribute("aria-label", askHint);
-      shell.querySelector(".reader-bar")?.append(ask);
+      shell.querySelector(".reader-bar .bar-assist")?.append(ask);
       const sheet = document.createElement("aside");
       sheet.className = "sheet";
       sheet.hidden = true;
@@ -7632,20 +7713,28 @@ function createView(root3, actions) {
     },
     setReader(data, loading2, error) {
       if (shell) shell.dataset.reading = data ? "1" : "0";
+      if (!data || data.uid !== lastReader?.uid) {
+        expanded = false;
+        filesExpanded = false;
+      }
       const body = shell?.querySelector("#reader-body");
       const addContact = shell?.querySelector("[data-action='m-addr-contact']");
       if (addContact) addContact.hidden = !data?.contacts;
       paintBar(data);
       if (!body) return;
       body.replaceChildren();
-      const say = (className, text2) => {
+      const say = (className, text2, symbol, role) => {
+        const box = document.createElement("div");
+        box.className = `reader-state ${className}`;
+        box.setAttribute("role", role);
         const p = document.createElement("p");
-        p.className = className;
         p.textContent = text2;
-        body.append(p);
+        box.innerHTML = icon(symbol);
+        box.append(p);
+        body.append(box);
       };
-      if (loading2) return say("quiet", loading2);
-      if (error) return say("error", error);
+      if (loading2) return say("quiet", loading2, "loading", "status");
+      if (error) return say("error", error, "error", "alert");
       if (!data) {
         body.innerHTML = `
           <div class="empty reader-empty">
@@ -7655,8 +7744,8 @@ function createView(root3, actions) {
           </div>`;
         return;
       }
-      if (data) this.setSelectionCount(0);
-      renderReader(body, data, expanded);
+      this.setSelectionCount(0);
+      renderReader(body, data, expanded, filesExpanded);
       body.scrollTop = 0;
     },
     setSelectionCount(count) {

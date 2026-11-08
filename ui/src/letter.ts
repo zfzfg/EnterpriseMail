@@ -31,6 +31,7 @@ export function srcdoc(body: string, kind: "html" | "plain", look: LetterLook): 
     ":root{--background:#ffffff;--foreground:rgb(28 25 23);}",
     `html{color-scheme:${scheme}}`,
     `body{margin:0;padding:16px;${paper};font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}`,
+    "@media(min-width:600px){body{padding:24px}}",
     kind === "plain" ? "body{white-space:pre-wrap;max-width:72ch}" : "",
     "img{max-width:100%;height:auto}",
     "table{max-width:100%}",
