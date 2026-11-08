@@ -76,54 +76,9 @@ trait User
 	{
 		Utils::UpdateConnectionToken();
 
-		$bMainCache = false;
-		$bFilesCache = false;
-
-		$iOneDay1 = 3600 * 23;
-		$iOneDay2 = 3600 * 25;
-
-		$sTimers = $this->StorageProvider()->Get(null,
-			\RainLoop\Providers\Storage\Enumerations\StorageType::NOBODY, 'Cache/Timers', '');
-
-		$aTimers = \explode(',', $sTimers);
-
-		$iMainCacheTime = !empty($aTimers[0]) && \is_numeric($aTimers[0]) ? (int) $aTimers[0] : 0;
-		$iFilesCacheTime = !empty($aTimers[1]) && \is_numeric($aTimers[1]) ? (int) $aTimers[1] : 0;
-
-		if (0 === $iMainCacheTime || $iMainCacheTime + $iOneDay1 < \time()) {
-			$bMainCache = true;
-			$iMainCacheTime = \time();
-		}
-
-		if (0 === $iFilesCacheTime || $iFilesCacheTime + $iOneDay2 < \time()) {
-			$bFilesCache = true;
-			$iFilesCacheTime = \time();
-		}
-
-		if ($bMainCache || $bFilesCache) {
-			if (!$this->StorageProvider()->Put(null,
-				\RainLoop\Providers\Storage\Enumerations\StorageType::NOBODY, 'Cache/Timers',
-				\implode(',', array($iMainCacheTime, $iFilesCacheTime))))
-			{
-				$bMainCache = $bFilesCache = false;
-			}
-		}
-
-		if ($bMainCache) {
-			$this->logWrite('Cacher GC: Begin');
-			$this->Cacher()->GC(48);
-			$this->logWrite('Cacher GC: End');
-
-			$this->logWrite('Storage GC: Begin');
-			$this->StorageProvider()->GC();
-			$this->logWrite('Storage GC: End');
-		} else if ($bFilesCache) {
-			$this->logWrite('Files GC: Begin');
-			$this->FilesProvider()->GC(48);
-			$this->logWrite('Files GC: End');
-		}
-
-		return $this->TrueResponse();
+		$sCachePath = \RainLoop\Maintenance\Service::configuredCachePath($this->Config(), $this->Cacher());
+		$oMaintenance = new \RainLoop\Maintenance\Service(\APP_PRIVATE_DATA, $sCachePath);
+		return $this->DefaultResponse($oMaintenance->run());
 	}
 
 	public function DoSettingsUpdate() : array
