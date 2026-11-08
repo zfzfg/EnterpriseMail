@@ -1,0 +1,31 @@
+[package]
+name = "snappy-ai-proxy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+license = "AGPL-3.0-or-later"
+description = "Bounded AI streaming sidecar for SnappyMail ai-copilot"
+publish = false
+
+[dependencies]
+axum = { version = "0.8.6", default-features = false, features = ["http1", "json", "tokio"] }
+bytes = "1.10"
+futures-util = "0.3.31"
+http-body-util = "0.1.3"
+regex = "1.12"
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1.17", features = ["sync"] }
+url = "2.5"
+uuid = { version = "1.18", features = ["v4"] }
+
+[dev-dependencies]
+tower = "0.5"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"

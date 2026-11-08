@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+\define('APP_SALT', 'phase5-test-only-application-salt');
+
 require __DIR__ . '/stubs.php';
 require \dirname(__DIR__) . '/index.php';
 
@@ -10,6 +12,7 @@ use AiCopilot\LlmClient;
 use AiCopilot\LlmException;
 use AiCopilot\SseEvent;
 use AiCopilot\SseParser;
+use AiCopilot\StreamPreparation;
 
 $iAssertions = 0;
 
@@ -237,6 +240,8 @@ class TestableAiCopilotPlugin extends AiCopilotPlugin
 	public string $chatContent = 'Antwort ✓';
 	public ?\Throwable $factoryException = null;
 	public ?string $rawBody = null;
+	public int $prepareStatus = 0;
+	public array $prepareResponse = [];
 
 	public function __construct(array $aParams = [], bool $bNoticeAck = false)
 	{
@@ -293,6 +298,12 @@ class TestableAiCopilotPlugin extends AiCopilotPlugin
 	{
 		$this->events[] = ['event' => $sEvent, 'data' => $aData];
 	}
+
+	protected function writePrepareResponse(int $iStatus, array $aData): void
+	{
+		$this->prepareStatus = $iStatus;
+		$this->prepareResponse = $aData;
+	}
 }
 
 function draftParams(string $sMode = 'proofread'): array
@@ -331,6 +342,34 @@ class StreamTestPlugin extends TestableAiCopilotPlugin
 	{
 		return $this->readStreamBody();
 	}
+}
+
+function runPrepare(StreamTestPlugin $oPlugin, array $aServer = [], bool $bEnabled = true): void
+{
+	\putenv('SNAPPY_AI_PROXY_ENABLED=' . ($bEnabled ? 'true' : 'false'));
+	\putenv('SNAPPY_AI_PROXY_SERVICE_CREDENTIAL=phase5-service-credential-32-bytes');
+	$aDefaults = [
+		'REQUEST_METHOD' => 'POST',
+		'REMOTE_ADDR' => '127.0.0.1',
+		'SNAPPY_AI_PREPARE' => StreamPreparation::INTERNAL_MARKER,
+		'HTTP_X_SNAPPY_PROXY_KEY' => 'phase5-service-credential-32-bytes',
+		'HTTP_X_REQUEST_ID' => '123e4567-e89b-42d3-a456-426614174000',
+		'HTTP_X_SM_TOKEN' => 'test-token',
+		'HTTP_SEC_FETCH_SITE' => 'same-origin',
+		'CONTENT_TYPE' => 'application/json',
+		'CONTENT_LENGTH' => (string) \strlen($oPlugin->readStreamBodyForTest())
+	];
+	foreach ($aDefaults as $sKey => $mValue) {
+		$_SERVER[$sKey] = $mValue;
+	}
+	foreach ($aServer as $sKey => $mValue) {
+		if (null === $mValue) {
+			unset($_SERVER[$sKey]);
+		} else {
+			$_SERVER[$sKey] = $mValue;
+		}
+	}
+	$oPlugin->ServicePrepare();
 }
 
 /* Every provider-dispatching JSON operation rejects missing persisted consent. */
@@ -477,5 +516,155 @@ same('internal_error', $aResult['code'] ?? '', 'Generic error was not normalized
 $sPublic = \json_encode([$aResult, $oPlugin->logs], JSON_UNESCAPED_UNICODE);
 check(!\str_contains($sPublic, 'private prompt'), 'Exception detail leaked to response or log.');
 same(0, $oPlugin->providerCalls, 'Factory failure dispatched to provider.');
+
+/* Private prepare RPC: typed output, opaque account key, and no provider dispatch. */
+$oPlugin = new StreamTestPlugin(draftParams('new'), true);
+runPrepare($oPlugin);
+same(200, $oPlugin->prepareStatus, 'Prepare success status mismatch.');
+$sExpectedAccountKey = \hash_hmac('sha256', 'ai-copilot/rust-account/v1|test-account', APP_SALT);
+same($sExpectedAccountKey, $oPlugin->prepareResponse['account_key'] ?? '', 'Account key is not the expected HMAC.');
+same([
+	'account_key', 'messages', 'provider_url', 'api_key', 'model', 'model_label',
+	'allow_local_provider', 'want_subject', 'options', 'timeouts'
+], \array_keys($oPlugin->prepareResponse), 'Prepare response contract changed.');
+same('https://mock.invalid/v1/chat/completions', $oPlugin->prepareResponse['provider_url'], 'Prepare provider URL mismatch.');
+same(false, $oPlugin->prepareResponse['allow_local_provider'], 'HTTPS was marked as a local provider.');
+same(['temperature' => 0.4, 'max_tokens' => 1500], $oPlugin->prepareResponse['options'], 'Default provider options changed.');
+same(['connect_ms' => 10000, 'idle_ms' => 5000, 'total_ms' => 5000], $oPlugin->prepareResponse['timeouts'], 'Prepare timeouts changed.');
+same(0, $oPlugin->providerCalls, 'Prepare dispatched to the provider.');
+$sPrepareJson = \json_encode($oPlugin->prepareResponse, JSON_UNESCAPED_UNICODE);
+check(!\str_contains($oPlugin->prepareResponse['account_key'], 'test@example.com'), 'Email was used as the account key.');
+check(!\str_contains($oPlugin->prepareResponse['account_key'], 'test-account'), 'Raw account hash was used as the account key.');
+check(!\str_contains($sPrepareJson, 'phase5-service-credential-32-bytes'), 'Service credential leaked into prepare output.');
+check(!\str_contains($sPrepareJson, 'test-token'), 'CSRF token leaked into prepare output.');
+
+$oZai = new StreamTestPlugin(draftParams('new'), true);
+$oZai->config['mistral_model'] = 'zai-deterministic-test';
+runPrepare($oZai);
+same(200, $oZai->prepareStatus, 'zai prepare failed.');
+same('low', $oZai->prepareResponse['options']['reasoning_effort'] ?? '', 'zai reasoning effort was not preserved.');
+same(0, $oZai->providerCalls, 'zai prepare dispatched to the provider.');
+
+$oLoopback = new StreamTestPlugin(draftParams('new'), true);
+$oLoopback->config = \array_merge($oLoopback->config, [
+	'profile_default' => 'llmster',
+	'llmster_base_url' => 'http://127.0.0.1:18080/v1',
+	'llmster_model' => 'zai-local-test',
+	'llmster_api_key' => '',
+	'llmster_key_file' => '',
+	'llmster_timeout' => 7
+]);
+runPrepare($oLoopback);
+same(200, $oLoopback->prepareStatus, 'Explicit llmster loopback prepare failed.');
+same(true, $oLoopback->prepareResponse['allow_local_provider'], 'llmster loopback was not explicitly allowed.');
+same('low', $oLoopback->prepareResponse['options']['reasoning_effort'] ?? '', 'Local zai reasoning effort was lost.');
+same(0, $oLoopback->providerCalls, 'Loopback prepare dispatched to the provider.');
+
+/* Transport, credential, request identity, and browser security gates. */
+$aPrepareRejections = [
+	'method_not_allowed' => ['REQUEST_METHOD' => 'GET'],
+	'prepare_forbidden' => ['REMOTE_ADDR' => '192.0.2.10'],
+	'invalid_request' => ['HTTP_X_REQUEST_ID' => 'not-a-uuid'],
+	'cross_site_request' => ['HTTP_SEC_FETCH_SITE' => 'cross-site'],
+	'invalid_csrf' => ['HTTP_X_SM_TOKEN' => 'wrong'],
+	'invalid_content_type' => ['CONTENT_TYPE' => 'text/plain'],
+	'body_too_large' => ['CONTENT_LENGTH' => '65537']
+];
+foreach ($aPrepareRejections as $sExpected => $aServer) {
+	$oPlugin = new StreamTestPlugin(draftParams(), true);
+	runPrepare($oPlugin, $aServer);
+	same($sExpected, $oPlugin->prepareResponse['code'] ?? '', 'Prepare rejection ' . $sExpected . ' mismatch.');
+	same(['code'], \array_keys($oPlugin->prepareResponse), 'Prepare error exposed diagnostic fields.');
+	same(0, $oPlugin->providerCalls, 'Rejected prepare reached the provider.');
+}
+foreach ([
+	['SNAPPY_AI_PREPARE' => null],
+	['REMOTE_ADDR' => null],
+	['HTTP_X_SNAPPY_PROXY_KEY' => 'wrong-credential'],
+	['HTTP_X_SNAPPY_PROXY_KEY' => null],
+	['HTTP_X_REQUEST_ID' => null],
+	['HTTP_X_SM_TOKEN' => null]
+] as $aServer) {
+	$oPlugin = new StreamTestPlugin(draftParams(), true);
+	runPrepare($oPlugin, $aServer);
+	$sExpected = \array_key_exists('HTTP_X_REQUEST_ID', $aServer) ? 'invalid_request'
+		: (\array_key_exists('HTTP_X_SM_TOKEN', $aServer) ? 'invalid_csrf' : 'prepare_forbidden');
+	same($sExpected, $oPlugin->prepareResponse['code'] ?? '', 'Missing prepare guard accepted a request.');
+	same(0, $oPlugin->providerCalls, 'Missing prepare guard reached the provider.');
+}
+$oPlugin = new StreamTestPlugin(draftParams(), true);
+runPrepare($oPlugin, [], false);
+same('prepare_disabled', $oPlugin->prepareResponse['code'] ?? '', 'Disabled Rust mode did not reject prepare.');
+same(0, $oPlugin->providerCalls, 'Disabled prepare reached the provider.');
+
+foreach (['admin', 'user', 'user_feature', 'consent', 'account'] as $sGate) {
+	$oPlugin = new StreamTestPlugin(draftParams(), 'consent' !== $sGate);
+	if ('admin' === $sGate) {
+		$oPlugin->config['feature_draft'] = false;
+	} else if ('user' === $sGate) {
+		$oPlugin->settings['enabled'] = false;
+	} else if ('user_feature' === $sGate) {
+		$oPlugin->settings['features']['draft'] = false;
+	} else if ('account' === $sGate) {
+		$oPlugin->accountException = new \RainLoop\Exceptions\ClientException('private account detail');
+	}
+	runPrepare($oPlugin);
+	$sExpected = 'consent' === $sGate ? 'consent_required'
+		: ('account' === $sGate ? 'unauthenticated' : 'feature_disabled');
+	same($sExpected, $oPlugin->prepareResponse['code'] ?? '', 'Prepare gate ' . $sGate . ' mismatch.');
+	same(['code'], \array_keys($oPlugin->prepareResponse), 'Prepare gate leaked error details.');
+	same(0, $oPlugin->providerCalls, 'Prepare gate ' . $sGate . ' reached the provider.');
+}
+
+/* Only HTTPS and the explicit llmster loopback profile are Rust-eligible. */
+foreach (['https://api.example.com/v1/chat/completions', 'https://127.0.0.1/v1/chat/completions'] as $sUrl) {
+	check(StreamPreparation::profileEligible('mistral', $sUrl), 'Eligible HTTPS URL rejected.');
+}
+foreach (['http://localhost:18080/v1', 'http://127.0.0.2:18080/v1', 'http://[::1]:18080/v1'] as $sUrl) {
+	check(StreamPreparation::profileEligible('llmster', $sUrl), 'Eligible llmster loopback URL rejected.');
+	check(StreamPreparation::allowLocalProvider('llmster', $sUrl), 'Loopback provider allowance missing.');
+}
+$aIneligible = [
+	'http://host.docker.internal:1234/v1',
+	'http://172.20.0.1:1234/v1',
+	'http://192.168.1.2:1234/v1',
+	'http://example.com/v1',
+	'http://127.0.0.1:1234/v1',
+	'https://user:pass@example.com/v1',
+	'https://example.com/v1#fragment'
+];
+foreach ($aIneligible as $i => $sUrl) {
+	$sProfile = 4 === $i ? 'mistral' : 'llmster';
+	check(!StreamPreparation::profileEligible($sProfile, $sUrl), 'Ineligible provider URL accepted: ' . $sUrl);
+	$oPlugin = new StreamTestPlugin(draftParams('new'), true);
+	$oPlugin->config['profile_default'] = $sProfile;
+	$oPlugin->config[$sProfile . '_base_url'] = $sUrl;
+	$oPlugin->config[$sProfile . '_model'] = 'mock-model';
+	$oPlugin->config[$sProfile . '_api_key'] = 'test-only-key';
+	runPrepare($oPlugin);
+	same('provider_not_eligible', $oPlugin->prepareResponse['code'] ?? '', 'Ineligible prepare was accepted: ' . $sUrl);
+	same(0, $oPlugin->providerCalls, 'Ineligible provider was contacted.');
+}
+
+/* AppData advertises no route by default, to admins/guests, or while Rust is unusable. */
+foreach ([[false, false], [true, true], [false, true]] as [$bAdmin, $bAuth]) {
+	\putenv('SNAPPY_AI_PROXY_ENABLED=false');
+	$aConfig = [];
+	$oPlugin = new StreamTestPlugin();
+	$oPlugin->FilterAppDataPluginSection($bAdmin, $bAuth, $aConfig);
+	check(!\array_key_exists('rustStream', $aConfig), 'Default/admin/guest AppData exposed Rust streaming.');
+	check(!\str_contains(\json_encode($aConfig), 'test-only-key'), 'AppData exposed a provider key.');
+}
+\putenv('SNAPPY_AI_PROXY_ENABLED=true');
+$aConfig = [];
+$oPlugin = new StreamTestPlugin();
+$oPlugin->FilterAppDataPluginSection(false, true, $aConfig);
+check(!isset($aConfig['rustStream']), 'Unavailable Rust health was advertised in AppData.');
+check(!\str_contains(\json_encode($aConfig), 'test-only-key'), 'Authenticated AppData exposed a provider key.');
+$aConfig = [];
+$oPlugin->config['mistral_base_url'] = 'http://127.0.0.1:18080/v1';
+$oPlugin->FilterAppDataPluginSection(false, true, $aConfig);
+check(!isset($aConfig['rustStream']), 'Ineligible provider was advertised in AppData.');
+\putenv('SNAPPY_AI_PROXY_ENABLED=false');
 
 print 'OK: ' . $iAssertions . " assertions; deterministic mock only, no live provider.\n";

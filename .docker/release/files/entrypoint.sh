@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+ulimit -c 0
 
 DEBUG=${DEBUG:-}
 if [ "$DEBUG" = 'true' ]; then
@@ -8,6 +9,56 @@ fi
 UPLOAD_MAX_SIZE=${UPLOAD_MAX_SIZE:-25M}
 MEMORY_LIMIT=${MEMORY_LIMIT:-128M}
 SECURE_COOKIES=${SECURE_COOKIES:-true}
+SNAPPY_AI_PROXY_ENABLED=${SNAPPY_AI_PROXY_ENABLED:-false}
+
+# The shared credential is inherited by PHP and Rust, never written to config or traced.
+if [ "$DEBUG" = 'true' ]; then
+    set +x
+fi
+mkdir -p /etc/supervisor.d
+rm -f /etc/supervisor.d/snappy-ai-proxy.ini
+if [ "$SNAPPY_AI_PROXY_ENABLED" = 'true' ]; then
+    SNAPPY_AI_PROXY_SERVICE_CREDENTIAL=${SNAPPY_AI_PROXY_SERVICE_CREDENTIAL:-}
+    if [ -z "$SNAPPY_AI_PROXY_SERVICE_CREDENTIAL" ]; then
+        SNAPPY_AI_PROXY_SERVICE_CREDENTIAL=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+    fi
+    case "$SNAPPY_AI_PROXY_SERVICE_CREDENTIAL" in
+        *[!A-Za-z0-9._~-]*)
+            echo '[ERROR] Rust streaming credential contains unsupported characters' >&2
+            exit 1
+            ;;
+    esac
+    if [ "${#SNAPPY_AI_PROXY_SERVICE_CREDENTIAL}" -lt 16 ] || [ "${#SNAPPY_AI_PROXY_SERVICE_CREDENTIAL}" -gt 256 ]; then
+        echo '[ERROR] Rust streaming credential must contain 16 to 256 safe ASCII bytes' >&2
+        exit 1
+    fi
+    export SNAPPY_AI_PROXY_ENABLED SNAPPY_AI_PROXY_SERVICE_CREDENTIAL
+    cat > /etc/supervisor.d/snappy-ai-proxy.ini <<'EOF'
+[program:snappy-ai-proxy]
+command=/bin/sh -c 'ulimit -c 0; exec /usr/local/bin/snappy-ai-proxy'
+process_name=%(program_name)s_%(process_num)02d
+user=snappy-ai-proxy
+numprocs=1
+autostart=true
+autorestart=unexpected
+startsecs=1
+startretries=3
+exitcodes=0
+stopsignal=TERM
+stopwaitsecs=10
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+else
+    SNAPPY_AI_PROXY_ENABLED=false
+    export SNAPPY_AI_PROXY_ENABLED
+    unset SNAPPY_AI_PROXY_SERVICE_CREDENTIAL
+fi
+if [ "$DEBUG" = 'true' ]; then
+    set -x
+fi
 
 # Disable listening on ipv6 for ipv4-only environments, or nginx will fail to start
 if ! ip a | grep 'inet6 ' > /dev/null; then

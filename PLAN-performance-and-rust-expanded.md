@@ -503,6 +503,8 @@ Do not proceed solely because Rust is expected to be faster. This workload is pr
 
 If the go criteria are not met, retain the hardened PHP endpoint and revisit after production measurements.
 
+**Phase 5 implementation decision:** GO under the explicit provider-stream isolation and independent lifecycle requirement, not under a claimed performance result. PHP relinquishes the FPM worker after authenticated preparation; Rust then owns upstream streaming under separate privileges, limits, cancellation, health, and restart policy. The accepted tradeoff is an additional supervised runtime, a loopback prepare hop, credential bootstrap, and a larger deployment/test matrix. No measured latency, throughput, memory, or concurrency gain is claimed. The sidecar remains draft-only and default-disabled, with the intact PHP endpoint as the deliberate rollback path and no automatic post-dispatch replay. Deployments that do not require this isolation/lifecycle boundary should leave it disabled.
+
 ### 10.2 Recommended responsibility split: prepare in PHP, stream in Rust
 
 The first increment covers draft streaming only. Non-streaming summaries, quick replies, search, triage, chat, alerts, caching, and tools remain in PHP.

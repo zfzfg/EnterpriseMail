@@ -52,6 +52,28 @@ class LlmClient
 		return $this->model;
 	}
 
+	/** Internal transient preparation data; the caller must never log or cache the result. */
+	public function rustPreparation(bool $bAllowLocalProvider): array
+	{
+		$aOptions = ['temperature' => 0.4, 'max_tokens' => 1500];
+		if (\str_starts_with($this->model, 'zai-')) {
+			$aOptions['reasoning_effort'] = 'low';
+		}
+		$iTotalMs = $this->timeout * 1000;
+		return [
+			'provider_url' => $this->baseUrl . '/chat/completions',
+			'api_key' => $this->apiKey,
+			'model' => $this->model,
+			'allow_local_provider' => $bAllowLocalProvider,
+			'options' => $aOptions,
+			'timeouts' => [
+				'connect_ms' => 10000,
+				'idle_ms' => \min(30000, $iTotalMs),
+				'total_ms' => $iTotalMs
+			]
+		];
+	}
+
 	/**
 	 * Entfernt Thinking: Liste -> nur type=text, <think> Bloecke weg.
 	 */

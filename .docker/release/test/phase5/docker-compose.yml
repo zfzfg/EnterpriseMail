@@ -1,0 +1,140 @@
+name: snappymail-phase5
+
+services:
+  step-ca:
+    image: smallstep/step-ca:0.28.4
+    container_name: snappymail-phase5-ca
+    working_dir: /certs
+    user: "0:0"
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        set -eu
+        if [ ! -d demoCA ]; then
+          mkdir -p demoCA
+          step certificate create "Phase5 Root CA" demoCA/cacert.pem demoCA/cakey.pem \
+            --no-password --insecure --profile root-ca \
+            --not-before "2025-01-01T00:00:00+00:00" --not-after "2035-01-01T00:00:00+00:00" \
+            --kty RSA --size 2048
+          step certificate create "Phase5 Mail" mail.example.com-cert.pem mail.example.com-key.pem \
+            --no-password --insecure --profile leaf \
+            --ca demoCA/cacert.pem --ca-key demoCA/cakey.pem \
+            --not-before "2025-01-01T00:00:00+00:00" --not-after "2035-01-01T00:00:00+00:00" \
+            --san example.com --san mail.example.com --san imap.example.com --san smtp.example.com \
+            --kty RSA --size 2048
+        fi
+    volumes:
+      - phase5-certs:/certs
+
+  mail:
+    image: mailserver/docker-mailserver:15.1.0
+    container_name: snappymail-phase5-mail
+    hostname: mail.example.com
+    environment:
+      ENABLE_SPAMASSASSIN: "0"
+      ENABLE_CLAMAV: "0"
+      ENABLE_FAIL2BAN: "0"
+      ENABLE_POSTGREY: "0"
+      ENABLE_RSPAMD: "0"
+      ENABLE_OPENDKIM: "0"
+      ENABLE_OPENDMARC: "0"
+      ENABLE_POLICYD_SPF: "0"
+      ENABLE_AMAVIS: "0"
+      ENABLE_MANAGESIEVE: "0"
+      PERMIT_DOCKER: network
+      LOG_LEVEL: warn
+      SSL_TYPE: manual
+      SSL_CERT_PATH: /certs/mail.example.com-cert.pem
+      SSL_KEY_PATH: /certs/mail.example.com-key.pem
+    volumes:
+      - phase5-certs:/certs:ro
+      - phase5-mail-data:/var/mail
+      - phase5-mail-state:/var/mail-state
+      - phase5-mail-config:/tmp/docker-mailserver
+    networks:
+      default:
+        aliases: [example.com, mail.example.com, imap.example.com, smtp.example.com]
+    depends_on:
+      step-ca:
+        condition: service_completed_successfully
+
+  snappymail:
+    build:
+      context: ../../../..
+      dockerfile: .docker/release/Dockerfile
+    image: snappymail-phase5:latest
+    container_name: snappymail-phase5-app
+    environment:
+      SECURE_COOKIES: "false"
+      SNAPPY_AI_PROXY_ENABLED: "true"
+      SNAPPY_AI_PROXY_SERVICE_CREDENTIAL: phase5-service-credential-32-bytes
+      SNAPPY_AI_PROXY_PREPARE_TIMEOUT_MS: "10000"
+      LLMSTER_API_KEY: phase5-provider-key-marker
+      PHASE5_UNRELATED_SECRET: phase5-unrelated-environment-marker
+    volumes:
+      - phase5-certs:/certs:ro
+      - phase5-snappymail-data:/var/lib/snappymail
+      - ../../../../plugins/ai-copilot:/opt/ai-copilot:ro
+      - ./launch.sh:/opt/phase5/launch.sh:ro
+      - ./mock_provider.php:/opt/phase5/mock_provider.php:ro
+      - ./runtime_probe.php:/snappymail/phase5-runtime-probe.php:ro
+    ports:
+      - "127.0.0.1:18880:8888"
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/phase5/launch.sh"]
+    depends_on:
+      step-ca:
+        condition: service_completed_successfully
+      mail:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8888/healthz"]
+      interval: 2s
+      timeout: 2s
+      start_period: 5s
+      retries: 30
+
+  prefix:
+    image: snappymail-phase5:latest
+    container_name: snappymail-phase5-prefix
+    entrypoint: []
+    command: ["nginx", "-c", "/etc/nginx/phase5-prefix.conf", "-g", "daemon off;"]
+    volumes:
+      - ./prefix-nginx.conf:/etc/nginx/phase5-prefix.conf:ro
+    ports:
+      - "127.0.0.1:18881:8888"
+    depends_on:
+      - snappymail
+
+  php-only:
+    image: snappymail-phase5:latest
+    container_name: snappymail-phase5-php-only
+    environment:
+      SECURE_COOKIES: "false"
+    volumes:
+      - phase5-php-only-data:/var/lib/snappymail
+    depends_on:
+      snappymail:
+        condition: service_started
+
+  fatal:
+    image: snappymail-phase5:latest
+    container_name: snappymail-phase5-fatal
+    profiles: ["failure"]
+    environment:
+      SECURE_COOKIES: "false"
+      SNAPPY_AI_PROXY_ENABLED: "true"
+      SNAPPY_AI_PROXY_SERVICE_CREDENTIAL: phase5-service-credential-32-bytes
+      SNAPPY_AI_PROXY_LISTEN_ADDR: 0.0.0.0:3001
+    volumes:
+      - phase5-fatal-data:/var/lib/snappymail
+
+volumes:
+  phase5-certs:
+  phase5-mail-data:
+  phase5-mail-state:
+  phase5-mail-config:
+  phase5-snappymail-data:
+  phase5-php-only-data:
+  phase5-fatal-data:

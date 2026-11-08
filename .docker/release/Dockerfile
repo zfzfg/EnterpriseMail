@@ -27,10 +27,15 @@ RUN set -eux; \
     # Remove unneeded files
     rm -v /snappymail/README.md /snappymail/_include.php
 
-# Inspired by the original Rainloop dockerfile from youtous on GitLab
-FROM php:8.5-fpm-alpine AS final
+FROM rust:1.93.0-alpine3.23 AS rust-builder
+RUN apk add --no-cache musl-dev
+WORKDIR /build
+COPY crates/snappy-ai-proxy/Cargo.toml crates/snappy-ai-proxy/Cargo.lock ./
+COPY crates/snappy-ai-proxy/src ./src
+RUN cargo build --release --locked
 
-LABEL org.label-schema.description="SnappyMail webmail client image using nginx, php-fpm on Alpine"
+# Inspired by the original Rainloop dockerfile from youtous on GitLab
+FROM php:8.5-fpm-alpine AS runtime
 
 # Install dependencies such as nginx
 RUN apk add --no-cache ca-certificates nginx supervisor bash
@@ -179,9 +184,14 @@ RUN set -eux; \
 COPY --chown=www-data:www-data --from=builder /snappymail /snappymail
 # Use a custom snappymail data folder
 RUN mv -v /snappymail/data /var/lib/snappymail;
-# Setup configs
+# Setup configs and the isolated, unprivileged streaming sidecar
 COPY --chown=root:root .docker/release/files /
+COPY --chown=root:root --from=rust-builder /build/target/release/snappy-ai-proxy /usr/local/bin/snappy-ai-proxy
 RUN set -eux; \
+    addgroup -S snappy-ai-proxy; \
+    adduser -S -D -H -G snappy-ai-proxy -s /sbin/nologin snappy-ai-proxy; \
+    chmod 755 /usr/local/bin/snappy-ai-proxy; \
+    mkdir -p /etc/supervisor.d; \
     chown www-data:www-data /snappymail/include.php; \
     chmod 440 /snappymail/include.php; \
     # Git for Windows may check out executable scripts with CRLF endings. \
@@ -196,14 +206,20 @@ RUN set -eux; \
     mv -v /usr/local/etc/php-fpm.d/www.conf /usr/local/etc/php-fpm.d/www.conf.disabled; \
     mv -v /usr/local/etc/php-fpm.d/zz-docker.conf /usr/local/etc/php-fpm.d/zz-docker.conf.disabled;
 
-# Verify the final stage, including the effective safe rollout settings.
+# Verify the runtime filesystem, including the effective safe rollout settings.
 RUN php -r 'if (!extension_loaded("Zend OPcache")) { fwrite(STDERR, "OPcache is not loaded\n"); exit(1); } foreach (["opcache.enable" => true, "opcache.enable_cli" => false, "opcache.validate_timestamps" => true, "opcache.save_comments" => true] as $name => $expected) { if (filter_var(ini_get($name), FILTER_VALIDATE_BOOL) !== $expected) { fwrite(STDERR, "Unexpected $name setting\n"); exit(1); } }'
+
+# Reset inherited image metadata (php:fpm exposes 9000) without changing the tested filesystem.
+FROM scratch AS final
+COPY --from=runtime / /
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PHP_INI_DIR=/usr/local/etc/php
+LABEL org.label-schema.description="SnappyMail webmail client image using nginx, php-fpm and an optional Rust sidecar on Alpine"
 
 USER root
 WORKDIR /snappymail
 VOLUME /var/lib/snappymail
 EXPOSE 8888
-EXPOSE 9000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD wget -q -T 3 -O /dev/null http://127.0.0.1:8888/healthz || exit 1
 ENTRYPOINT []
 CMD ["/entrypoint.sh"]

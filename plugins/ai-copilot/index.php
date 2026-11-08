@@ -67,6 +67,8 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		$this->addJsonHook('AiAlerts', 'DoAlerts');
 		$this->addJsonHook('AiAlertsLlm', 'DoAlertsLlm');
 		$this->addPartHook('AiStream', 'ServiceStream');
+		// Registered for the private FastCGI transport; ServicePrepare rejects public callers.
+		$this->addPartHook('AiPrepare', 'ServicePrepare');
 
 		$this->addHook('imap.message-headers', 'onMessageHeaders');
 		$this->addHook('json.after-MessageList', 'onAfterMessageList');
@@ -284,6 +286,19 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		$aConfig['features'] = $aFeatures;
 		$aConfig['providers'] = $aProviders;
 		$aConfig['storeKeywords'] = (bool) $this->conf('store_keywords', true);
+
+		// Absence means the legacy PHP endpoint. The route is relative so root() can retain a proxy prefix.
+		$sDraftProfile = $this->profileFor('draft');
+		$aDraftProfile = $this->profileConfig($sDraftProfile);
+		$bProviderReady = '' !== $aDraftProfile['model']
+			&& ('llmster' === $sDraftProfile || '' !== $aDraftProfile['api_key']);
+		if (\AiCopilot\StreamPreparation::enabled()
+		 && $bProviderReady
+		 && \AiCopilot\StreamPreparation::profileEligible($sDraftProfile, \rtrim($aDraftProfile['base_url'], '/') . '/chat/completions')
+		 && \AiCopilot\StreamPreparation::healthy()
+		) {
+			$aConfig['rustStream'] = ['route' => \AiCopilot\StreamPreparation::ROUTE];
+		}
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -601,7 +616,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return $aInput;
 	}
 
-	/** Shared by DoDraft, ServiceStream and the future protected prepare RPC. */
+	/** Shared by DoDraft, ServiceStream and the protected prepare RPC. */
 	protected function prepareDraft(array $aInput): array
 	{
 		$a = DraftRequest::validate($aInput);
@@ -632,8 +647,97 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			'messages' => Prompts::draft($aUser, $sMode, $sTone, $sInstruction, $sContext, $sCurrent, $bWantSubject),
 			'wantSubject' => $bWantSubject,
 			'client' => $oLlm,
-			'model' => $oLlm->profileName() . ' · ' . $oLlm->model()
+			'model' => $oLlm->profileName() . ' · ' . $oLlm->model(),
+			'profile' => $this->profileFor('draft')
 		];
+	}
+
+	protected function writePrepareResponse(int $iStatus, array $aData): void
+	{
+		\http_response_code($iStatus);
+		echo \json_encode($aData, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+	}
+
+	/** Private PHP -> Rust preparation RPC. It returns before any provider streaming begins. */
+	public function ServicePrepare(...$aParts): bool
+	{
+		while (\ob_get_level()) {
+			\ob_end_clean();
+		}
+		\header_remove('Content-Encoding');
+		\header('Content-Type: application/json; charset=utf-8');
+		\header('Cache-Control: no-store');
+
+		try {
+			if ('POST' !== ($_SERVER['REQUEST_METHOD'] ?? '')) {
+				throw new LlmException('Nur POST erlaubt.', 405, 'method_not_allowed');
+			}
+			if (\AiCopilot\StreamPreparation::INTERNAL_MARKER !== (string) ($_SERVER['SNAPPY_AI_PREPARE'] ?? '')
+			 || !\AiCopilot\StreamPreparation::loopbackAddress((string) ($_SERVER['REMOTE_ADDR'] ?? ''))
+			) {
+				throw new LlmException('Privater Transport erforderlich.', 403, 'prepare_forbidden');
+			}
+			$sCredential = (string) \getenv('SNAPPY_AI_PROXY_SERVICE_CREDENTIAL');
+			$sProvided = (string) ($_SERVER['HTTP_X_SNAPPY_PROXY_KEY'] ?? '');
+			if (\strlen($sCredential) < 16 || '' === $sProvided || !\hash_equals($sCredential, $sProvided)) {
+				throw new LlmException('Ungültige Dienstberechtigung.', 403, 'prepare_forbidden');
+			}
+			if (!\AiCopilot\StreamPreparation::enabled()) {
+				throw new LlmException('Rust-Streaming ist deaktiviert.', 503, 'prepare_disabled');
+			}
+			$sRequestId = (string) ($_SERVER['HTTP_X_REQUEST_ID'] ?? '');
+			if (!\preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $sRequestId)) {
+				throw new LlmException('Ungültige Anfrage.', 400, 'invalid_request');
+			}
+			\header('X-Request-ID: ' . $sRequestId);
+			if (isset($_SERVER['HTTP_SEC_FETCH_SITE']) && 'same-origin' !== \strtolower((string) $_SERVER['HTTP_SEC_FETCH_SITE'])) {
+				throw new LlmException('Herkunft der Anfrage nicht erlaubt.', 403, 'cross_site_request');
+			}
+			$sToken = (string) ($_SERVER['HTTP_X_SM_TOKEN'] ?? '');
+			if (!$sToken || !\hash_equals(\RainLoop\Utils::GetCsrfToken(), $sToken)) {
+				throw new LlmException('Ungültiges Token.', 403, 'invalid_csrf');
+			}
+			$iContentLength = null;
+			if (isset($_SERVER['CONTENT_LENGTH']) && '' !== (string) $_SERVER['CONTENT_LENGTH']) {
+				$sContentLength = (string) $_SERVER['CONTENT_LENGTH'];
+				if (!\ctype_digit($sContentLength)) {
+					throw new LlmException('Ungültige Anfrage.', 400, 'invalid_request');
+				}
+				$iContentLength = (int) $sContentLength;
+				if ($iContentLength > DraftRequest::MAX_BODY_BYTES) {
+					throw new LlmException('Die Anfrage ist zu groß.', 413, 'body_too_large');
+				}
+			}
+			$aBody = DraftRequest::decode($this->readStreamBody(), (string) ($_SERVER['CONTENT_TYPE'] ?? ''), $iContentLength);
+			$aPrepared = $this->prepareDraft($aBody);
+			$sProfile = $aPrepared['profile'];
+			$aTarget = $aPrepared['client']->rustPreparation(false);
+			if (!\AiCopilot\StreamPreparation::profileEligible($sProfile, $aTarget['provider_url'])) {
+				throw new LlmException('Dieses Anbieterprofil verwendet weiterhin PHP-Streaming.', 422, 'provider_not_eligible');
+			}
+			$aTarget['allow_local_provider'] = \AiCopilot\StreamPreparation::allowLocalProvider($sProfile, $aTarget['provider_url']);
+			$this->writePrepareResponse(200, [
+				'account_key' => \AiCopilot\StreamPreparation::accountKey($this->account()->Hash()),
+				'messages' => $aPrepared['messages'],
+				'provider_url' => $aTarget['provider_url'],
+				'api_key' => $aTarget['api_key'],
+				'model' => $aTarget['model'],
+				'model_label' => $aPrepared['model'],
+				'allow_local_provider' => $aTarget['allow_local_provider'],
+				'want_subject' => $aPrepared['wantSubject'],
+				'options' => $aTarget['options'],
+				'timeouts' => $aTarget['timeouts']
+			]);
+		} catch (LlmException $e) {
+			$iStatus = $e->getCode();
+			$this->writePrepareResponse($iStatus >= 400 && $iStatus <= 599 ? $iStatus : 400, ['code' => $e->errorCode()]);
+		} catch (\RainLoop\Exceptions\ClientException $e) {
+			$this->writePrepareResponse(401, ['code' => 'unauthenticated']);
+		} catch (\Throwable $e) {
+			$this->Manager()->WriteLog('AiCopilot prepare: operation failed.', \LOG_WARNING);
+			$this->writePrepareResponse(500, ['code' => 'prepare_failed']);
+		}
+		return true;
 	}
 
 	public static function splitSubject(string $sText, bool $bWantSubject): array

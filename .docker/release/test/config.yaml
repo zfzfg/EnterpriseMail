@@ -18,14 +18,18 @@ commandTests:
           ls -al /var/lib/snappymail/_data_/_default_/admin_password.txt
           nc -vz 127.0.0.1 8888
           nc -vz 127.0.0.1 9000
+          nc -vz 127.0.0.1 8081
+          test -z "`pidof snappy-ai-proxy || true`"
+          test ! -e /etc/supervisor.d/snappy-ai-proxy.ini
           wget -S -T 3 -O /dev/null http://127.0.0.1:8888
           wget -q -T 3 -O /tmp/health-response http://127.0.0.1:8888/healthz
           test ! -s /tmp/health-response
           php -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'
+          su -s /bin/sh snappy-ai-proxy -c 'test ! -r /var/lib/snappymail/_data_/_default_/admin_password.txt'
           php -r 'foreach (["opcache.enable" => true, "opcache.enable_cli" => false, "opcache.validate_timestamps" => true, "opcache.save_comments" => true] as $name => $expected) { if (filter_var(ini_get($name), FILTER_VALIDATE_BOOL) !== $expected) { exit(1); } }'
           kill `pidof supervisord`
 metadataTest:
-  exposedPorts: ["8888", "9000"]
+  exposedPorts: ["8888"]
   volumes: ["/var/lib/snappymail"]
   entrypoint: []
   cmd: ["/entrypoint.sh"]
