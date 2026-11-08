@@ -110,7 +110,7 @@ def resource_envelope(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "container_samples_available": len(containers),
         "fpm_samples_available": len(fpms),
         "memory_current_bytes_max": None,
-        "memory_peak_bytes_max": None,
+        "memory_peak_bytes_cumulative_high_water": None,
         "fpm_worker_pss_bytes_max": None,
         "fpm_worker_rss_bytes_max": None,
         "fpm_worker_private_bytes_max": None,
@@ -120,7 +120,7 @@ def resource_envelope(samples: list[dict[str, Any]]) -> dict[str, Any]:
     if containers:
         for field, source in (
             ("memory_current_bytes_max", "memory_current_bytes"),
-            ("memory_peak_bytes_max", "memory_peak_bytes"),
+            ("memory_peak_bytes_cumulative_high_water", "memory_peak_bytes"),
         ):
             values = [item[source] for item in containers if item.get(source) is not None]
             envelope[field] = max(values) if values else None
@@ -163,9 +163,28 @@ def resource_envelope(samples: list[dict[str, Any]]) -> dict[str, Any]:
             )
         envelope["cgroup_version"] = last.get("version")
     if fpms:
-        for source in ("active_processes", "idle_processes", "total_processes", "listen_queue", "max_listen_queue", "max_active_processes", "max_children_reached", "slow_requests", "accepted_conn"):
+        # These are instantaneous gauges. In particular, listen_queue is the
+        # queue at sample time, unlike FPM's cumulative max_listen_queue.
+        for source in ("active_processes", "idle_processes", "total_processes", "listen_queue"):
             values = [item["status"][source] for item in fpms if item.get("status", {}).get(source) is not None]
             envelope["fpm_" + source + "_max"] = max(values) if values else None
+
+        # FPM exposes these values cumulatively since startup. A sampled maximum
+        # is not attributable to this scenario, so retain explicit endpoints and
+        # deltas and name cumulative high-water fields unambiguously.
+        cumulative = ("max_listen_queue", "max_active_processes", "max_children_reached", "slow_requests", "accepted_conn")
+        envelope["fpm_cumulative_scope"] = "Values are cumulative since FPM startup; first/last/delta are scoped to this measured run"
+        for source in cumulative:
+            values = [item["status"][source] for item in fpms if item.get("status", {}).get(source) is not None]
+            first = values[0] if values else None
+            last = values[-1] if values else None
+            envelope["fpm_" + source + "_first"] = first
+            envelope["fpm_" + source + "_last"] = last
+            envelope["fpm_" + source + "_delta"] = (
+                last - first if first is not None and last is not None and last >= first else None
+            )
+            if source in ("max_listen_queue", "max_active_processes"):
+                envelope["fpm_" + source + "_cumulative_high_water"] = max(values) if values else None
         # Ondemand worker births are not necessarily restarts, and PID reuse is
         # possible. Do not infer a restart count from request totals or PID count.
         envelope["fpm_worker_restarts_observed"] = None
@@ -267,6 +286,36 @@ def evaluate_objectives(summary: dict[str, Any], resources: dict[str, Any], conf
     return {"status": "not_configured" if not checks else "evaluated", "checks": checks}
 
 
+def aggregate_resources(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
+    def maximum(field: str) -> float | int | None:
+        values = [item[field] for item in envelopes if item.get(field) is not None]
+        return max(values) if values else None
+
+    def total(field: str) -> float | int | None:
+        values = [item.get(field) for item in envelopes]
+        return sum(values) if values and all(value is not None for value in values) else None
+
+    return {
+        "per_run": envelopes,
+        "memory_current_bytes_max_across_runs": maximum("memory_current_bytes_max"),
+        "memory_peak_bytes_cumulative_high_water": maximum("memory_peak_bytes_cumulative_high_water"),
+        "fpm_worker_pss_bytes_max_across_runs": maximum("fpm_worker_pss_bytes_max"),
+        "fpm_worker_rss_bytes_max_across_runs": maximum("fpm_worker_rss_bytes_max"),
+        "fpm_worker_private_bytes_max_across_runs": maximum("fpm_worker_private_bytes_max"),
+        "fpm_individual_worker_private_bytes_max": maximum("fpm_individual_worker_private_bytes_max"),
+        "fpm_listen_queue_max_across_runs": maximum("fpm_listen_queue_max"),
+        "fpm_accepted_conn_delta_total": total("fpm_accepted_conn_delta"),
+        "fpm_max_listen_queue_delta_total": total("fpm_max_listen_queue_delta"),
+        "fpm_max_active_processes_delta_total": total("fpm_max_active_processes_delta"),
+        "fpm_max_children_reached_delta_total": total("fpm_max_children_reached_delta"),
+        "fpm_slow_requests_delta_total": total("fpm_slow_requests_delta"),
+        "oom_kill_events_delta_total": total("oom_kill_events_delta"),
+        "fpm_delta_note": "Totals sum first-to-last deltas over measured runs; they do not use FPM-startup totals",
+        "memory_note": "Current/worker memory maxima are sampled values across runs; memory.peak is a cgroup-lifetime high-water mark",
+        "oom_note": "Total is null when any run lacks an OOM counter; unavailable is never converted to zero",
+    }
+
+
 def run_scenario(
     config: dict[str, Any],
     candidate: int,
@@ -338,16 +387,7 @@ def run_scenario(
             group_runs = [run["by_workload"][kind] for run in completed]
             group_samples = [sample for sample in all_samples if sample["workload"] == kind]
             aggregate["by_workload"][kind] = aggregate_runs(group_runs, group_samples)
-    peak_values = [item["memory_peak_bytes_max"] for item in envelopes if item.get("memory_peak_bytes_max") is not None]
-    private_values = [item["fpm_individual_worker_private_bytes_max"] for item in envelopes if item.get("fpm_individual_worker_private_bytes_max") is not None]
-    oom_values = [item["oom_kill_events_delta"] for item in envelopes if item.get("oom_kill_events_delta") is not None]
-    aggregate["resources"] = {
-        "per_run": envelopes,
-        "memory_peak_bytes_max": max(peak_values) if peak_values else None,
-        "fpm_individual_worker_private_bytes_max": max(private_values) if private_values else None,
-        "oom_kill_events_delta_total": sum(oom_values) if len(oom_values) == len(envelopes) else None,
-        "oom_note": "Total is null when any run lacks an OOM counter; unavailable is never converted to zero",
-    }
+    aggregate["resources"] = aggregate_resources(envelopes)
     aggregate["objectives"] = evaluate_objectives(aggregate, aggregate["resources"], config)
     atomic_write_json(scenario_dir / "aggregate.json", aggregate)
     return {"scenario": label, "path": str(scenario_dir.relative_to(directory)), "aggregate": aggregate}

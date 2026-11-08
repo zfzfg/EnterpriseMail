@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -132,8 +133,14 @@ def docker_metadata(config: dict[str, Any], candidate: int) -> dict[str, Any]:
 
     dockerfile = (ROOT / ".docker" / "release" / "Dockerfile").read_text(encoding="utf-8")
     bases = re.findall(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+\S+)?", dockerfile, re.MULTILINE | re.IGNORECASE)
-    base_reference = bases[-1] if bases else None
-    base = {"reference": base_reference, "reference_sha256_in_dockerfile": sha256_bytes(dockerfile.encode())}
+    # A final FROM scratch stage has no registry image. Record the runtime
+    # stage's base instead of trying to inspect the reserved scratch name.
+    base_reference = next((base for base in reversed(bases) if base.lower() != "scratch"), None)
+    base = {
+        "reference": base_reference,
+        "final_stage_base": bases[-1] if bases else None,
+        "reference_sha256_in_dockerfile": sha256_bytes(dockerfile.encode()),
+    }
     if base_reference:
         local = safe_probe(lambda: json.loads(text(command(["docker", "image", "inspect", base_reference])))[0])
         if local.get("available"):
@@ -190,16 +197,19 @@ def docker_metadata(config: dict[str, Any], candidate: int) -> dict[str, Any]:
     }
 
 
-def registry_manifest(reference: str) -> dict[str, Any]:
-    raw = command(["docker", "buildx", "imagetools", "inspect", "--raw", reference], timeout=90).stdout
+def manifest_metadata(reference: str, raw: bytes, inspection_method: str, descriptor: dict[str, Any] | None = None) -> dict[str, Any]:
     parsed = json.loads(raw)
+    descriptor = descriptor or {}
     result: dict[str, Any] = {
         "reference": reference,
-        "manifest_sha256": "sha256:" + sha256_bytes(raw),
-        "manifest_media_type": parsed.get("mediaType"),
+        "inspection_method": inspection_method,
+        "manifest_sha256": descriptor.get("digest") or "sha256:" + sha256_bytes(raw),
+        "manifest_media_type": descriptor.get("mediaType") or parsed.get("mediaType"),
         "manifest_kind": "index" if "manifests" in parsed else "manifest",
         "manifest_bytes": len(raw),
     }
+    if descriptor.get("platform"):
+        result["platform"] = descriptor["platform"]
     if "layers" in parsed:
         config_size = (parsed.get("config") or {}).get("size") or 0
         result["compressed_config_and_layers_bytes"] = config_size + sum(layer.get("size", 0) for layer in parsed["layers"])
@@ -207,6 +217,40 @@ def registry_manifest(reference: str) -> dict[str, Any]:
         result["compressed_config_and_layers_bytes"] = None
         result["size_note"] = "Index requires platform-specific manifest resolution; size not inferred"
     return result
+
+
+def registry_manifest(reference: str) -> dict[str, Any]:
+    # Docker Desktop's CLI may not expose buildx even though `docker manifest`
+    # works. Verbose output carries each exact registry manifest as base64 Raw.
+    verbose = command(["docker", "manifest", "inspect", "--verbose", reference], timeout=90, check=False)
+    if verbose.returncode == 0:
+        entries = json.loads(verbose.stdout)
+        if not isinstance(entries, list) or not entries:
+            raise BenchError("docker manifest inspect returned no manifests")
+        manifests = [
+            manifest_metadata(
+                reference,
+                base64.b64decode(entry["Raw"], validate=True),
+                "docker manifest inspect --verbose",
+                entry.get("Descriptor") or {},
+            )
+            for entry in entries
+        ]
+        if len(manifests) == 1:
+            return manifests[0]
+        return {
+            "reference": reference,
+            "inspection_method": "docker manifest inspect --verbose",
+            "manifest_kind": "index",
+            "manifests": manifests,
+            "compressed_config_and_layers_bytes": None,
+            "size_note": "Platform-specific compressed sizes are listed per manifest; no single size is inferred",
+        }
+
+    # Retain buildx compatibility for Docker installations without manifest
+    # verbose support. Only diagnostics from the successful method are stored.
+    raw = command(["docker", "buildx", "imagetools", "inspect", "--raw", reference], timeout=90).stdout
+    return manifest_metadata(reference, raw, "docker buildx imagetools inspect --raw")
 
 
 def application_metadata(config: dict[str, Any], candidate: int) -> dict[str, Any]:
