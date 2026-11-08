@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { ConcurrencyLimiter, EventStreamParser } from "./runtime";
 
 export interface ApiFailure {
   code: number;
@@ -26,6 +27,7 @@ interface Envelope {
 }
 
 let token = "";
+let rustStreamRoute = "";
 let onExpired: (() => void) | null = null;
 
 /** Sitzung abgelaufen (Fehler 101): einmal melden, der Aufrufer zeigt den Anmelde-Dialog. */
@@ -75,6 +77,13 @@ async function readApp(url: string): Promise<Record<string, unknown>> {
   const data = await response.json() as Record<string, unknown>;
   const system = data.System as { token?: string } | undefined;
   if (system?.token) token = system.token;
+  const plugins = data.Plugins as Record<string, unknown> | undefined;
+  const copilot = plugins?.["ai-copilot"] as Record<string, unknown> | undefined;
+  const rust = copilot?.rustStream as Record<string, unknown> | undefined;
+  const route = typeof rust?.route === "string" ? rust.route : "";
+  // Authenticated AppData is the deployment gate. Only a safe relative path
+  // is accepted; absence or withdrawal restores the legacy PHP endpoint.
+  rustStreamRoute = /^[a-z0-9][a-z0-9/_-]*$/i.test(route) && !route.includes("..") ? route : "";
   return data;
 }
 
@@ -86,7 +95,7 @@ export function loadAdminApp(): Promise<Record<string, unknown>> {
   return readApp(`${root()}?/AdminAppData/0/${Math.random().toString().slice(2)}/`);
 }
 
-async function postJson<T>(url: string, action: string, params: Record<string, unknown>): Promise<T> {
+async function postJson<T>(url: string, action: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
@@ -95,7 +104,8 @@ async function postJson<T>(url: string, action: string, params: Record<string, u
       "Content-Type": "application/json",
       "X-SM-Token": token
     },
-    body: JSON.stringify({ Action: action, ...params })
+    body: JSON.stringify({ Action: action, ...params }),
+    signal
   });
   if (!response.ok) throw new ApiError(1, "Die Anfrage ist fehlgeschlagen.");
   const data = await response.json() as Envelope;
@@ -110,13 +120,13 @@ async function postJson<T>(url: string, action: string, params: Record<string, u
   return data.Result as T;
 }
 
-export function call<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
-  return postJson<T>(`${root()}?/Json/&q[]=/0/`, action, params);
+export function call<T>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+  return postJson<T>(`${root()}?/Json/&q[]=/0/`, action, params, signal);
 }
 
-export function adminCall<T>(adminKey: string, action: string, params: Record<string, unknown> = {}): Promise<T> {
+export function adminCall<T>(adminKey: string, action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   const key = /^[a-z0-9._-]+$/i.test(adminKey) && !adminKey.includes("..") ? adminKey : "admin";
-  return postJson<T>(`${root()}?/${key}/Json/&q[]=/0/`, action, params);
+  return postJson<T>(`${root()}?/${key}/Json/&q[]=/0/`, action, params, signal);
 }
 
 export interface UploadedFile {
@@ -221,8 +231,8 @@ export function rawPath(action: string): string {
   return `${root()}?/Raw/&q[]=/0/${encodeURIComponent(action)}/`;
 }
 
-export async function plugin<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
-  const result = await call<T & { error?: string; status?: number }>("Plugin" + action, params);
+export async function plugin<T>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+  const result = await call<T & { error?: string; status?: number }>("Plugin" + action, params, signal);
   if (result && typeof result === "object" && "error" in result && result.error) {
     throw new ApiError(Number(result.status) || 999, String(result.error));
   }
@@ -235,7 +245,12 @@ export async function streamEvents(
   onEvent: (event: string, data: Record<string, unknown>) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const response = await fetch(`${root()}?/${path}/`, {
+  const url = path === "AiStream" && rustStreamRoute
+    ? `${root()}${rustStreamRoute}`
+    : `${root()}?/${path}/`;
+  // Never replay a failed Rust request through PHP: dispatch may already have
+  // reached the provider, so an automatic fallback could duplicate generation.
+  const response = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -249,22 +264,33 @@ export async function streamEvents(
   if (!response.ok || !response.body) throw new ApiError(1, "Verbindung unterbrochen.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const chunk = await reader.read();
-    buffer += chunk.value ? decoder.decode(chunk.value, { stream: !chunk.done }) : "";
-    const blocks = buffer.split(/\n\n/);
-    buffer = blocks.pop() || "";
-    for (const block of blocks) {
-      let event = "message";
-      const data: string[] = [];
-      block.split(/\n/).forEach((line) => {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).trim());
-      });
-      if (data.length) onEvent(event, JSON.parse(data.join("\n")) as Record<string, unknown>);
+  const parser = new EventStreamParser();
+  let finished = false;
+  const emit = (events: { event: string; data: string }[]): void => {
+    events.forEach(({ event, data }) => {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        throw new ApiError(1, t("NOTIFICATIONS.RequestError", "Der Server hat keine lesbare Antwort geschickt."));
+      }
+      if (event === "done") finished = true;
+      onEvent(event, payload);
+    });
+  };
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      emit(parser.feed(decoder.decode(chunk.value, { stream: true })));
     }
-    if (chunk.done) break;
+    // Flush a split UTF-8 sequence and accept one final, unterminated SSE block.
+    emit(parser.feed(decoder.decode()));
+    emit(parser.finish());
+    if (!finished) throw new ApiError(1, "Verbindung unterbrochen.");
+  } finally {
+    try { await reader.cancel(); } catch { /* Stream kann bereits geschlossen oder fehlerhaft sein. */ }
+    reader.releaseLock();
   }
 }
 
@@ -316,24 +342,71 @@ export function proxyUrl(url: string): string {
   return `${root()}?/ProxyExternal/${encoded}`;
 }
 
-/** Lädt eine Adresse dieser Seite und gibt sie als data:-URL zurück (für den sandboxed Brief). */
-export async function fetchDataUrl(url: string, limit = 8 * 1024 * 1024): Promise<string> {
-  const response = await fetch(url, { credentials: "same-origin" });
-  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
-  const blob = await response.blob();
-  if (blob.size > limit) throw new ApiError(1, "Datei zu groß.");
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new ApiError(1, "Datei nicht lesbar."));
-    reader.readAsDataURL(blob);
-  });
+async function boundedBlob(response: Response, limit: number): Promise<Blob> {
+  const max = Math.max(0, limit);
+  const declared = Number(response.headers.get("Content-Length") || 0);
+  if (declared > max) {
+    try { await response.body?.cancel(); } catch { /* Der Stream kann bereits fehlerhaft sein. */ }
+    throw new ApiError(1, "Datei zu groß.");
+  }
+  if (!response.body) {
+    const blob = await response.blob();
+    if (blob.size > max) throw new ApiError(1, "Datei zu groß.");
+    return blob;
+  }
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  let ended = false;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        ended = true;
+        break;
+      }
+      size += chunk.value.byteLength;
+      if (size > max) throw new ApiError(1, "Datei zu groß.");
+      parts.push(chunk.value);
+    }
+    return new Blob(parts.map((part) => part as Uint8Array<ArrayBuffer>), { type: response.headers.get("Content-Type") || "" });
+  } finally {
+    if (!ended) {
+      try { await reader.cancel(); } catch { /* Der Stream kann bereits fehlerhaft sein. */ }
+    }
+    reader.releaseLock();
+  }
 }
 
-export async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { credentials: "same-origin" });
+const imageSlots = new ConcurrencyLimiter(4);
+
+/** Lädt eine Adresse dieser Seite und gibt sie als data:-URL zurück (für den sandboxed Brief). */
+export function fetchDataUrl(url: string, limit = 8 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
+  return imageSlots.run(async () => {
+    const response = await fetch(url, { credentials: "same-origin", signal });
+    if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+    const blob = await boundedBlob(response, limit);
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      const cleanup = () => signal?.removeEventListener("abort", abort);
+      const abort = () => reader.abort();
+      reader.onload = () => { cleanup(); resolve(String(reader.result || "")); };
+      reader.onerror = () => { cleanup(); reject(new ApiError(1, "Datei nicht lesbar.")); };
+      reader.onabort = () => { cleanup(); reject(signal?.reason || new ApiError(0, "Der Vorgang wurde abgebrochen.")); };
+      if (signal?.aborted) {
+        reject(signal.reason || new ApiError(0, "Der Vorgang wurde abgebrochen."));
+        return;
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+      try { reader.readAsDataURL(blob); } catch (error) { cleanup(); reject(error); }
+    });
+  }, signal);
+}
+
+export async function fetchText(url: string, limit = 2 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(url, { credentials: "same-origin", signal });
   if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
-  return response.text();
+  return (await boundedBlob(response, limit)).text();
 }
 
 export function appRoot(): string {

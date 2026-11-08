@@ -12,10 +12,11 @@ import {
   type FolderAction, type FolderDesk, type FolderInfo, type FolderModel
 } from "./folders";
 import {
-  autocryptHeader, autocryptKey, bodyFromDecrypt, emptyParts, gnupgDecrypt, loadGnuKeys, readParts,
+  autocryptHeader, autocryptKey, bodyFromDecrypt, clearRememberedPasses, emptyParts, gnupgDecrypt, loadGnuKeys, readParts,
   pgpVerify, rememberedPass, rememberPass, smimeDecrypt, smimeVerify, downloadText, type CryptoParts
 } from "./crypto";
 import { t } from "./i18n";
+import { BoundedCache, pollBackoff } from "./runtime";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
   createView, type ChatTurn, type ComposeSeed, type ListMode, type MailView, type MessageRow,
@@ -285,12 +286,22 @@ class Session {
   private pollTimer = 0;
   private logoutTimer = 0;
   private lastPoll = 0;
+  private pollFailures = 0;
+  private pollRetryAt = 0;
+  private polling = false;
+  private accountGeneration = 0;
+  private listAbort: AbortController | null = null;
+  private messageAbort: AbortController | null = null;
+  private letterAbort: AbortController | null = null;
+  private pollAbort: AbortController | null = null;
   private inboxUid = 0;
   private inboxUnread = -1;
   private letter = { uid: 0, mode: "html" as "html" | "plain", images: false, links: false, swap: false };
-  private inlineCache = new Map<string, string>();
-  private calendarCache = new Map<string, CalendarEvent | null>();
-  private receiptSkipped = new Set<string>();
+  private inlineCache = new BoundedCache<string, string>(64, 24 * 1024 * 1024,
+    (value, key) => key.length + value.length);
+  private calendarCache = new BoundedCache<string, CalendarEvent | null>(32, 1024 * 1024,
+    (value, key) => key.length * 2 + (value ? Object.values(value).reduce((sum, text) => sum + text.length * 2, 0) : 0));
+  private receiptSkipped = new BoundedCache<string, true>(256, 64 * 1024, (_value, key) => key.length * 2);
   private draftRef: { folder: string; uid: number } | null = null;
   private composeData: Record<string, unknown> = {};
   private boot: Record<string, unknown> = {};
@@ -367,11 +378,54 @@ class Session {
     }
   }
 
-  private async logout(): Promise<void> {
-    try { await call("Logout"); } catch { /* the screen still returns to login */ }
-    window.clearInterval(this.pollTimer);
+  private invalidateAccount(clear: boolean): void {
+    this.accountGeneration += 1;
+    this.listSeq += 1;
+    this.renderToken += 1;
+    this.listAbort?.abort();
+    this.messageAbort?.abort();
+    this.letterAbort?.abort();
+    this.pollAbort?.abort();
+    this.draftAbort?.abort();
+    this.polling = false;
+    this.pollFailures = 0;
+    this.pollRetryAt = 0;
+    this.lastPoll = 0;
     window.clearTimeout(this.readTimer);
+    if (!clear) return;
+    this.inlineCache.clear();
+    this.calendarCache.clear();
+    this.receiptSkipped.clear();
+    this.aboCache = null;
+    this.tagged.clear();
+    this.alertItems = [];
+    this.chat = [];
+    this.turns = [];
+    this.chatActions = [];
+    this.replies = [];
+    this.clearBulkState();
+    this.tldr = "";
+    this.summaryCached = false;
+    this.summaryModel = "";
+    this.current = null;
+    this.selected = 0;
+    this.messages = [];
+    this.identities = [];
+    this.checked.clear();
+    clearRememberedPasses();
+  }
+
+  private async logout(): Promise<void> {
+    const request = call("Logout");
+    this.invalidateAccount(true);
+    window.clearInterval(this.pollTimer);
     this.email = "";
+    try {
+      await request;
+      // Logout clears the account cookies. Re-read the anonymous CSRF state
+      // before allowing an immediate login in the same document.
+      await loadApp();
+    } catch { /* the screen still returns to login */ }
     this.view.showLogin(document.title || "SnappyMail");
   }
 
@@ -457,10 +511,16 @@ class Session {
       this.armLogout();
       return;
     }
-    this.email = String(data.Email || "");
+    const nextEmail = String(data.Email || "");
+    const nextHash = String(data.accountHash || "");
+    const changed = Boolean(this.email) && (this.email !== nextEmail
+      || Boolean(this.accountHash || nextHash) && this.accountHash !== nextHash);
+    this.invalidateAccount(changed);
+    const generation = this.accountGeneration;
+    this.email = nextEmail;
     this.mainEmail = String(data.mainEmail || data.Email || "");
     this.caps = readCaps(data);
-    this.accountHash = String(data.accountHash || "");
+    this.accountHash = nextHash;
     this.sentFolder = String(data.SentFolder || "");
     this.archiveFolder = String(data.ArchiveFolder || "");
     this.draftsFolder = String(data.DraftsFolder || "");
@@ -478,10 +538,12 @@ class Session {
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(100, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
-    this.assistFlags = await readAssist(data, async () => {
+    const assistFlags = await readAssist(data, async () => {
       const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
       return result.settings;
     });
+    if (generation !== this.accountGeneration) return;
+    this.assistFlags = assistFlags;
     this.noticeAck = Boolean(this.assistFlags?.noticeAck);
     const cycle = String(data.hourCycle || "");
     hourCycle = cycle === "h12" || cycle === "h23" ? cycle : undefined;
@@ -513,8 +575,8 @@ class Session {
     this.view.setFolderDesk(this.folderDesk());
     this.armLogout();
     if (this.assistFlags?.alerts) void this.loadAlerts();
-    await this.loadFolders();
-    await this.loadComposeIdentities();
+    await Promise.all([this.loadFolders(), this.loadComposeIdentities()]);
+    if (generation !== this.accountGeneration) return;
     this.configureComposer();
     const mailto = String(data.mailToEmail || "");
     if (mailto) {
@@ -612,8 +674,11 @@ class Session {
   }
 
   private async loadFolders(): Promise<void> {
+    const generation = this.accountGeneration;
     try {
-      this.folderModel = parseFolders(await call<Record<string, unknown>>("Folders"));
+      const result = await call<Record<string, unknown>>("Folders");
+      if (generation !== this.accountGeneration) return;
+      this.folderModel = parseFolders(result);
       this.folders = this.folderModel.folders;
       this.resolveSystemFolders(null);
       const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX");
@@ -621,7 +686,7 @@ class Session {
       this.paintTitle();
       await this.selectFolder(inbox?.fullName || this.folders.find((folder) => folder.selectable)?.fullName || "INBOX");
     } catch (error) {
-      this.view.setList([], "", explain(error), false, false);
+      if (generation === this.accountGeneration) this.view.setList([], "", explain(error), false, false);
     }
   }
 
@@ -985,6 +1050,9 @@ class Session {
 
   private async selectFolder(fullName: string): Promise<void> {
     window.clearTimeout(this.readTimer);
+    this.messageAbort?.abort();
+    this.letterAbort?.abort();
+    this.renderToken += 1;
     this.folder = fullName;
     this.offset = 0;
     this.search = "";
@@ -1067,12 +1135,16 @@ class Session {
   }
 
   private async loadList(append: boolean, quiet = false): Promise<void> {
+    this.listAbort?.abort();
+    const controller = new AbortController();
+    this.listAbort = controller;
+    const generation = this.accountGeneration;
     const start = append ? this.offset : 0;
     const query = this.listQuery();
     const context = this.listContext();
     const seq = ++this.listSeq;
-    // Eine neuere Anfrage im selben Kontext ersetzt die ältere; eine Antwort zu einem alten Kontext zeichnet nie.
-    const stale = () => seq !== this.listSeq || context !== this.listContext();
+    // Eine neuere Anfrage ersetzt und beendet die ältere; Kontext und Generierung schützen zusätzlich.
+    const stale = () => seq !== this.listSeq || generation !== this.accountGeneration || context !== this.listContext();
     if (!append && !quiet) this.view.setList([], "Mails werden geladen …", "", false, Boolean(query));
     try {
       const result = await call<ListResult>("MessageList", {
@@ -1083,7 +1155,7 @@ class Session {
         sort: this.capability("SORT") ? this.sort : "",
         uidNext: this.folders.find((folder) => folder.fullName === this.folder)?.uidNext || 0,
         ...(this.threadsOn() ? { useThreads: 1, threadAlgorithm: this.prefs.threadAlgorithm, threadUid: this.threadUid } : {})
-      });
+      }, controller.signal);
       if (stale()) return;
       const batch = (result["@Collection"] || []).map((item) => this.parseMessage(item));
       this.messages = append ? this.messages.concat(batch) : batch;
@@ -1102,10 +1174,12 @@ class Session {
       this.hasMore = query ? batch.length >= this.pageSize : this.offset < this.total;
       this.paintList();
     } catch (error) {
+      if (stale() || error instanceof Error && error.name === "AbortError") return;
       if (!(error instanceof ApiError)) throw error;
-      if (stale()) return;
       this.hasMore = false;
       this.view.setList(this.rows(), "", explain(error), false, Boolean(this.search));
+    } finally {
+      if (this.listAbort === controller) this.listAbort = null;
     }
   }
 
@@ -1263,13 +1337,20 @@ class Session {
 
   private async selectMessage(uid: number): Promise<void> {
     window.clearTimeout(this.readTimer);
+    this.messageAbort?.abort();
+    this.letterAbort?.abort();
+    this.renderToken += 1;
+    const controller = new AbortController();
+    this.messageAbort = controller;
+    const generation = this.accountGeneration;
+    const folder = this.folder;
     this.selected = uid;
     this.checked.clear();
     this.paintList();
     this.view.setReader(null, "Brief wird geladen …", "");
     try {
-      const result = await call<Record<string, unknown>>("Message", { folder: this.folder, uid });
-      if (this.selected !== uid) return;
+      const result = await call<Record<string, unknown>>("Message", { folder, uid }, controller.signal);
+      if (this.selected !== uid || this.folder !== folder || generation !== this.accountGeneration) return;
       const message = this.parseMessage(result, true);
       this.current = message;
       this.letter = { uid, mode: this.prefs.viewHtml && message.html ? "html" : "plain", images: false, links: false, swap: false };
@@ -1277,10 +1358,16 @@ class Session {
       if (row) row.flags = message.flags.slice();
       this.scheduleSeen(message);
       await this.paintLetter();
+      if (this.current !== message || generation !== this.accountGeneration) return;
       this.paintStrip();
       void this.loadCachedSummary();
     } catch (error) {
-      if (this.selected === uid) this.view.setReader(null, "", explain(error));
+      if (error instanceof Error && error.name === "AbortError") return;
+      if (this.selected === uid && this.folder === folder && generation === this.accountGeneration) {
+        this.view.setReader(null, "", explain(error));
+      }
+    } finally {
+      if (this.messageAbort === controller) this.messageAbort = null;
     }
   }
 
@@ -1322,6 +1409,10 @@ class Session {
   private async paintLetter(): Promise<void> {
     const message = this.current;
     if (!message || this.checked.size) return;
+    this.letterAbort?.abort();
+    const controller = new AbortController();
+    this.letterAbort = controller;
+    const signal = controller.signal;
     const token = ++this.renderToken;
     const dark = document.documentElement.classList.contains("dark");
     let body = "";
@@ -1350,8 +1441,12 @@ class Session {
       if (cleaned.linked.length) {
         await Promise.all(cleaned.linked.map(async (hash) => {
           if (this.inlineCache.has(hash)) return;
-          try { this.inlineCache.set(hash, await fetchDataUrl(rawUrl("View", hash))); } catch { /* Bild fehlt, Platzhalter bleibt */ }
+          try {
+            const value = await fetchDataUrl(rawUrl("View", hash), 8 * 1024 * 1024, signal);
+            if (!signal.aborted) this.inlineCache.set(hash, value);
+          } catch { /* Bild fehlt oder der Brief ist nicht mehr aktuell. */ }
         }));
+        if (signal.aborted) return;
         body = fillInline(body, this.inlineCache);
       }
       if (cleaned.externals) {
@@ -1360,8 +1455,12 @@ class Session {
             const loaded = new Map<string, string>();
             const urls = externalUrls(body).slice(0, 40);
             await Promise.all(urls.map(async (url) => {
-              try { loaded.set(url, await fetchDataUrl(proxyUrl(url), 4 * 1024 * 1024)); } catch { /* Bild nicht erreichbar */ }
+              try {
+                const value = await fetchDataUrl(proxyUrl(url), 4 * 1024 * 1024, signal);
+                if (!signal.aborted) loaded.set(url, value);
+              } catch { /* Bild nicht erreichbar oder nicht mehr aktuell. */ }
             }));
+            if (signal.aborted) return;
             failed = urls.length - loaded.size;
             const shown = revealExternals(body, (url) => loaded.has(url), (url) => loaded.get(url) || "");
             body = shown.html;
@@ -1377,7 +1476,7 @@ class Session {
     } else {
       body = plainToHtml(message.plain || plainFromHtml(message.html), this.prefs.collapseBlockquotes);
     }
-    if (token !== this.renderToken || this.current !== message) return;
+    if (signal.aborted || token !== this.renderToken || this.current !== message) return;
 
     const files: ReaderFile[] = message.attachments
       .map((file, index) => ({ file, index }))
@@ -1400,10 +1499,17 @@ class Session {
     let calendar: CalendarEvent | null = null;
     if (ics) {
       if (!this.calendarCache.has(ics.hash)) {
-        try { this.calendarCache.set(ics.hash, parseIcs(await fetchText(rawUrl("ViewAsPlain", ics.hash)))); } catch { this.calendarCache.set(ics.hash, null); }
+        try {
+          const text = await fetchText(rawUrl("ViewAsPlain", ics.hash), 2 * 1024 * 1024, signal);
+          if (signal.aborted) return;
+          this.calendarCache.set(ics.hash, parseIcs(text));
+        } catch {
+          if (signal.aborted) return;
+          this.calendarCache.set(ics.hash, null);
+        }
       }
       calendar = this.calendarCache.get(ics.hash) || null;
-      if (token !== this.renderToken || this.current !== message) return;
+      if (signal.aborted || token !== this.renderToken || this.current !== message) return;
     }
 
     // Feld `hasVirus` (falls ein Server es liefert), sonst die Kopfzeilen wie bisher.
@@ -1464,8 +1570,10 @@ class Session {
   }
 
   private async loadComposeIdentities(): Promise<void> {
+    const generation = this.accountGeneration;
     try {
       const result = await call<{ Identities?: unknown }>("AccountsAndIdentities");
+      if (generation !== this.accountGeneration) return;
       const rows = Array.isArray(result.Identities) ? result.Identities : Object.values((result.Identities || {}) as object);
       this.identities = rows.map((value) => {
         const item = value as Record<string, unknown>;
@@ -1477,7 +1585,10 @@ class Session {
           smimeCertificate: String(item.smimeCertificate || ""), smimeCertificateChain: String(item.smimeCertificateChain || "")
         };
       }).filter((item) => item.email);
-    } catch { this.identities = []; }
+    } catch {
+      if (generation !== this.accountGeneration) return;
+      this.identities = [];
+    }
     if (!this.identities.length) this.identities = [{ id: "", label: "", email: this.email, name: "", replyTo: "", bcc: "", signature: "", signatureInsertBefore: false, sentFolder: "", pgpEncrypt: false, pgpSign: false, smimeKey: "", smimeCertificate: "", smimeCertificateChain: "" }];
   }
 
@@ -1916,11 +2027,16 @@ class Session {
 
   /** Neue Mails prüfen: Ordnerzahlen, Liste des offenen Ordners, Hinweis und Ton bei neuer Mail im Posteingang. */
   private async poll(manual: boolean): Promise<void> {
-    if (!this.email) return;
+    if (!this.email || this.polling || !manual && Date.now() < this.pollRetryAt) return;
+    this.polling = true;
+    const generation = this.accountGeneration;
+    const controller = new AbortController();
+    this.pollAbort = controller;
     this.lastPoll = Date.now();
     if (manual) this.view.setRefreshing(true);
     try {
-      const result = await call<{ "@Collection"?: Record<string, unknown>[] }>("Folders");
+      const result = await call<{ "@Collection"?: Record<string, unknown>[] }>("Folders", {}, controller.signal);
+      if (generation !== this.accountGeneration) return;
       const fresh = new Map((result["@Collection"] || []).map((item) => [String(item.fullName || ""), item]));
       let changed = manual;
       this.folders.forEach((folder) => {
@@ -1947,12 +2063,21 @@ class Session {
         this.inboxUid = uidNext;
         this.inboxUnread = inbox.unread;
       }
+      this.pollFailures = 0;
+      this.pollRetryAt = 0;
       this.paintFolders();
-      if (changed) await this.loadList(false, true);
+      if (changed && generation === this.accountGeneration) await this.loadList(false, true);
     } catch (error) {
+      if (generation !== this.accountGeneration || error instanceof Error && error.name === "AbortError") return;
+      this.pollFailures += 1;
+      this.pollRetryAt = Date.now() + pollBackoff(this.pollFailures);
       if (manual) this.view.notice(explain(error));
     } finally {
-      if (manual) this.view.setRefreshing(false);
+      if (this.pollAbort === controller) this.pollAbort = null;
+      if (generation === this.accountGeneration) {
+        this.polling = false;
+        if (manual) this.view.setRefreshing(false);
+      }
     }
   }
 
@@ -2280,7 +2405,7 @@ class Session {
       case "receipt":
       case "receipt-skip": {
         if (!message) return;
-        this.receiptSkipped.add(`${message.folder}:${message.uid}`);
+        this.receiptSkipped.set(`${message.folder}:${message.uid}`, true);
         if (name === "receipt") {
           try {
             await call("SendReadReceiptMessage", {
@@ -2609,12 +2734,14 @@ class Session {
   }
 
   private async loadAlerts(): Promise<void> {
+    const generation = this.accountGeneration;
     const inbox = this.folders.find((folder) => folder.role === "inbox")?.fullName || "INBOX";
     try {
       const result = await plugin<{ alerts: { type: string; folder: string; uid: number; title: string }[] }>("AiAlerts", {
         inbox,
         sent: this.sentFolder
       });
+      if (generation !== this.accountGeneration) return;
       this.alertItems = result.alerts || [];
       const count = (type: string) => this.alertItems.filter((item) => item.type === type).length;
       this.view.setAlerts(count("reply"), count("followup"), count("invoice"), "");

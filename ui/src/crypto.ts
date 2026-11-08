@@ -35,6 +35,10 @@ export function rememberPass(id: string, value: string, keep: boolean): void {
   if (keep && value) sessionPass.set(id, value);
 }
 
+export function clearRememberedPasses(): void {
+  sessionPass.clear();
+}
+
 export function emptyParts(): CryptoParts {
   return { pgpEncrypted: null, pgpSigned: null, smimeEncrypted: null, smimeSigned: null };
 }
