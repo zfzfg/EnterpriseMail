@@ -251,11 +251,35 @@ def successful_events(events):
     check('PRIVATE_FIXTURE_THINKING' not in json.dumps(events), 'Reasoning content leaked downstream')
 
 
+def static_cache_checks(client):
+    """Compressed, identity, and conditional responses must remain interchangeable."""
+    import gzip
+    status, _, html = client.request('')
+    match = re.search(rb'snappymail/v/[^/"\']+/static/js/app\.js', html)
+    check(status == 200 and match is not None, 'Release HTML did not reference its versioned application script')
+    path = match.group(0).decode('ascii')
+    status, headers, compressed = client.request(path, headers={'Accept-Encoding': 'gzip'})
+    check(status == 200 and headers.get('Content-Encoding') == 'gzip', 'Static gzip response was not served')
+    check(headers.get_all('Vary') == ['Accept-Encoding'], 'Static gzip response must have one explicit Vary header')
+    check('max-age=' in (headers.get('Cache-Control') or ''), 'Versioned static asset has no cache lifetime')
+    etag = headers.get('ETag')
+    check(bool(etag), 'Static asset did not provide an ETag')
+    status, headers, body = client.request(path, headers={'Accept-Encoding': 'gzip', 'If-None-Match': etag})
+    check(status == 304 and not body, 'Conditional static asset request did not produce an empty 304')
+    check(headers.get_all('Vary') == ['Accept-Encoding'], '304 response omitted or duplicated Vary: Accept-Encoding')
+    status, headers, identity = client.request(path, headers={'Accept-Encoding': 'identity'})
+    check(status == 200 and not headers.get('Content-Encoding'), 'Identity asset response was unexpectedly encoded')
+    check(headers.get_all('Vary') == ['Accept-Encoding'], 'Identity response omitted Vary: Accept-Encoding')
+    check(gzip.decompress(compressed) == identity, 'Compressed and identity assets have different content')
+    check(len(compressed) < len(identity), 'Dynamic compression did not reduce static transfer bytes')
+
+
 def main():
     direct = Client('http://127.0.0.1:18880/')
     prefixed = Client('http://127.0.0.1:18881/mail/')
-
     wait_until(lambda: direct.request('healthz', timeout=3)[0] == 204, 'Application did not become healthy', 90)
+    static_cache_checks(direct)
+
     wait_until(lambda: prefixed.request('healthz', timeout=3)[0] == 204, 'Prefix proxy did not become healthy', 30)
     wait_until(lambda: docker('exec', PHP_ONLY, 'wget', '-q', '-T', '3', '-O', '/dev/null',
                               'http://127.0.0.1:8888/healthz', check_result=False).returncode == 0,

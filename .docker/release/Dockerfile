@@ -126,7 +126,8 @@ RUN set -eux; \
     apk add --no-cache liblzf zstd-libs; \
     apk add --no-cache --virtual .deps zstd-dev; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    pecl install igbinary-3.2.16; \
+    # PHP 8.5 removed ext/standard/php_smart_string.h; 3.2.16 cannot compile. \
+    pecl install igbinary-3.2.17RC1; \
     docker-php-ext-enable igbinary; \
     pecl install --configureoptions 'enable-redis-igbinary="yes" enable-redis-lzf="yes" enable-redis-zstd="yes"' redis-6.3.0; \
     docker-php-ext-enable redis; \
