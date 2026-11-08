@@ -5,7 +5,15 @@ RUN apk add --no-cache php85 php85-json php-phar php-zip
 WORKDIR /source
 COPY . .
 # Patch release.php with hotfix from: https://github.com/xgbstar1/snappymail-docker/blob/main/Dockerfile, so that release.php doesn't fail with error
-RUN sed -i 's_^if.*rename.*snappymail.v.0.0.0.*$_if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {_' cli/release.php  || true
+# Fail if upstream changes the expected line; sed otherwise succeeds even when it patches nothing.
+RUN set -eux; \
+    expected="if (!rename('snappymail/v/0.0.0', \"snappymail/v/{\$package->version}\")) {"; \
+    replacement='if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {'; \
+    tr -d '\r' < cli/release.php > /tmp/release.php; \
+    test "$(grep -Fxc "$expected" /tmp/release.php)" = 1; \
+    sed -i 's_^if.*rename.*snappymail.v.0.0.0.*$_if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {_' /tmp/release.php; \
+    test "$(grep -Fxc "$replacement" /tmp/release.php)" = 1; \
+    cp /tmp/release.php cli/release.php
 # Der Fork baut das Frontend vorab (npm --prefix ui run build) und committet static/; gulp/npm braucht es nicht.
 RUN php release.php --skip-gulp
 RUN set -eux; \
@@ -27,7 +35,9 @@ LABEL org.label-schema.description="SnappyMail webmail client image using nginx,
 # Install dependencies such as nginx
 RUN apk add --no-cache ca-certificates nginx supervisor bash
 
-# Install PHP extensions
+# Install PHP extensions. OPcache is non-optional and built into PHP 8.5;
+# its FPM settings are enabled and verified below in the final image.
+
 # apcu
 RUN set -eux; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
@@ -174,16 +184,26 @@ COPY --chown=root:root .docker/release/files /
 RUN set -eux; \
     chown www-data:www-data /snappymail/include.php; \
     chmod 440 /snappymail/include.php; \
+    # Git for Windows may check out executable scripts with CRLF endings. \
+    for file in /entrypoint.sh /supervisor.conf /etc/nginx/nginx.conf /usr/local/etc/php-fpm.d/php-fpm.conf; do \
+        tr -d '\r' < "$file" > "$file.tmp"; \
+        cat "$file.tmp" > "$file"; \
+        rm "$file.tmp"; \
+    done; \
     chmod +x /entrypoint.sh; \
     # Disable the built-in php-fpm configs, since we're using our own config
     mv -v /usr/local/etc/php-fpm.d/docker.conf /usr/local/etc/php-fpm.d/docker.conf.disabled; \
     mv -v /usr/local/etc/php-fpm.d/www.conf /usr/local/etc/php-fpm.d/www.conf.disabled; \
     mv -v /usr/local/etc/php-fpm.d/zz-docker.conf /usr/local/etc/php-fpm.d/zz-docker.conf.disabled;
 
+# Verify the final stage, including the effective safe rollout settings.
+RUN php -r 'if (!extension_loaded("Zend OPcache")) { fwrite(STDERR, "OPcache is not loaded\n"); exit(1); } foreach (["opcache.enable" => true, "opcache.enable_cli" => false, "opcache.validate_timestamps" => true, "opcache.save_comments" => true] as $name => $expected) { if (filter_var(ini_get($name), FILTER_VALIDATE_BOOL) !== $expected) { fwrite(STDERR, "Unexpected $name setting\n"); exit(1); } }'
+
 USER root
 WORKDIR /snappymail
 VOLUME /var/lib/snappymail
 EXPOSE 8888
 EXPOSE 9000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD wget -q -T 3 -O /dev/null http://127.0.0.1:8888/healthz || exit 1
 ENTRYPOINT []
 CMD ["/entrypoint.sh"]

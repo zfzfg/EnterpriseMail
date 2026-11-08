@@ -5,10 +5,13 @@
   "scripts": {
     "build:fonts": "node scripts/copy-fonts.mjs",
     "build:css": "tailwindcss -i ./src/styles/app.css -o ../snappymail/v/0.0.0/static/css/app.css --minify && node scripts/copy-admin-css.mjs",
-    "build:js": "esbuild src/main.ts --bundle --format=esm --target=es2022 --outfile=../snappymail/v/0.0.0/static/js/app.js && esbuild src/admin.ts --bundle --format=esm --target=es2022 --outfile=../snappymail/v/0.0.0/static/js/admin.js",
+    "build:js": "esbuild src/main.ts --bundle --format=esm --target=es2022 --minify --metafile=../build/local/esbuild/app.meta.json --outfile=../snappymail/v/0.0.0/static/js/app.js && esbuild src/admin.ts --bundle --format=esm --target=es2022 --minify --metafile=../build/local/esbuild/admin.meta.json --outfile=../snappymail/v/0.0.0/static/js/admin.js",
     "build": "npm run build:fonts && npm run build:icons && npm run build:css && npm run build:js",
     "typecheck": "tsc --noEmit",
-    "build:icons": "node scripts/icons.mjs"
+    "build:icons": "node scripts/icons.mjs",
+    "bundle:report": "node scripts/bundle-report.mjs",
+    "bundle:check": "node scripts/bundle-report.mjs --check",
+    "bundle:baseline": "node scripts/bundle-report.mjs --write-baseline"
   },
   "devDependencies": {
     "@fontsource/inter": "^5.2.8",

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "allowedGrowthPercent": 2,
+  "source": "Deliberately updated with npm run bundle:baseline.",
+  "artifacts": {
+    "app.js": {
+      "rawBytes": 463502,
+      "gzipBytes": 115284
+    },
+    "admin.js": {
+      "rawBytes": 116769,
+      "gzipBytes": 17453
+    },
+    "app.css": {
+      "rawBytes": 85797,
+      "gzipBytes": 16540
+    },
+    "admin.css": {
+      "rawBytes": 85797,
+      "gzipBytes": 16540
+    }
+  }
+}

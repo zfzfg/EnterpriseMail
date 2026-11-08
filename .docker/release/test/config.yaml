@@ -19,6 +19,10 @@ commandTests:
           nc -vz 127.0.0.1 8888
           nc -vz 127.0.0.1 9000
           wget -S -T 3 -O /dev/null http://127.0.0.1:8888
+          wget -q -T 3 -O /tmp/health-response http://127.0.0.1:8888/healthz
+          test ! -s /tmp/health-response
+          php -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'
+          php -r 'foreach (["opcache.enable" => true, "opcache.enable_cli" => false, "opcache.validate_timestamps" => true, "opcache.save_comments" => true] as $name => $expected) { if (filter_var(ini_get($name), FILTER_VALIDATE_BOOL) !== $expected) { exit(1); } }'
           kill `pidof supervisord`
 metadataTest:
   exposedPorts: ["8888", "9000"]

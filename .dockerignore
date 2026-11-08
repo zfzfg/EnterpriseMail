@@ -1,2 +1,53 @@
+# Version control and editor state
 /.git
-/node_modules
+**/.git
+**/.idea
+**/.vscode
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+**/*~
+
+# Never send local dependencies or compiler output to the daemon
+**/node_modules
+**/target
+**/__pycache__
+
+# Local runtime data and secrets; retain the tracked release scaffold only.
+/data/*
+!/data/.htaccess
+!/data/README.md
+!/data/VERSION
+/include.php
+/public_html
+/issues
+/MULTIPLY
+**/.env
+**/.env.*
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.key
+# These tracked files are application/test fixtures, not local secrets.
+!/snappymail/v/0.0.0/app/libraries/snappymail/smime/snappymail.key
+!/examples/crypto/smime.key
+**/*.log
+**/*.bak
+**/*.old
+
+# Generated build, cache, and visual-test output
+/build/local
+/build/dist
+/build/tmp
+/build/docker
+/dist
+/ui/build
+/.docker/dev/.cache
+**/.cache
+**/.npm
+**/.pnpm-store
+**/.yarn/cache
+**/screenshots
+**/shots
+/ui/icons.html
