@@ -41,7 +41,8 @@ RUN cargo build --release --locked
 FROM php:8.5-fpm-alpine@sha256:64535609509e0fd5c8529359e6b599a68ce42089defd565f7881efdae7687cea AS runtime
 
 # Install dependencies such as nginx
-RUN apk add --no-cache ca-certificates nginx supervisor bash
+# GNU Wget is required by cli/upgrade.sh for HTTPS-only redirect handling.
+RUN apk add --no-cache ca-certificates nginx supervisor bash wget
 
 # Install PHP extensions. OPcache is non-optional and built into PHP 8.5;
 # its FPM settings are enabled and verified below in the final image.

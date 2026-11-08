@@ -45,7 +45,7 @@ if [ -z "${OLD_VERSION}" ]; then
 	exit 1
 fi
 
-ARCHIVE="$(mktemp /tmp/snappymail-upgrade.XXXXXXXX.tar.gz)"
+ARCHIVE="$(mktemp /tmp/snappymail-upgrade.XXXXXXXX)"
 trap 'rm -f "${ARCHIVE}"' EXIT INT TERM
 
 echo "Downloading reviewed release: ${LATEST_URL}"
@@ -62,7 +62,7 @@ else
 	exit 1
 fi
 
-NEW_VERSION="$(tar -tf "${ARCHIVE}" | awk -F/ '/^snappymail\/v\/[^/]+\/index.php$/ { print $3 }' | sort -u)"
+NEW_VERSION="$(tar -tf "${ARCHIVE}" | awk -F/ '/^snappymail\/v\/[^\/]+\/index.php$/ { print $3 }' | sort -u)"
 if [[ ! "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || [[ "${NEW_VERSION}" == *$'\n'* ]]; then
 	echo "Archive must contain exactly one valid snappymail/v/VERSION/index.php" >&2
 	exit 1
