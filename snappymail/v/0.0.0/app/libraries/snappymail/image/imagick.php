@@ -19,11 +19,17 @@ class IMagick extends \Imagick implements \SnappyMail\Image
 	public static function createFromString(string &$data)
 	{
 		$imagick = new static();
-		if (!$imagick->readImageBlob($data)) {
+		try {
+			if (!$imagick->readImageBlob($data)) {
+				throw new \InvalidArgumentException('Failed to load image');
+			}
+			$imagick->setImageMatte(true);
+			return $imagick;
+		} catch (\Throwable) {
+			// Decoder exceptions can contain attacker-controlled image metadata.
+			$imagick->clear();
 			throw new \InvalidArgumentException('Failed to load image');
 		}
-		$imagick->setImageMatte(true);
-		return $imagick;
 	}
 
 	public static function createFromStream($fp)

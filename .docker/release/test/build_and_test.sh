@@ -5,3 +5,4 @@ set -eu
 IMAGE=snappymail/snappymail:test
 DOCKER_BUILDX=1 docker build -t "$IMAGE" -f .docker/release/Dockerfile .
 .docker/release/test/test.sh "$IMAGE"
+sh .docker/release/test/runtime/run.sh "$IMAGE"

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policymap>
+<policymap>
+  <!-- Attachment thumbnails need a small set of raster decoders, not URLs,
+       document renderers, MVG/MSL programs, or external delegates. -->
+  <policy domain="delegate" rights="none" pattern="*" />
+  <policy domain="coder" rights="none" pattern="*" />
+  <policy domain="coder" rights="read|write" pattern="JPEG" />
+  <policy domain="coder" rights="read|write" pattern="JPG" />
+  <policy domain="coder" rights="read|write" pattern="JPE" />
+  <policy domain="coder" rights="read|write" pattern="PNG" />
+  <policy domain="coder" rights="read|write" pattern="GIF" />
+  <policy domain="coder" rights="read|write" pattern="GIF87" />
+  <policy domain="coder" rights="read|write" pattern="WEBP" />
+  <policy domain="coder" rights="read|write" pattern="BMP" />
+  <policy domain="coder" rights="read|write" pattern="BMP2" />
+  <policy domain="coder" rights="read|write" pattern="BMP3" />
+  <policy domain="coder" rights="read|write" pattern="AVIF" />
+  <policy domain="coder" rights="read|write" pattern="HEIC" />
+
+  <!-- Native decoder allocations are outside PHP's memory_limit. Bound pixel
+       dimensions, animation length, cache storage, CPU time, and threads. -->
+  <policy domain="resource" name="memory" value="64MiB" />
+  <policy domain="resource" name="map" value="128MiB" />
+  <policy domain="resource" name="disk" value="128MiB" />
+  <policy domain="resource" name="area" value="16MP" />
+  <policy domain="resource" name="width" value="8KP" />
+  <policy domain="resource" name="height" value="8KP" />
+  <policy domain="resource" name="list-length" value="32" />
+  <policy domain="resource" name="time" value="10" />
+  <policy domain="resource" name="thread" value="1" />
+</policymap>
