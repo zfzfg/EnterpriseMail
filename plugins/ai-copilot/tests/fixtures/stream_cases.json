@@ -1,0 +1,55 @@
+{
+  "unicode_crlf_arrays_reasoning": {
+    "chunks": [
+      ": keepalive\r\n\r\n",
+      "data: {\"choices\":[{\"delta\":{\"content\":\"  <thi\"}}]}\r\n\r\n",
+      "data: {\"choices\":[{\"delta\":{\"content\":\"nk>verborgen</think>Hallo\"}}]}\r\n\r\n",
+      "data: {\"choices\":[{\"delta\":{\"content\":[{\"type\":\"thinking\",\"thinking\":\"secret\"},{\"type\":\"text\",\"text\":\",\"},{\"type\":\"text\",\"text\":\" Grüße ✓\"}]}}]}\n\n",
+      "data: {\"choices\":[\n",
+      "data: {\"delta\":{\"content\":\"!\"}}]}\n\n",
+      "data: [DONE]"
+    ],
+    "expected": "Hallo, Grüße ✓!"
+  },
+  "response_completed": {
+    "chunks": [
+      "data: {\"choices\":[{\"delta\":{\"content\":[{\"type\":\"text\",\"text\":\"Fertig\"}]}}]}\n\n",
+      "data: {\"type\":\"response.completed\"}\n\n"
+    ],
+    "expected": "Fertig"
+  },
+  "empty_completed": {
+    "chunks": ["data: [DONE]\n\n"],
+    "expected": ""
+  },
+  "unclosed_reasoning": {
+    "chunks": [
+      "data: {\"choices\":[{\"delta\":{\"content\":\"Vor <think>secret\"}}]}\n\n",
+      "data: [DONE]\n\n"
+    ],
+    "expected": "Vor"
+  },
+  "literal_partial_tag": {
+    "chunks": [
+      "data: {\"choices\":[{\"delta\":{\"content\":\"Literal <thi\"}}]}\n\n",
+      "data: [DONE]\n\n"
+    ],
+    "expected": "Literal <thi"
+  },
+  "malformed_json": {
+    "chunks": ["data: {not-json}\n\n", "data: [DONE]\n\n"],
+    "error": "upstream_malformed_json"
+  },
+  "malformed_final_json": {
+    "chunks": ["data: {\"choices\": ["],
+    "error": "upstream_malformed_json"
+  },
+  "missing_completion": {
+    "chunks": ["data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"],
+    "error": "upstream_incomplete"
+  },
+  "provider_error_event": {
+    "chunks": ["data: {\"error\":{\"message\":\"private upstream detail\"}}\n\n"],
+    "error": "upstream_error"
+  }
+}

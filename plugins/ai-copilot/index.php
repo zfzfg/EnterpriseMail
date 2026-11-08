@@ -18,11 +18,13 @@
 
 use AiCopilot\Alerts;
 use AiCopilot\Chat;
+use AiCopilot\DraftRequest;
 use AiCopilot\LlmClient;
 use AiCopilot\LlmException;
 use AiCopilot\MailContext;
 use AiCopilot\Mailbox;
 use AiCopilot\Prompts;
+use AiCopilot\SseEvent;
 use AiCopilot\Triage;
 use RainLoop\Enumerations\PluginPropertyType;
 use RainLoop\Plugins\Property;
@@ -244,12 +246,19 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 
 	private function llm(string $sFeature): LlmClient
 	{
+		// Central defense for every current and future provider-dispatching action.
+		$this->requireConsent();
 		$sProfile = $this->profileFor($sFeature);
 		$a = $this->profileConfig($sProfile);
 		if ('mistral' === $sProfile && !$a['api_key']) {
-			throw new LlmException('Für Mistral ist kein API-Key hinterlegt (Admin → Erweiterungen → AI Copilot).', 401);
+			throw new LlmException('Für Mistral ist kein API-Key hinterlegt (Admin → Erweiterungen → AI Copilot).', 401, 'provider_not_configured');
 		}
-		return new LlmClient($a['name'], $a);
+		return $this->createLlmClient($a['name'], $a);
+	}
+
+	protected function createLlmClient(string $sProfileName, array $aProfile): LlmClient
+	{
+		return new LlmClient($sProfileName, $aProfile);
 	}
 
 	public function FilterAppDataPluginSection(bool $bAdmin, bool $bAuth, array &$aConfig): void
@@ -400,19 +409,26 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		try {
 			return $this->jsonResponse($sFunction, $fn());
 		} catch (LlmException $e) {
-			return $this->jsonResponse($sFunction, ['error' => $e->getMessage(), 'status' => $e->getCode()]);
+			return $this->jsonResponse($sFunction, ['error' => $e->getMessage(), 'status' => $e->getCode(), 'code' => $e->errorCode()]);
 		} catch (\RainLoop\Exceptions\ClientException $e) {
 			throw $e;
 		} catch (\Throwable $e) {
-			$this->Manager()->WriteLog('AiCopilot: ' . \get_class($e) . ': ' . $e->getMessage(), \LOG_WARNING);
-			return $this->jsonResponse($sFunction, ['error' => 'Interner Fehler: ' . \mb_substr($e->getMessage(), 0, 200)]);
+			$this->Manager()->WriteLog('AiCopilot ' . $sFunction . ': operation failed.', \LOG_WARNING);
+			return $this->jsonResponse($sFunction, ['error' => 'Interner Fehler.', 'status' => 500, 'code' => 'internal_error']);
 		}
 	}
 
 	private function requireFeature(string $sFeature): void
 	{
 		if (!$this->featureOn($sFeature)) {
-			throw new LlmException('Diese KI-Funktion ist deaktiviert.', 403);
+			throw new LlmException('Diese KI-Funktion ist deaktiviert.', 403, 'feature_disabled');
+		}
+	}
+
+	private function requireConsent(): void
+	{
+		if (empty($this->userSettings()['notice_ack'])) {
+			throw new LlmException('Bitte bestätigen Sie zuerst den Hinweis zur Übermittlung an den KI-Anbieter in den Einstellungen.', 403, 'consent_required');
 		}
 	}
 
@@ -458,8 +474,8 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				$this->triage()->annotateList($aResponse);
 			}
 		} catch (\Throwable $e) {
-			// Liste nie wegen Kategorien kaputt machen
-			$this->Manager()->WriteLog('AiCopilot triage: ' . \get_class($e) . ': ' . $e->getMessage(), \LOG_WARNING);
+			// Liste nie wegen Kategorien kaputt machen; keine Inhalte oder Interna protokollieren.
+			$this->Manager()->WriteLog('AiCopilot triage: annotation failed.', \LOG_WARNING);
 		}
 	}
 
@@ -530,6 +546,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if ($bCacheOnly) {
 				return ['summary' => null];
 			}
+			$this->requireConsent();
 			$oContext = new MailContext($this->mailClient());
 			$aThread = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) $this->conf('context_budget', 12000));
 			$oLlm = $this->llm('summarize');
@@ -574,31 +591,49 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	/* 2. Entwuerfe                                                        */
 	/* ------------------------------------------------------------------ */
 
-	private function draftMessages(): array
+	private function draftParams(): array
 	{
-		$sMode = (string) $this->jsonParam('mode', 'new');
-		if (!\in_array($sMode, ['new', 'reply', 'rewrite', 'proofread'], true)) {
-			$sMode = 'new';
+		$aInput = [];
+		foreach (['mode' => 'new', 'tone' => '', 'instruction' => '', 'current' => '', 'wantSubject' => false,
+			'folder' => '', 'uids' => [], 'uid' => 0, 'sent' => ''] as $sKey => $mDefault) {
+			$aInput[$sKey] = $this->jsonParam($sKey, $mDefault);
 		}
+		return $aInput;
+	}
+
+	/** Shared by DoDraft, ServiceStream and the future protected prepare RPC. */
+	protected function prepareDraft(array $aInput): array
+	{
+		$a = DraftRequest::validate($aInput);
+		$this->account();
+		$this->requireFeature('draft');
+		$this->requireConsent();
+
+		$sMode = $a['mode'];
 		$aUser = $this->promptUser();
-		$sTone = (string) $this->jsonParam('tone', '') ?: $aUser['tone'];
-		$sInstruction = \trim((string) $this->jsonParam('instruction', ''));
-		$sCurrent = \trim((string) $this->jsonParam('current', ''));
-		$bWantSubject = !empty($this->jsonParam('wantSubject', false)) && \in_array($sMode, ['new', 'reply'], true);
-		$sFolder = (string) $this->jsonParam('folder', '');
-		$aUids = $this->paramUids();
+		$sTone = $a['tone'] ?: $aUser['tone'];
+		$sInstruction = \trim($a['instruction']);
+		$sCurrent = \trim($a['current']);
+		$bWantSubject = $a['wantSubject'] && \in_array($sMode, ['new', 'reply'], true);
 		$sContext = '';
-		if ($sFolder && $aUids && \in_array($sMode, ['reply', 'new'], true)) {
+		if ($a['folder'] && $a['uids'] && \in_array($sMode, ['reply', 'new'], true)) {
 			$oContext = new MailContext($this->mailClient());
-			$sContext = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) $this->conf('context_budget', 12000))['text'];
+			$sContext = $oContext->threadWithSent($a['folder'], $a['uids'], $a['sent'], (int) $this->conf('context_budget', 12000))['text'];
 		}
 		if ('new' === $sMode && !\strlen($sInstruction) && !\strlen($sCurrent) && !\strlen($sContext)) {
-			throw new LlmException('Bitte beschreiben, was die Mail enthalten soll.', 400);
+			throw new LlmException('Bitte beschreiben, was die Mail enthalten soll.', 400, 'invalid_request');
 		}
 		if (\in_array($sMode, ['rewrite', 'proofread'], true) && !\strlen($sCurrent)) {
-			throw new LlmException('Kein Text zum Bearbeiten vorhanden.', 400);
+			throw new LlmException('Kein Text zum Bearbeiten vorhanden.', 400, 'invalid_request');
 		}
-		return [Prompts::draft($aUser, $sMode, $sTone, $sInstruction, $sContext, $sCurrent, $bWantSubject), $bWantSubject];
+
+		$oLlm = $this->llm('draft');
+		return [
+			'messages' => Prompts::draft($aUser, $sMode, $sTone, $sInstruction, $sContext, $sCurrent, $bWantSubject),
+			'wantSubject' => $bWantSubject,
+			'client' => $oLlm,
+			'model' => $oLlm->profileName() . ' · ' . $oLlm->model()
+		];
 	}
 
 	public static function splitSubject(string $sText, bool $bWantSubject): array
@@ -614,23 +649,44 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	public function DoDraft(): array
 	{
 		return $this->respond(__FUNCTION__, function () {
-			$this->requireFeature('draft');
-			[$aMessages, $bWantSubject] = $this->draftMessages();
-			$oLlm = $this->llm('draft');
-			$sText = $oLlm->chat($aMessages, ['temperature' => 0.4, 'max_tokens' => 1500]);
-			return static::splitSubject($sText, $bWantSubject) + ['model' => $oLlm->profileName() . ' · ' . $oLlm->model()];
+			$aPrepared = $this->prepareDraft($this->draftParams());
+			$sText = $aPrepared['client']->chat($aPrepared['messages'], ['temperature' => 0.4, 'max_tokens' => 1500]);
+			return static::splitSubject($sText, $aPrepared['wantSubject']) + ['model' => $aPrepared['model']];
 		});
+	}
+
+	protected function readStreamBody(): string
+	{
+		$sBody = \file_get_contents('php://input', false, null, 0, DraftRequest::MAX_BODY_BYTES + 1);
+		if (false === $sBody) {
+			throw new LlmException('Der Anfrageinhalt konnte nicht gelesen werden.', 400, 'invalid_request');
+		}
+		return $sBody;
+	}
+
+	protected function writeStreamEvent(string $sEvent, array $aData): void
+	{
+		if (\connection_aborted()) {
+			throw new LlmException('Die Client-Verbindung wurde beendet.', 499, 'client_disconnected');
+		}
+		echo SseEvent::format($sEvent, $aData);
+		@\flush();
+		if (\connection_aborted()) {
+			throw new LlmException('Die Client-Verbindung wurde beendet.', 499, 'client_disconnected');
+		}
 	}
 
 	/**
 	 * Streaming per Server-Sent Events: /?/AiStream/
-	 * Ereignisse: delta {text}, done {subject, body, model}, error {error}
+	 * Ereignisse: delta {text}, done {subject, body, model}, error {error, code}
+	 * Fehler bleiben aus Kompatibilitätsgründen HTTP 200 mit SSE-Ereignis.
 	 */
 	public function ServiceStream(...$aParts): bool
 	{
 		while (\ob_get_level()) {
 			\ob_end_clean();
 		}
+		\ignore_user_abort(false);
 		\header_remove('Content-Encoding');
 		\header('Content-Type: text/event-stream; charset=utf-8');
 		\header('Cache-Control: no-cache, no-store');
@@ -638,38 +694,60 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		@\ini_set('zlib.output_compression', '0');
 		@\set_time_limit(300);
 
-		$send = function (string $sEvent, array $aData) {
-			echo "event: {$sEvent}\ndata: " . \json_encode($aData, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n\n";
-			@\flush();
+		$send = function (string $sEvent, array $aData): void {
+			$this->writeStreamEvent($sEvent, $aData);
+		};
+		$sendError = function (string $sMessage, string $sCode) use ($send): void {
+			try {
+				$send('error', ['error' => $sMessage, 'code' => $sCode]);
+			} catch (\Throwable $e) {
+				// Ein getrennter Client kann keine Fehlermeldung mehr empfangen.
+			}
 		};
 
 		try {
 			if ('POST' !== ($_SERVER['REQUEST_METHOD'] ?? '')) {
-				throw new LlmException('Nur POST erlaubt.', 405);
+				throw new LlmException('Nur POST erlaubt.', 405, 'method_not_allowed');
+			}
+			if (isset($_SERVER['HTTP_SEC_FETCH_SITE']) && 'same-origin' !== \strtolower((string) $_SERVER['HTTP_SEC_FETCH_SITE'])) {
+				throw new LlmException('Herkunft der Anfrage nicht erlaubt.', 403, 'cross_site_request');
 			}
 			$sToken = (string) ($_SERVER['HTTP_X_SM_TOKEN'] ?? '');
 			if (!$sToken || !\hash_equals(\RainLoop\Utils::GetCsrfToken(), $sToken)) {
-				throw new LlmException('Ungültiges Token.', 403);
+				throw new LlmException('Ungültiges Token.', 403, 'invalid_csrf');
 			}
-			$aBody = \json_decode((string) \file_get_contents('php://input'), true);
-			if (!\is_array($aBody)) {
-				throw new LlmException('Ungültige Anfrage.', 400);
+			$iContentLength = null;
+			if (isset($_SERVER['CONTENT_LENGTH']) && '' !== (string) $_SERVER['CONTENT_LENGTH']) {
+				$sContentLength = (string) $_SERVER['CONTENT_LENGTH'];
+				if (!\ctype_digit($sContentLength)) {
+					throw new LlmException('Ungültige Anfrage.', 400, 'invalid_request');
+				}
+				$iContentLength = (int) $sContentLength;
+				if ($iContentLength > DraftRequest::MAX_BODY_BYTES) {
+					throw new LlmException('Die Anfrage ist zu groß.', 413, 'body_too_large');
+				}
 			}
-			$this->Manager()->Actions()->SetActionParams($aBody, 'DoPluginAiStream');
-			$this->account();
-			$this->requireFeature('draft');
-			[$aMessages, $bWantSubject] = $this->draftMessages();
-			$oLlm = $this->llm('draft');
-			$send('start', ['model' => $oLlm->profileName() . ' · ' . $oLlm->model()]);
-			$sText = $oLlm->stream($aMessages, function (string $sDelta) use ($send) {
+			$aBody = DraftRequest::decode($this->readStreamBody(), (string) ($_SERVER['CONTENT_TYPE'] ?? ''), $iContentLength);
+			$aPrepared = $this->prepareDraft($aBody);
+			$send('start', ['model' => $aPrepared['model']]);
+			$sText = $aPrepared['client']->stream($aPrepared['messages'], function (string $sDelta) use ($send): void {
 				$send('delta', ['text' => $sDelta]);
 			}, ['temperature' => 0.4, 'max_tokens' => 1500]);
-			$send('done', static::splitSubject($sText, $bWantSubject) + ['model' => $oLlm->profileName() . ' · ' . $oLlm->model()]);
+			$send('done', static::splitSubject($sText, $aPrepared['wantSubject']) + ['model' => $aPrepared['model']]);
 		} catch (LlmException $e) {
-			$send('error', ['error' => $e->getMessage()]);
+			if (499 === $e->getCode() || \connection_aborted()) {
+				return true;
+			}
+			$sendError($e->getMessage(), $e->errorCode());
 		} catch (\Throwable $e) {
-			$this->Manager()->WriteLog('AiCopilot stream: ' . \get_class($e) . ': ' . $e->getMessage(), \LOG_WARNING);
-			$send('error', ['error' => $e instanceof \RainLoop\Exceptions\ClientException ? 'Nicht angemeldet oder Sitzung abgelaufen.' : 'Interner Fehler.']);
+			if (\connection_aborted()) {
+				return true;
+			}
+			$this->Manager()->WriteLog('AiCopilot stream: operation failed.', \LOG_WARNING);
+			$sendError(
+				$e instanceof \RainLoop\Exceptions\ClientException ? 'Nicht angemeldet oder Sitzung abgelaufen.' : 'Interner Fehler.',
+				$e instanceof \RainLoop\Exceptions\ClientException ? 'unauthenticated' : 'internal_error'
+			);
 		}
 		return true;
 	}
@@ -691,6 +769,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!$bForce && ($aCached = $this->cacheGet('quick', $sKey))) {
 				return ['replies' => $aCached, 'cached' => true];
 			}
+			$this->requireConsent();
 			$oContext = new MailContext($this->mailClient());
 			$aThread = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) \min(8000, $this->conf('context_budget', 12000)));
 			$a = $this->llm('quick_replies')->chatJson(Prompts::quickReplies($aUser, $aThread['text'], $aUser['tone']), ['temperature' => 0.5, 'max_tokens' => 1800]);
@@ -725,6 +804,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!\strlen($sQuery)) {
 				throw new LlmException('Leere Anfrage.', 400);
 			}
+			$this->requireConsent();
 			$aFolders = $this->paramFolders();
 			$sCurrent = (string) $this->jsonParam('currentFolder', 'INBOX');
 			$sToday = \gmdate('Y-m-d (l)');
@@ -779,6 +859,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return $this->respond(__FUNCTION__, function () {
 			$this->requireFeature('triage');
 			$this->requireFeature('triage_llm');
+			$this->requireConsent();
 			$sFolder = (string) $this->jsonParam('folder', 'INBOX');
 			// Kopfdaten der sichtbaren Liste kommen vom Browser (eigene Mails des Benutzers)
 			$aItems = [];
@@ -835,6 +916,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!$aHistory) {
 				throw new LlmException('Leere Nachricht.', 400);
 			}
+			$this->requireConsent();
 			$aFolders = $this->paramFolders();
 			if (!\in_array('INBOX', $aFolders, true)) {
 				$aFolders[] = 'INBOX';
@@ -883,6 +965,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		return $this->respond(__FUNCTION__, function () {
 			$this->requireFeature('alerts');
+			$this->requireConsent();
 			$aItems = \array_slice((array) $this->jsonParam('items', []), 0, 8);
 			$oContext = new MailContext($this->mailClient());
 			$aParts = [];

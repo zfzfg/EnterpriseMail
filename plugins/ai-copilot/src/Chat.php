@@ -140,9 +140,9 @@ class Chat
 					]];
 			}
 		} catch (\Throwable $e) {
-			return ['Fehler bei ' . $sName, ['error' => 'Werkzeug fehlgeschlagen: ' . \mb_substr($e->getMessage(), 0, 200)]];
+			return ['Werkzeugfehler', ['error' => 'Werkzeug fehlgeschlagen.']];
 		}
-		return ['Unbekanntes Werkzeug', ['error' => 'Unbekanntes Werkzeug ' . $sName]];
+		return ['Unbekanntes Werkzeug', ['error' => 'Unbekanntes Werkzeug.']];
 	}
 
 	public function validateActions(array $aActions): array
