@@ -763,73 +763,75 @@ For the Rust rollout:
 
 ## 15. Detailed implementation checklist
 
+Checked items were implemented and locally verified as recorded in §17. Unchecked items are incomplete or only partially verified; no checkbox implies a production or multi-architecture release approval.
+
 ### Phase 0 deliverables
 
-- [ ] Versioned benchmark environment description and immutable mail/LLM fixtures.
-- [ ] Repeatable image, cgroup, process, FPM, latency, throughput, and error metrics.
-- [ ] Cold/warm browser baseline and bundle-composition reports.
-- [ ] Existing PHP SSE golden/contract tests.
-- [ ] Storage lifecycle and privacy data-flow inventory.
-- [ ] CI typecheck/build/generated-artifact drift checks.
-- [ ] Documented service objectives and regression thresholds.
+- [x] Versioned benchmark environment description and immutable mail/LLM fixtures.
+- [x] Repeatable image, cgroup, process, FPM, latency, throughput, and error metrics.
+- [x] Cold/warm browser baseline and bundle-composition reports.
+- [x] Existing PHP SSE golden/contract tests.
+- [ ] Storage lifecycle and privacy data-flow inventory. (Template and tests exist; the complete deployment-specific inventory remains open.)
+- [x] CI typecheck/build/generated-artifact drift checks.
+- [ ] Documented service objectives and regression thresholds. (Measurements exist; explicit production objectives/thresholds remain open.)
 
 ### Phase 1 deliverables
 
-- [ ] Clean Docker context and deterministic, pinned build inputs.
-- [ ] OPcache installed, verified, sized, and environment-specific invalidation documented.
-- [ ] JavaScript minification and bundle budgets.
-- [ ] Health/readiness checks with no live-model dependency.
-- [ ] Static cache/compression tests and upgrade/rollback asset checks.
+- [x] Clean Docker context and deterministic, pinned build inputs.
+- [x] OPcache installed, verified, sized, and environment-specific invalidation documented.
+- [x] JavaScript minification and bundle budgets.
+- [x] Health/readiness checks with no live-model dependency.
+- [x] Static cache/compression tests and upgrade/rollback asset checks.
 
 ### Phase 2 deliverables
 
-- [ ] FPM candidate comparison with queue, capacity, memory, and latency results.
-- [ ] Independent extension-removal reports with feature matrices.
-- [ ] Imagick/GD decision based on correctness, security, size, and memory evidence.
-- [ ] Trusted-proxy and private-metrics/network configuration reviewed.
+- [x] FPM candidate comparison with queue, capacity, memory, and latency results.
+- [ ] Independent extension-removal reports with feature matrices. (Extensions were deliberately retained; no removal compatibility proof was produced.)
+- [ ] Imagick/GD decision based on correctness, security, size, and memory evidence. (Imagick was hardened and tested; a complete GD-only size/format comparison remains open.)
+- [x] Trusted-proxy and private-metrics/network configuration reviewed.
 
 ### Phase 3 deliverables
 
-- [ ] Nonblocking client maintenance trigger.
-- [ ] Shared PHP maintenance service with independent retryable schedules.
-- [ ] Optional one-shot CLI scheduling with correct UID/GID and persistent volume.
-- [ ] File allowlists, symlink/concurrency safeguards, and conservative retention.
-- [ ] Tests proving active data and SQLite sidecars are preserved.
+- [x] Nonblocking client maintenance trigger.
+- [x] Shared PHP maintenance service with independent retryable schedules.
+- [x] Optional one-shot CLI scheduling with correct UID/GID and persistent volume.
+- [x] File allowlists, symlink/concurrency safeguards, and conservative retention.
+- [x] Tests proving active data and SQLite sidecars are preserved.
 
 ### Phase 4 deliverables
 
-- [ ] Server-side consent/feature enforcement and complete authorization tests.
-- [ ] Request/body/schema bounds.
-- [ ] Robust server/client SSE parsing and mandatory terminal completion semantics.
-- [ ] Cancellation, timeout, retry, slow-client, and privacy tests.
-- [ ] Automated mock-provider suite covering both success and failure paths.
+- [x] Server-side consent/feature enforcement and complete authorization tests.
+- [x] Request/body/schema bounds.
+- [x] Robust server/client SSE parsing and mandatory terminal completion semantics.
+- [x] Cancellation, timeout, retry, slow-client, and privacy tests.
+- [x] Automated mock-provider suite covering both success and failure paths.
 
 ### Phase 5 deliverables, only after a go decision
 
-- [ ] Internal PHP prepare RPC with complete authentication/feature/context behavior.
-- [ ] Protected secret-resolution design and security review.
-- [ ] Bounded Rust streamer with cancellation, backpressure, timeouts, and safe retries.
-- [ ] Explicit Nginx route and existing `streamEvents()` integration.
-- [ ] Legacy PHP route and old-client compatibility.
-- [ ] Rust quality, supply-chain, concurrency, memory, and multi-architecture gates.
-- [ ] Canary/rollback drill and comparative benchmark report.
+- [x] Internal PHP prepare RPC with complete authentication/feature/context behavior.
+- [x] Protected secret-resolution design and security review.
+- [x] Bounded Rust streamer with cancellation, backpressure, timeouts, and safe retries.
+- [x] Explicit Nginx route and existing `streamEvents()` integration.
+- [x] Legacy PHP route and old-client compatibility.
+- [ ] Rust quality, supply-chain, concurrency, memory, and multi-architecture gates. (Local quality/security/concurrency checks passed; ARM64/386 verification was interrupted.)
+- [ ] Canary/rollback drill and comparative benchmark report. (Rollback and comparative synthetic benchmarks passed; staging/production canary remains open.)
 
 ### Phase 6 deliverables
 
-- [ ] Poll overlap prevention and failure backoff.
-- [ ] Measured startup-request scheduling improvements.
-- [ ] Keyed/incremental list updates where profiles justify them.
-- [ ] Bounded account-scoped caches and cleanup on logout/account change.
-- [ ] Streaming image-size enforcement and fetch concurrency limits.
-- [ ] Browser interaction, accessibility, heap, and soak verification.
+- [x] Poll overlap prevention and failure backoff.
+- [x] Measured startup-request scheduling improvements.
+- [x] Keyed/incremental list updates where profiles justify them.
+- [x] Bounded account-scoped caches and cleanup on logout/account change.
+- [x] Streaming image-size enforcement and fetch concurrency limits.
+- [x] Browser interaction, accessibility, heap, and soak verification. (Interaction/focus/overflow and measured heap/DOM behavior covered; the CDP-node caveat remains documented in §17.10.)
 
 ### Phase 7 deliverables
 
-- [ ] Correct fork-specific release tags, metadata, registries, and updater channels.
-- [ ] Reproducible frontend/container release pipeline.
-- [ ] Fresh install, upgrade, rollback, and persistent-data verification.
-- [ ] Supported PHP-only/non-Docker deployment documentation.
-- [ ] Final resource/latency report replacing hypotheses with measured results.
+- [x] Correct fork-specific release tags, metadata, registries, and updater channels.
+- [x] Reproducible frontend/container release pipeline.
+- [x] Fresh install, upgrade, rollback, and persistent-data verification.
+- [x] Supported PHP-only/non-Docker deployment documentation.
+- [x] Final resource/latency report replacing hypotheses with measured results.
 
 ## 16. Final definition of done
 
