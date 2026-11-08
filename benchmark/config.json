@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "project": "snappymail-phase02",
+  "port": 18888,
+  "application_image": "snappymail-phase02:local",
+  "runs": 5,
+  "warmup_iterations": 1,
+  "timeout_seconds": 30,
+  "sample_interval_seconds": 2.0,
+  "idle_drain_seconds": 12,
+  "container_limits": {
+    "cpus": "2.0",
+    "memory": "1g",
+    "pids": 512
+  },
+  "fpm_candidates": [8, 16, 30],
+  "anonymous": {
+    "concurrency": [1, 10, 25],
+    "iterations": 2
+  },
+  "mailbox": {
+    "concurrency": [1, 10, 25],
+    "row_counts": [20, 100],
+    "iterations": 2
+  },
+  "ai": {
+    "concurrency": [1, 5, 10, 30],
+    "iterations": 1
+  },
+  "combined": {
+    "mail_concurrency": 10,
+    "ai_concurrency": 5,
+    "mail_rows": 20,
+    "iterations": 1
+  },
+  "objectives": {
+    "max_error_rate": null,
+    "max_timeouts": null,
+    "max_p95_ms": null,
+    "max_p99_ms": null,
+    "max_oom_kill_events": null
+  }
+}

@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+ARG PYTHON_IMAGE=python:3.12.8-alpine3.21
+FROM ${PYTHON_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+COPY scripts/performance/mock_llm.py /opt/performance/mock_llm.py
+COPY benchmark/fixtures/llm_cases.json /opt/benchmark/fixtures/llm_cases.json
+USER 65532:65532
+EXPOSE 18080
+CMD ["python", "/opt/performance/mock_llm.py", "--host", "0.0.0.0", "--port", "18080", "--fixtures", "/opt/benchmark/fixtures/llm_cases.json"]

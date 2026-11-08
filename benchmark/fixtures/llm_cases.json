@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "cases": {
+    "benchmark-success": {
+      "behavior": "success",
+      "text": "Betreff: Terminbestätigung\n\nHallo,\n\nvielen Dank für Ihre Nachricht. Der Termin ist bestätigt.\n\nViele Grüße\nBenchmark Fixture"
+    },
+    "benchmark-reasoning": {
+      "behavior": "reasoning",
+      "text": "Hallo,\n\ndies ist eine deterministische Antwort.\n\nViele Grüße"
+    },
+    "benchmark-slow": {
+      "behavior": "success",
+      "text": "Betreff: Langsame Testantwort\n\nDiese Antwort verwendet die konfigurierte Fixture-Verzögerung."
+    },
+    "benchmark-empty": {
+      "behavior": "empty",
+      "text": ""
+    },
+    "benchmark-http-429": {
+      "behavior": "http_error",
+      "status": 429,
+      "text": "benchmark rate limit"
+    },
+    "benchmark-malformed": {
+      "behavior": "malformed",
+      "text": "{not-json}"
+    },
+    "benchmark-incomplete": {
+      "behavior": "incomplete",
+      "text": "partial benchmark response"
+    },
+    "benchmark-provider-error": {
+      "behavior": "provider_error",
+      "text": "benchmark provider failure"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "bytes": 1109,
+      "path": "llm_cases.json",
+      "sha256": "535b635630e33a74852a628de5c78a76935f117c9fb77a26f56093c4f2114fae"
+    },
+    {
+      "bytes": 79601,
+      "path": "mail-fixtures.json",
+      "sha256": "bb2a888cf59166d182fbe3000768cfcf5d98062c13fdf17468e938fb35501164"
+    },
+    {
+      "bytes": 170,
+      "path": "provider.env",
+      "sha256": "49d0b91e23cfe02d0a3d1820521bece440830d8e1ae7142b3067d540e5915176"
+    }
+  ],
+  "schema_version": 1
+}

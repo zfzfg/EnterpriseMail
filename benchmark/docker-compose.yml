@@ -1,0 +1,57 @@
+# Isolated override for plugins/ai-copilot/dev/docker-compose.yml.
+# Always invoke with a separate project name; never use this file alone.
+services:
+  snappymail:
+    image: ${BENCH_APP_IMAGE:-snappymail-phase02:local}
+    environment:
+      - SECURE_COOKIES=false
+      - BENCH_FPM_MAX_CHILDREN=${BENCH_FPM_MAX_CHILDREN:?set candidate 8, 16, or 30}
+      # No provider environment or host key is inherited by this override.
+      - MISTRAL_API_KEY=
+      - LLMSTER_API_KEY=
+    entrypoint: ["/bin/sh"]
+    # Normalize the launcher's own line endings before the shell parses it.
+    command: ["-c", "tr -d '\\r' < /opt/benchmark/container-entrypoint.sh > /tmp/benchmark-entrypoint.sh && exec /bin/sh /tmp/benchmark-entrypoint.sh"]
+    volumes:
+      - ${BENCH_ROOT:-../../..}/scripts/performance:/opt/performance:ro
+      - ${BENCH_BENCHMARK:-../../../benchmark}/fixtures/provider.env:/run/secrets/mistral.env:ro
+      - ${BENCH_BENCHMARK:-../../../benchmark}/container-entrypoint.sh:/opt/benchmark/container-entrypoint.sh:ro
+    ports:
+      - "127.0.0.1:${BENCH_PORT:-18888}:8888"
+    cpus: ${BENCH_CPUS:-2.0}
+    mem_limit: ${BENCH_MEMORY:-1g}
+    pids_limit: ${BENCH_PIDS:-512}
+    depends_on:
+      mock-llm:
+        condition: service_healthy
+
+  mock-llm:
+    build:
+      context: ${BENCH_ROOT:-../../..}
+      dockerfile: benchmark/Dockerfile.mock
+      args:
+        PYTHON_IMAGE: ${BENCH_PYTHON_IMAGE:-python:3.12.8-alpine3.21}
+    image: ${BENCH_MOCK_IMAGE:-snappymail-deterministic-mock:local}
+    environment:
+      - MOCK_CHUNK_DELAY_MS=${MOCK_CHUNK_DELAY_MS:-20}
+      - MOCK_START_DELAY_MS=${MOCK_START_DELAY_MS:-0}
+      - MOCK_CHUNK_CHARS=${MOCK_CHUNK_CHARS:-12}
+      - MOCK_MAX_REQUEST_BYTES=65536
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=2).read()"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 1s
+    # No host port: reachable only by benchmark containers.
+
+networks:
+  default:
+    internal: true
