@@ -16,11 +16,21 @@ services:
       - ${BENCH_ROOT:-../../..}/scripts/performance:/opt/performance:ro
       - ${BENCH_BENCHMARK:-../../../benchmark}/fixtures/provider.env:/run/secrets/mistral.env:ro
       - ${BENCH_BENCHMARK:-../../../benchmark}/container-entrypoint.sh:/opt/benchmark/container-entrypoint.sh:ro
-    ports:
+    # Replace rather than append to the development port mapping.
+    ports: !override
       - "127.0.0.1:${BENCH_PORT:-18888}:8888"
+    networks:
+      # Published ports on an internal-only network are unreachable from the
+      # host. Keep mail/mock traffic isolated and add loopback-only ingress.
+      default: {}
+      ingress: {}
     cpus: ${BENCH_CPUS:-2.0}
     mem_limit: ${BENCH_MEMORY:-1g}
     pids_limit: ${BENCH_PIDS:-512}
+    # Allow the root metrics CLI to read www-data worker smaps_rollup.
+    # This capability is benchmark-only and is not present in the release image.
+    cap_add:
+      - SYS_PTRACE
     depends_on:
       mock-llm:
         condition: service_healthy
@@ -55,3 +65,5 @@ services:
 networks:
   default:
     internal: true
+  ingress:
+    internal: false

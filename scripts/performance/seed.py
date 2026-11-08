@@ -6,6 +6,7 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import time
 
 from common import DEFAULT_CONFIG, FIXTURES, BenchError, compose, load_config, verify_fixtures
 from loadgen import Client
@@ -45,6 +46,24 @@ file_put_contents($base . 'configs/plugin-ai-copilot.json', json_encode($provide
 '''
 
 
+def wait_for_mailbox(config: dict, candidate: int, timeout: float = 60) -> None:
+    """Wait for account-triggered Dovecot restarts to become stable."""
+    deadline = time.monotonic() + timeout
+    successful_probes = 0
+    while time.monotonic() < deadline:
+        result = compose(
+            config,
+            ["exec", "-T", "mail", "doveadm", "search", "-u", USER, "mailbox", "INBOX", "all"],
+            candidate=candidate,
+            check=False,
+        )
+        successful_probes = successful_probes + 1 if result.returncode == 0 else 0
+        if successful_probes >= 3:
+            return
+        time.sleep(1)
+    raise BenchError("Synthetic mailbox did not become ready within 60 s")
+
+
 def seed(config: dict, candidate: int) -> dict:
     verify_fixtures()
     for address in (USER, "kollege@example.com"):
@@ -53,6 +72,7 @@ def seed(config: dict, candidate: int) -> dict:
             result = compose(config, ["exec", "-T", "mail", "setup", "email", "add", address, PASSWORD], candidate=candidate, check=False)
             if result.returncode and b"already" not in result.stderr.lower():
                 raise BenchError(f"Could not create synthetic mail account {address}")
+    wait_for_mailbox(config, candidate)
     compose(config, ["exec", "-T", "-u", "www-data", "snappymail", "php", "-r", PHP_CONFIG], candidate=candidate)
 
     fixture = json.loads((FIXTURES / "mail-fixtures.json").read_text(encoding="utf-8"))

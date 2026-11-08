@@ -60,6 +60,8 @@ def compose_environment(config: dict[str, Any], candidate: int | None = None) ->
     env.update(
         MSYS_NO_PATHCONV="1",
         COMPOSE_PROJECT_NAME=config["project"],
+        # Public deterministic fixtures do not need the host registry credentials.
+        DOCKER_CONFIG=str(BENCHMARK / "docker"),
         BENCH_PORT=str(config["port"]),
         BENCH_APP_IMAGE=config["application_image"],
         # Multi-file Compose resolves relative paths from the base file.
@@ -111,6 +113,13 @@ def command(
         args[0] = executable("SNAPPY_DOCKER_COMPOSE", "docker-compose")
     environment = dict(env or os.environ)
     environment["MSYS_NO_PATHCONV"] = "1"
+    if original in ("docker", "docker-compose") and Path(args[0]).is_absolute():
+        # The standalone Compose binary invokes docker-credential-desktop from
+        # PATH; resolving only the parent executable is not sufficient.
+        bin_directory = str(Path(args[0]).parent)
+        path_entries = environment.get("PATH", "").split(os.pathsep)
+        if bin_directory not in path_entries:
+            environment["PATH"] = bin_directory + os.pathsep + environment.get("PATH", "")
     try:
         result = subprocess.run(
             args,

@@ -22,7 +22,8 @@ function readMap(string $path): ?array {
     $result = [];
     foreach (preg_split('/\r?\n/', $value) as $line) {
         $parts = preg_split('/\s+/', trim($line));
-        if (2 === count($parts) && is_numeric($parts[1])) {
+        // cgroup rows have two columns; proc status/smaps rows append "kB".
+        if (count($parts) >= 2 && is_numeric($parts[1])) {
             $result[$parts[0]] = $parts[1] + 0;
         }
     }

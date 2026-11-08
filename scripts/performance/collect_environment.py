@@ -228,7 +228,9 @@ def application_metadata(config: dict[str, Any], candidate: int) -> dict[str, An
         'memory_limit' => ini_get('memory_limit')
     ], JSON_UNESCAPED_SLASHES);
     """
-    fpm_raw = exec_app(["php-fpm", "-tt"])
+    fpm_result = compose(config, ["exec", "-T", "snappymail", "php-fpm", "-tt"], candidate=candidate)
+    # php-fpm writes its configuration test to stderr, not stdout.
+    fpm_raw = text(fpm_result) + "\n" + fpm_result.stderr.decode("utf-8", "replace")
     fpm: dict[str, str] = {}
     for line in fpm_raw.splitlines():
         match = re.search(r"\b(pm(?:\.max_children|\.max_requests|\.process_idle_timeout)?|pm\.status_path)\s*=\s*([^\s]+)", line)
