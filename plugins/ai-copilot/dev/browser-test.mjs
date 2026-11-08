@@ -688,6 +688,7 @@ try {
     await step("Sustain polling, navigation, and repeated authentication for the configured soak", async () => {
       await authenticate(page);
       result.soak.logins += 1;
+      await openMessage(page, "Funktionstest: Anhänge und Termin");
       const baseline = await measure("soak-start");
       while (Date.now() < deadline && result.soak.iterations < 10_000) {
         await openMessage(page, result.soak.iterations % 2 ? "Rechnung 2026-1043" : "Funktionstest: HTML, Bilder, Tracking, Abmelden");

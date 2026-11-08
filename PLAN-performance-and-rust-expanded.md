@@ -1,6 +1,6 @@
 # Performance, Resource Efficiency, and Optional Rust Integration Plan
 
-**Status:** Revised implementation proposal  
+**Status:** Local implementation and AMD64 verification completed; remaining acceptance limits are recorded in §17
 **Scope:** This SnappyMail fork, its TypeScript client, PHP backend, AI Copilot plugin, Docker image, maintenance jobs, CI, and release process  
 **Supersedes:** `PLAN-performance-und-rust.md`
 
@@ -846,3 +846,142 @@ This plan is complete only when:
 - UI artifacts are reproducible, minified where beneficial, cached safely, and protected by size/performance budgets.
 - Fresh install, upgrade, canary, rollback, multi-architecture, and PHP-only deployment paths are verified.
 - The final report documents remaining tradeoffs and unmeasured environments instead of converting estimates into guarantees.
+
+## 17. Implementation and verification record — 2026-11-08
+
+This section records work actually implemented and executed. It does not convert local synthetic tests into production, provider, multi-architecture, or compliance guarantees. No image, GitHub release, or registry manifest was published, and no live AI provider was contacted.
+
+### 17.1 Phase 0 — Reproducible evidence and measurements
+
+- Added isolated deterministic mail/mock-provider fixtures and a repeatable benchmark harness with image, cgroup, process, FPM, request latency, throughput, and error measurements.
+- Added run-attributable FPM cumulative-counter deltas instead of assigning process-lifetime counters to unrelated scenarios.
+- Recompiled 14 scenarios at 8, 16, and 30 workers with five measured runs each: 210 measured runs in total. Reports preserve unavailable values instead of turning them into zero.
+- Added cold/warm browser measurements, bundle composition/budgets, SSE contract tests, and CI generated-artifact drift checks.
+- Added the storage/privacy inventory template, but the complete production data-flow/cache inventory remains open as stated in §17.10.
+
+Evidence: `benchmark/README.md`, `benchmark/fpm-sizing.md`, `docs/performance/`, `scripts/performance/`.
+
+Commits: `e2f758392`, `bc480cc33`, `ff8f62ac8`, `08149bac3`.
+
+### 17.2 Phase 1 — Build and runtime
+
+- Enabled and configured OPcache in the release image; added real runtime verification and environment-specific invalidation/restart handling.
+- Enabled esbuild `--minify` for both application bundles; retained deterministic generated assets, metafiles, composition reports, and a 2% bundle-growth budget.
+- Cleaned the Docker build context and pinned reviewed build/test inputs and PECL extension versions. The igbinary pin uses `3.2.17RC1` for PHP 8.5 compatibility.
+- Added health/readiness behavior without a live-model dependency.
+- Tested cold, warm, gzip, identity, conditional 304, ETag, cache lifetime, matching decompressed content, and exactly one `Vary: Accept-Encoding` header on static responses. The release integration discovers the actual versioned asset URL instead of assuming development `0.0.0` URLs.
+
+Final build measurements: application JS 463,701 raw / 115,383 gzip bytes; admin JS 116,919 / 17,526; application/admin CSS each 85,825 / 16,547. These are local build measurements, not universal network-transfer claims.
+
+Commits: `4ea2139f5`, `ec0b7df39`, `ca0c7d40c`.
+
+### 17.3 Phase 2 — FPM sizing and extensions
+
+- Compared 8, 16, and 30 workers under mail-only, AI-only, and combined synthetic workloads with identical 2-CPU / 1-GiB / 512-PID limits.
+- Provisionally retained 30 workers for the observed p95/backlog priority. At AI concurrency 30, pooled p95 was 520.12 ms at 30 workers, 688.17 ms at 16, and 1,067.24 ms at 8. However, 16 workers had better AI-30 throughput (67.92 versus 54.09 req/s) and p99 (703.93 versus 1,710.90 ms) and lower memory.
+- This is not a universal production sizing guarantee. The complete tradeoff matrix and sampling limitations are in `benchmark/fpm-sizing.md`.
+- Reviewed trusted-proxy handling and kept FPM, its status endpoint, and the Rust prepare/streaming internals on loopback/private listeners. Tests reject spoofed direct and forwarded client addresses.
+- Retained LESS, Imagick, GD, and optional extensions absent evidence that removal is compatible. Added a restrictive ImageMagick policy and safer decoder error handling rather than claiming undocumented feature loss.
+
+Commit: `d5d51ac61` includes runtime/storage changes; `098ad08fd` contains the OPcache/image-decoder work.
+
+### 17.4 Phase 3 — Safe maintenance
+
+- Wired asynchronous `AppDelayStart` invocation into the TypeScript mailbox startup without blocking interactive startup.
+- Repaired shared PHP maintenance scheduling with independent retryable schedules, locking/concurrency safeguards, actual storage paths, and safe UID/GID behavior.
+- Preserved at least 48 hours of temporary draft attachments and the configured session/token retention behavior.
+- Added exact-path, symlink, active-data, and SQLite safety tests. Maintenance never directly deletes `.wal`, `.shm`, or rollback journals and refuses unsafe root execution.
+- Added optional one-shot CLI maintenance and persistent-volume-aware verification.
+
+The full standalone maintenance suite passed 87 assertions on both PHP 8.2.35 and 8.5.12; the separate root-refusal test passed four assertions on each version.
+
+Commit: `d5d51ac61`.
+
+### 17.5 Phase 4 — PHP AI hardening and privacy boundaries
+
+- Hardened the existing PHP streaming endpoint with server-side consent/feature checks, request/body/schema bounds, bounded reads, controlled errors, and terminal SSE completion semantics.
+- Fixed parsing across arbitrary byte/line/CRLF/LF boundaries, malformed JSON, reasoning tags, EOF without `done`, cancellation, reader release, upstream disconnects, and final-block handling.
+- Prevented automatic replay of an ambiguous provider request and added timeout, cancellation, slow-client, failure, and mock-provider tests.
+- Removed sensitive request values from logs; tests cover provider keys, service credentials, cookies, CSRF tokens, prompts, mail content, and reasoning markers.
+- Kept provider Zero Data Retention separate from local implementation behavior. The Rust sidecar does not enforce or prove a provider's contractual ZDR policy.
+
+The AI contract suite passed 359 assertions; the targeted service-privacy suite passed 89 assertions. Both targeted suites and repository tests were executed on PHP 8.2 and 8.5. The complete standalone matrix result is listed in §17.9.
+
+Commits: `4a49c3c8f`, `a6ab8f5f0`.
+
+### 17.6 Phase 5 — Optional Rust sidecar
+
+- Implemented `crates/snappy-ai-proxy` with Axum/Tokio using “Prepare in PHP, Stream in Rust”.
+- PHP performs authentication, consent, feature, draft-context, and provider-secret preparation over a loopback-only internal RPC. The public internal-prepare route returns 404.
+- Rust receives only the prepared bounded request, applies concurrency/queue/body bounds, backpressure, cancellation and idle/total timeouts, normalizes provider failures, and strips reasoning content.
+- Added `/api/ai/stream` and authenticated AppData capability discovery. Missing, invalid, withdrawn, or unhealthy capability retains the existing PHP route. A failed Rust request is never automatically replayed through PHP.
+- Rust is disabled by default. PHP-only installations and default containers need no Rust process; 386 intentionally refuses Rust enablement.
+- Added unprivileged execution, no mail-data read access, disabled core dumps, environment allowlisting, loopback ports, prefix-deployment tests, Supervisor restart/stop recovery, and explicit PHP/Rust route rollback.
+
+The final real PHP/Nginx/Rust/Supervisor/mock-provider integration passed 145 assertions. It covers static caching, authentication/authorization, prefix routing, secrets/log privacy, malformed streams, cancellation, bounded concurrency, slow clients, provider failure, no replay, health/capability withdrawal, process restart, unprivileged execution, and PHP fallback.
+
+Commits: `ce8dce25a`, `a5ef8a626`, `ec0b7df39`.
+
+### 17.7 Phase 6 — Frontend runtime and browser verification
+
+- Added poll overlap prevention, abort handling, jittered exponential failure backoff, account-generation guards, and deferred/coalesced startup work.
+- Added keyed/incremental list rendering and bounded account-scoped caches with logout/account-change cleanup.
+- Added bounded shared fetch/image concurrency and streaming image-size enforcement; preserved the sandboxed scriptless letter iframe.
+- Added reusable Chrome Headless tests for desktop/mobile login, folders, list/read, HTML sanitization, drafts, settings/admin, account switching, logout/reauthentication, attachment HTTP responses, cold/warm cache, per-account/global assistant disablement, and fixture restoration.
+- Browser metrics include LCP, CLS, long tasks, Event Timing latency, actual Chrome compile/evaluation trace events, bytes, visible DOM, CDP counters, and GC heap. Event Timing is labeled as a short-session INP approximation, not field INP.
+- Fixed harness synchronization around dialog close, asynchronously refreshed account settings, response waits, and preservation of primary versus cleanup errors. Both account-switch directions and reader invalidation passed.
+
+Final functional browser run: 12 scenarios passed and one was explicitly unverified. The unverified scenario is file saving: raw attachment HTTP 200, 158 bytes, and PNG signature passed, but Chrome canceled both application downloads and the local `data:` control. No successful download is claimed.
+
+Soak evidence: eight sequential 225-second Chrome sessions totaled 1,806,560 ms (30 minutes 6.56 seconds), with 184 iterations/refreshes, 368 message navigations, 40 logins, zero AI-stream requests, and zero external-origin requests. This was not one uninterrupted browser session. Each interval passed the visible-DOM/document/post-GC-heap assertions. The harness nevertheless records a large CDP total-node increase; see §17.10 rather than claiming leak-free behavior.
+
+Frontend `npx tsc --noEmit`, all 15 Node tests, `npm run build`, and `npm run bundle:check` passed.
+
+Evidence: `plugins/ai-copilot/dev/browser-test.mjs`, `plugins/ai-copilot/dev/shots/browser-acceptance-results.json`, `plugins/ai-copilot/dev/shots/browser-soak-results.json`.
+
+Commits: `a5ef8a626`, `9cf833570`, plus the final aligned-soak baseline correction committed with this record.
+
+### 17.8 Phase 7 — Release, updater, upgrade, and rollback
+
+- Corrected fork release tags to exact `v<package.json.version>` matching and restricted publishing to `ghcr.io/zfzfg/snappymail`.
+- Added pinned CI inputs, UI drift/build/budget checks, PHP 8.2/8.5 tests, archive checks, Rust tests, real HTTP integration, and optional-Rust/PHP-only image variants.
+- Disabled upstream core/plugin update channels by default. A deliberately configured channel requires controlled HTTPS validation; no upstream URL is inherited silently.
+- Hardened `cli/upgrade.sh` for explicit HTTPS archives, SHA-256 verification, backups, Alpine/BusyBox tools, and supported Wget implementations.
+- Added actual versioned fresh-install, previous-fork upgrade, immutable rollback, persistent-data, asset-version, OPcache-invalidation, PHP-only archive, and PHP/Rust route drills.
+
+Executed final-image acceptance on local linux/AMD64 with PHP 8.5.12. Structure tests passed 2/2; the final integrated runtime acceptance passed. Fresh install and `2.38.2.1 → 3.0.0` upgrade/rollback passed with persistent configuration/data, unchanged admin credential, stopped-volume backups, version-clean OPcache, PHP SSE, Rust rollout, and PHP rollback.
+
+| Artifact | Current 3.0.0 | Previous fork 2.38.2.1 |
+| --- | --- | --- |
+| Local image ID | `30ad2c602c8e96fdb665aaeb9b0faa76fa0ca8d73fb68f5713809146fdf0e48c` | `f75c813f3e9a26000e185bd845f7898c8398e87ab0ed1baea561a7184794f235` |
+| Release TAR SHA-256 | `1882b240ce200c7f1fd6621bbf914a492c8d1f23cce41afee81bfd47e6afe2c8` | `4753a75bcc6d6c7aee6faaeb38b9f8089395c5365325f39692b7ce620455141a` |
+| Saved image archive SHA-256 | `01a555e01c948504192e73758c2fc1188f57e519e4235ebf8a475328b608ad15` | `a833560d358b260389585ffb48e8049ccf90d24aaa725e758ab7d33110dd374e` |
+
+These are local immutable IDs/archives, not GHCR digests. The previous baseline was built from actual fork tag `v2.38.2.1`, commit `208f1c7298e5fc2f99cfeae97570d5fe04c3c48b`. No historical registry digest was invented.
+
+Commits: `505b06813`, `b1116aeb3`, `5fa8e7c9f`, `eef3e0409`, `a4f7344a3`, `841e92eb5`.
+
+### 17.9 Runtime and supply-chain evidence
+
+- OPcache on PHP 8.5.12/linux-AMD64: configured 64 MiB and 4,000 files; compiled 1,032 production files with zero failures; 20,366,088 bytes used, 46,742,776 bytes free, initially zero wasted bytes. Warm hits increased 41 → 491, misses stayed at 1,033, and restarts stayed at zero. Timestamp and explicit invalidation served the new fixture generation.
+- Full standalone PHP matrix: all 15 test files completed on PHP 8.2.35 and 8.5.12. SSO, SSRF, SASL, cryptography, S/MIME, privacy, repository, storage, and remaining tests passed. Generic CLI images without Imagick explicitly skip that image test.
+- Imagick release-runtime acceptance: 74 assertions passed, including malformed input and a 2048×2048 PNG. The large-image native peak was 167,251,968 bytes with 0.125 s CPU / 0.125 s elapsed in this environment. Attacker-controlled decoder exception metadata is no longer retained or exposed.
+- Rust supply chain: 151 locked dependencies, zero RustSec vulnerabilities/warnings; cargo-deny advisories, licenses, bans, and sources passed. License evidence covers 136 crates. Only documented non-blocking duplicate-version warnings remain for `base64`, `getrandom`, and `windows-sys`. Pinned `cargo-audit` 0.22.2 and `cargo-deny` 0.20.2 are SHA-256 verified.
+- Runtime versions observed in the rebuilt development image: PHP 8.5.12, APCu 5.1.28, igbinary 3.2.17RC1, Redis 6.3.0, Imagick 3.8.1, GnuPG 1.5.4, and OPcache 8.5.12.
+
+Evidence: `.docker/release/test/runtime/`, `.docker/release/test/upgrade/`, `build/local/phase13-final-build-and-test.log`, `build/local/phase13-final-php-only.log`, `build/local/release/rust-supply-chain/`.
+
+Commits: `098ad08fd`, `b8549ac7a`, `8e24bde37`, `bd61562e5`.
+
+### 17.10 Explicitly open or unverified acceptance limits
+
+- **Multi-architecture execution:** the ARM64/386 verification run was interrupted before completion. Local AMD64 evidence does not prove those architectures. CI retains architecture-specific runtime gates, but no multi-architecture manifest is published or approved by this record.
+- **Staging/production canary:** not performed. No production traffic, real provider, production IMAP/SMTP, or published GHCR rollback digest is claimed.
+- **File saving:** unverified because both application downloads and the local Chrome control were canceled by the browser environment. Raw attachment delivery itself passed.
+- **Memory interpretation:** visible DOM remained 4,513 → 4,514 nodes in each valid soak interval and documents were 2 → 3, while post-GC heap was approximately 2.2 → 3.2 MiB. CDP total nodes increased 7,140 → 93,537 consistently in each 23-iteration interval. This requires detached-node ownership analysis; no leak-free or universal memory-saving claim is made.
+- **Soak shape:** the 30-minute browser soak was eight sequential sessions, not a single continuous session. Controlled mock streaming was verified separately in the Phase 5/integration suites; no live model was used.
+- **Image compatibility:** WebP/AVIF decoders are unavailable in the inspected Alpine runtime. Retaining Imagick does not establish support for every format/platform. The PHP-only archive drill used the final image's PHP 8.5.12 runtime; every Apache/Nginx/Nextcloud/ownCloud environment was not exercised.
+- **Privacy inventory:** `docs/performance/privacy-inventory-template.md` remains explicitly a template, not a completed compliance inventory. Existing summary/quick-reply caches, sessions, diagnostics, retention owners, and all production paths still require deployment-specific review. No local no-persistence or provider-ZDR guarantee is made.
+- **External CI:** the committed GitHub workflow was not itself executed or published from this local run. Its future architecture gates do not substitute for the interrupted local verification.
+
+Accordingly, the implementation and local AMD64/synthetic acceptance work is recorded, but the complete cross-environment definition of done in §16 is not claimed.
