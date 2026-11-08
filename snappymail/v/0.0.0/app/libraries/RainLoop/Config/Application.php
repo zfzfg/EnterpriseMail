@@ -270,7 +270,11 @@ Default is "site=same-origin;site=none"')
 				'language'     => array('en', 'Admin Panel interface language'),
 			),
 
-			'ssl' => array(
+			'repository' => array(
+					'url' => array('', 'HTTPS base URL of a reviewed fork package repository. Empty disables remote core and plugin packages.')
+				),
+
+				'ssl' => array(
 				'verify_certificate'  => array(true, 'Require verification of SSL certificate used.'),
 				'allow_self_signed'   => array(false, 'Allow self-signed certificates. Requires verify_certificate.'),
 				'security_level'      => array(1, 'https://www.openssl.org/docs/man1.1.1/man3/SSL_CTX_set_security_level.html'),

@@ -4,8 +4,30 @@ namespace SnappyMail;
 
 abstract class Repository
 {
-	// snappyMailRepo
-	const BASE_URL = 'https://snappymail.eu/repository/v2/';
+	/**
+	 * Remote core and plugin packages are opt-in for this independently released fork.
+	 * An empty URL never contacts upstream and leaves installed packages untouched.
+	 */
+	private static function baseUrl() : string
+	{
+		$sUrl = \trim((string) \RainLoop\Api::Config()->Get('repository', 'url', ''));
+		if ('' === $sUrl) {
+			return '';
+		}
+
+		$aParts = \parse_url($sUrl);
+		if (!\is_array($aParts)
+		 || 'https' !== \strtolower($aParts['scheme'] ?? '')
+		 || empty($aParts['host'])
+		 || isset($aParts['user']) || isset($aParts['pass'])
+		 || isset($aParts['query']) || isset($aParts['fragment'])
+		 || \preg_match('/[\x00-\x20\x7f]/', $sUrl)
+		) {
+			throw new \RuntimeException('Remote repository must be an HTTPS URL without credentials, query, or fragment');
+		}
+
+		return \rtrim($sUrl, '/') . '/';
+	}
 
 	private static function get(string $path) : string
 	{
@@ -15,7 +37,7 @@ abstract class Repository
 		$oHTTP->verify_peer = \RainLoop\Api::Config()->Get('labs', 'curl_verify_peer', true);
 		$oHTTP->max_response_kb = 0;
 		$oHTTP->timeout = 15; // timeout in seconds.
-		$oResponse = $oHTTP->doRequest('GET', static::BASE_URL . $path);
+		$oResponse = $oHTTP->doRequest('GET', static::baseUrl() . $path);
 		if (!$oResponse) {
 			throw new \Exception('No HTTP response from repository');
 		}
@@ -43,7 +65,7 @@ abstract class Repository
 		$oHTTP->timeout = 15; // timeout in seconds.
 		$oHTTP->streamBodyTo($pDest);
 		\set_time_limit(120);
-		$oResponse = $oHTTP->doRequest('GET', static::BASE_URL . $path);
+		$oResponse = $oHTTP->doRequest('GET', static::baseUrl() . $path);
 		\fclose($pDest);
 		if (!$oResponse) {
 			\unlink($sTmp);
@@ -68,12 +90,16 @@ abstract class Repository
 	{
 		$bReal = false;
 		$aRep = null;
+		$sBaseUrl = static::baseUrl();
+		if ('' === $sBaseUrl) {
+			return [];
+		}
 
 		$sRepoFile = 'packages.json';
 
 		$oCache = \RainLoop\Api::Actions()->Cacher();
 
-		$sCacheKey = '/RepositoryCache/Repo/' . static::BASE_URL . '/File/' . $sRepoFile;
+		$sCacheKey = '/RepositoryCache/Repo/' . $sBaseUrl . '/File/' . $sRepoFile;
 		$sRep = $oCache->Get($sCacheKey);
 		$iRepTime = $sRep ? $oCache->GetTimer($sCacheKey) : 0;
 
@@ -141,6 +167,9 @@ abstract class Repository
 	 */
 	public static function getLatestCoreInfo()
 	{
+		if ('' === static::baseUrl()) {
+			return null;
+		}
 		\RainLoop\Api::Actions()->IsAdminLoggined();
 		$sRep = static::get('core.json');
 		return $sRep ? \json_decode($sRep, false, 3, JSON_THROW_ON_ERROR) : null;
@@ -156,7 +185,8 @@ abstract class Repository
 
 	public static function canUpdateCore() : bool
 	{
-		return \version_compare(APP_VERSION, '2.0', '>')
+		return '' !== static::baseUrl()
+			&& \version_compare(APP_VERSION, '2.0', '>')
 			&& \is_writable(\dirname(APP_VERSION_ROOT_PATH))
 			&& \is_writable(APP_INDEX_ROOT_PATH . 'index.php')
 			&& \RainLoop\Api::Config()->Get('admin_panel', 'allow_update', false);
