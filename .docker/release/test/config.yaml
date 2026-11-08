@@ -21,6 +21,15 @@ commandTests:
           nc -vz 127.0.0.1 8081
           test -z "`pidof snappy-ai-proxy || true`"
           test ! -e /etc/supervisor.d/snappy-ai-proxy.ini
+          if [ "$(php -r 'echo PHP_INT_SIZE;')" = 4 ]; then
+            test ! -e /usr/local/bin/snappy-ai-proxy
+            if SNAPPY_AI_PROXY_ENABLED=true /entrypoint.sh > /tmp/rust-refusal 2>&1; then
+              echo '386 image unexpectedly accepted Rust mode' >&2
+              exit 1
+            fi
+          else
+            test -x /usr/local/bin/snappy-ai-proxy
+          fi
           wget -S -T 3 -O /dev/null http://127.0.0.1:8888
           wget -q -T 3 -O /tmp/health-response http://127.0.0.1:8888/healthz
           test ! -s /tmp/health-response

@@ -3,115 +3,133 @@ name: docker
 on:
   push:
     tags:
-    - 'v2.*'
+      - 'v*.*.*'
 
-# This is needed to push to GitHub Container Registry. See https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: ghcr-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  release-input:
+    runs-on: ubuntu-24.04
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .node-version
+      - name: Require tag to match the reviewed package version
+        run: node -e 'const expected = `v${require("./package.json").version}`; if (process.env.GITHUB_REF_NAME !== expected) { throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match ${expected}`); }'
 
-    # This step generates the docker tags
-    - name: Docker meta
-      id: meta
-      uses: docker/metadata-action@v4
-      env:
-        # This env var ensures {{sha}} is a real commit SHA for type=ref,event=pr
-        DOCKER_METADATA_PR_HEAD_SHA: 'true'
-      with:
-        images: |
-          djmaze/snappymail
-          ghcr.io/${{ github.repository }}
-        # type=ref,event=branch generates tag(s) on branch only. E.g. 'master', 'master-abc0123'
-        # type=ref,event=tag generates tag(s) on tags only. E.g. 'v0.0.0', 'v0.0.0-abc0123', and 'latest'
-        tags: |
-          type=ref,event=branch
-          type=ref,event=tag
-        # The rest of the org.opencontainers.image.xxx labels are dynamically generated
-        labels: |
-          org.opencontainers.image.description=SnappyMail
-          org.opencontainers.image.licenses=AGPLv3
+  verify:
+    uses: ./.github/workflows/ci.yml
 
-    # See: https://github.com/docker/build-push-action/blob/v2.6.1/docs/advanced/cache.md#github-cache
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v2
+  runtime:
+    needs: [release-input, verify]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64 }
+          - { arch: arm64, platform: linux/arm64 }
+          - { arch: '386', platform: linux/386 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build architecture image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: .docker/release/Dockerfile
+          platforms: ${{ matrix.platform }}
+          pull: true
+          push: false
+          load: true
+          tags: snappymail:release-test-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=SnappyMail fork with TypeScript UI and optional AI streaming
+            org.opencontainers.image.licenses=AGPLv3
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,scope=release-${{ matrix.arch }},mode=max
+      - name: Test actual HTTP runtime
+        run: .docker/release/test/test.sh snappymail:release-test-${{ matrix.arch }}
+      - name: Record tested image metadata
+        run: |
+          mkdir -p build/local/release
+          docker image inspect snappymail:release-test-${{ matrix.arch }} > build/local/release/image-${{ matrix.arch }}.json
+          docker history --no-trunc snappymail:release-test-${{ matrix.arch }} > build/local/release/image-${{ matrix.arch }}-history.txt
+      - name: Upload tested image metadata
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: release-image-metadata-${{ matrix.arch }}
+          path: build/local/release/
+          if-no-files-found: error
+          retention-days: 14
 
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
-
-    - name: Login to Docker Hub registry
-      if: startsWith(github.ref, 'refs/tags/')  # Login only on tags
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Login to GitHub Container Registry
-      if: startsWith(github.ref, 'refs/tags/')  # Login only on tags
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    # See: https://github.com/docker/buildx/issues/59
-    - name: Build
-      id: build
-      uses: docker/build-push-action@v3
-      with:
-        context: '.'
-        file: ./.docker/release/Dockerfile
-        platforms: linux/amd64
-        push: false
-        load: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-    - name: Docker images
-      run: |
-        docker images
-
-    - name: Test
-      run: |
-        TAG=$( echo "${{ steps.meta.outputs.tags }}" | head -n1 )
-        .docker/release/test/test.sh "$TAG"
-
-    - name: Build and push
-      id: build-and-push
-      uses: docker/build-push-action@v3
-      with:
-        context: '.'
-        file: ./.docker/release/Dockerfile
-        # TODO: Add more arches?
-        # platforms: linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64,linux/s390x
-        platforms: linux/386,linux/amd64,linux/arm64
-        push: ${{ startsWith(github.ref, 'refs/tags/') }}  # Push only on tags
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-    # Temp fix
-    # https://github.com/docker/build-push-action/issues/252
-    # https://github.com/moby/buildkit/issues/1896
-    - name: Move cache
-      run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+  publish:
+    needs: runtime
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Login to fork GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate fork-only GHCR metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.description=SnappyMail fork with TypeScript UI and optional AI streaming
+            org.opencontainers.image.licenses=AGPLv3
+      - name: Publish tested architectures to fork GHCR
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: .docker/release/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/386
+          pull: true
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha,scope=release-amd64
+            type=gha,scope=release-arm64
+            type=gha,scope=release-386
+      - name: Record published GHCR digest
+        run: |
+          mkdir -p build/local/release
+          printf '%s\n' '${{ steps.build.outputs.digest }}' > build/local/release/ghcr-digest.txt
+          printf '%s\n' '${{ steps.meta.outputs.tags }}' > build/local/release/ghcr-tags.txt
+      - name: Upload publication metadata
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ghcr-publication-metadata
+          path: build/local/release/
+          if-no-files-found: error
+          retention-days: 30

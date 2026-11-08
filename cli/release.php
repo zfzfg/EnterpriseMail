@@ -4,7 +4,11 @@ define('ROOT_DIR', dirname(__DIR__));
 chdir(ROOT_DIR);
 require ROOT_DIR . '/snappymail/v/0.0.0/app/libraries/snappymail/tar.php';
 
-$options = getopt('', ['aur','docker','plugins','plugins-all','skip-gulp','debian','nextcloud','owncloud','cpanel','sign']);
+$options = getopt('', ['aur','docker','plugins','plugins-all','frontend-dist','skip-gulp','debian','nextcloud','owncloud','cpanel','sign']);
+if (isset($options['skip-gulp'])) {
+	fwrite(STDERR, "--skip-gulp is deprecated; use --frontend-dist to package the committed TypeScript build.\n");
+	$options['frontend-dist'] = true;
+}
 
 if (isset($options['plugins']) || isset($options['plugins-all'])) {
 	require(ROOT_DIR . '/build/plugins.php');
@@ -48,7 +52,7 @@ $tgz_destination = "{$tar_destination}.gz";
 @unlink($tar_destination);
 @unlink($tgz_destination);
 
-if (!isset($options['skip-gulp'])) {
+if (!isset($options['frontend-dist'])) {
 	$gulp = trim(shell_exec('which gulp'));
 	if (!$gulp) {
 		exit('gulp not installed, run as root: npm install --global gulp-cli');
@@ -123,9 +127,6 @@ if ($options['docker']) {
 	$tar->buildFromDirectory('./', "@snappymail/v/{$package->version}@");
 }
 
-//$zip->addFile('cli/upgrade.sh');
-//$tar->addFile('cli/upgrade.sh');
-
 $zip->addFile('data/.htaccess');
 $tar->addFile('data/.htaccess');
 
@@ -159,6 +160,10 @@ $tar->addFromString('index.php', $index);
 
 $zip->addFile('README.md');
 $tar->addFile('README.md');
+$zip->addFile('docs/release.md');
+$tar->addFile('docs/release.md');
+$zip->addFile('cli/upgrade.sh');
+$tar->addFile('cli/upgrade.sh');
 
 $zip->close();
 if ($tar instanceof PharData) {
@@ -212,7 +217,7 @@ if ($options['aur']) {
 	pkgdesc = modern PHP webmail client
 	pkgver = '.$package->version.'
 	pkgrel = 1
-	url = https://github.com/the-djmaze/snappymail
+	url = https://github.com/zfzfg/snappymail
 	arch = any
 	license = AGPL3
 	makedepends = php
@@ -223,7 +228,7 @@ if ($options['aur']) {
 	optdepends = mariadb: storage backend for contacts
 	optdepends = php-pgsql: storage backend for contacts
 	optdepends = php-sqlite: storage backend for contacts
-	source = snappymail-'.$package->version.'.tar.gz::https://github.com/the-djmaze/snappymail/archive/v'.$package->version.'.tar.gz
+	source = snappymail-'.$package->version.'.tar.gz::https://github.com/zfzfg/snappymail/archive/v'.$package->version.'.tar.gz
 	source = snappymail.sysusers
 	source = snappymail.tmpfiles
 	b2sums = '.implode("\n	b2sums = ", $b2sums).'
@@ -235,6 +240,7 @@ pkgname = snappymail
 	if (is_file($file)) {
 		$PKGBUILD = file_get_contents($file);
 		$PKGBUILD = preg_replace('/pkgver=[0-9.]+/', "pkgver={$package->version}", $PKGBUILD);
+		$PKGBUILD = preg_replace('#^url="https://github\.com/[^"]+/snappymail"$#m', 'url="https://github.com/zfzfg/snappymail"', $PKGBUILD);
 		$PKGBUILD = preg_replace('/b2sums=\\([^)]+\\)/s', "b2sums=('".implode("'\n        '", $b2sums)."')", $PKGBUILD);
 		file_put_contents($file, $PKGBUILD);
 	}

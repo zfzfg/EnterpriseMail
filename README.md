@@ -73,6 +73,12 @@ Der Admin ist dieselbe Token-Datei, dicht, unter `/?admin`. `ui/src/admin.ts` me
 - Konfiguration und Postfachdaten liegen unter `data/` bzw. im Container unter `/var/lib/snappymail`. Beides ist nicht Teil des Git-Baums.
 - Designs Slate und SlateDark liegen nicht in diesem Repo.
 
+## Release und Aktualisierung
+
+Container-Releases dieses Forks liegen ausschließlich unter `ghcr.io/zfzfg/snappymail`; ein Tag muss exakt zur Version in `package.json` passen. Entfernte Core- und Plugin-Updates sind standardmäßig ausgeschaltet und benötigen eine ausdrücklich konfigurierte, geprüfte HTTPS-Quelle. PHP-only bleibt für Archive, klassische PHP-Server und als Standardpfad im Container vollständig unterstützt. Das 386-Image ist immer PHP-only; AMD64 und ARM64 können den optionalen Rust-Sidecar aktivieren.
+
+Der Ablauf für CI, Archive, Shell-Upgrades, OPcache-Neustarts, Canary und Rollback steht in [docs/release.md](docs/release.md). Fresh-Install-, Upgrade-, Rollback- und Ressourcenprüfungen müssen für jede Umgebung tatsächlich durchgeführt und protokolliert werden.
+
 ## Lizenz
 
 GNU Affero General Public License 3.0, Text in `LICENSE`.

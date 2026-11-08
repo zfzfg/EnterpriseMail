@@ -6,6 +6,7 @@ import http.cookiejar
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 import urllib.error
@@ -14,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-COMPOSE = os.environ.get('COMPOSE', 'docker-compose')
+COMPOSE = shlex.split(os.environ.get('COMPOSE', 'docker compose'))
 PROJECT = 'snappymail-phase5'
 APP = 'snappymail-phase5-app'
 PREFIX = 'snappymail-phase5-prefix'
@@ -47,7 +48,7 @@ def run(args, *, check_result=True, timeout=60):
 
 
 def dc(*args, check_result=True, timeout=60):
-    return run([COMPOSE, '-p', PROJECT, '-f', str(HERE / 'docker-compose.yml'), *args],
+    return run([*COMPOSE, '-p', PROJECT, '-f', str(HERE / 'docker-compose.yml'), *args],
                check_result=check_result, timeout=timeout)
 
 

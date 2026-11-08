@@ -12,7 +12,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/the-djmaze/snappymail.git"
+    "url": "https://github.com/zfzfg/snappymail.git"
   },
   "scripts": {
     "build:ui": "npm --prefix ui run build"
@@ -25,7 +25,7 @@
     }
   ],
   "bugs": {
-    "url": "https://github.com/the-djmaze/snappymail/issues"
+    "url": "https://github.com/zfzfg/snappymail/issues"
   },
   "keywords": [
     "webmail",

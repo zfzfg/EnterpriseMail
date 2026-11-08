@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM alpine:3.24.3 AS builder
+ARG TARGETARCH=amd64
+
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS builder
 RUN apk add --no-cache php85 php85-json php-phar php-zip
 WORKDIR /source
 COPY . .
@@ -14,8 +16,8 @@ RUN set -eux; \
     sed -i 's_^if.*rename.*snappymail.v.0.0.0.*$_if (!!system("mv snappymail/v/0.0.0 snappymail/v/{$package->version}")) {_' /tmp/release.php; \
     test "$(grep -Fxc "$replacement" /tmp/release.php)" = 1; \
     cp /tmp/release.php cli/release.php
-# Der Fork baut das Frontend vorab (npm --prefix ui run build) und committet static/; gulp/npm braucht es nicht.
-RUN php release.php --skip-gulp
+# Package the reviewed, committed TypeScript artifacts; CI proves they match ui/.
+RUN php release.php --frontend-dist
 RUN set -eux; \
     VERSION=$( ls build/dist/releases/webmail ); \
     ls -al build/dist/releases/webmail/$VERSION/snappymail-$VERSION.tar.gz; \
@@ -24,10 +26,11 @@ RUN set -eux; \
     find /snappymail -type d -exec chmod 550 {} \; ; \
     find /snappymail -type f -exec chmod 440 {} \; ; \
     find /snappymail/data -type d -exec chmod 750 {} \; ; \
-    # Remove unneeded files
-    rm -v /snappymail/README.md /snappymail/_include.php
+    # Keep operator documentation and in-place updater out of the web root.
+    rm -v /snappymail/README.md /snappymail/_include.php /snappymail/docs/release.md /snappymail/cli/upgrade.sh; \
+    rmdir /snappymail/docs /snappymail/cli
 
-FROM rust:1.93.0-alpine3.23 AS rust-builder
+FROM rust:1.93.0-alpine3.23@sha256:69d7b9d9aeaf108a1419d9a7fcf7860dcc043e9dbd1ab7ce88e44228774d99e9 AS rust-builder
 RUN apk add --no-cache musl-dev
 WORKDIR /build
 COPY crates/snappy-ai-proxy/Cargo.toml crates/snappy-ai-proxy/Cargo.lock ./
@@ -35,7 +38,7 @@ COPY crates/snappy-ai-proxy/src ./src
 RUN cargo build --release --locked
 
 # Inspired by the original Rainloop dockerfile from youtous on GitLab
-FROM php:8.5-fpm-alpine AS runtime
+FROM php:8.5-fpm-alpine@sha256:64535609509e0fd5c8529359e6b599a68ce42089defd565f7881efdae7687cea AS runtime
 
 # Install dependencies such as nginx
 RUN apk add --no-cache ca-certificates nginx supervisor bash
@@ -46,7 +49,7 @@ RUN apk add --no-cache ca-certificates nginx supervisor bash
 # apcu
 RUN set -eux; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    pecl install apcu; \
+    pecl install apcu-5.1.28; \
     docker-php-ext-enable apcu; \
     docker-php-source delete; \
     apk del .build-dependencies;
@@ -75,7 +78,7 @@ RUN set -eux; \
     apk add --no-cache gnupg gpgme; \
     apk add --no-cache --virtual .deps gpgme-dev; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    pecl install gnupg; \
+    pecl install gnupg-1.5.4; \
     docker-php-ext-enable gnupg; \
     docker-php-source delete; \
     apk del .build-dependencies; \
@@ -86,7 +89,7 @@ RUN set -eux; \
     apk add --no-cache imagemagick libgomp; \
     apk add --no-cache --virtual .deps imagemagick-dev; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    echo | pecl install imagick; \
+    echo | pecl install imagick-3.8.1; \
     docker-php-ext-enable imagick; \
     docker-php-source delete; \
     apk del .build-dependencies; \
@@ -123,9 +126,9 @@ RUN set -eux; \
     apk add --no-cache liblzf zstd-libs; \
     apk add --no-cache --virtual .deps zstd-dev; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    pecl install igbinary; \
+    pecl install igbinary-3.2.16; \
     docker-php-ext-enable igbinary; \
-    pecl install --configureoptions 'enable-redis-igbinary="yes" enable-redis-lzf="yes" enable-redis-zstd="yes"' redis; \
+    pecl install --configureoptions 'enable-redis-igbinary="yes" enable-redis-lzf="yes" enable-redis-zstd="yes"' redis-6.3.0; \
     docker-php-ext-enable redis; \
     docker-php-source delete; \
     apk del .build-dependencies; \
@@ -150,7 +153,7 @@ RUN set -eux; \
     apk add --no-cache libuuid; \
     apk add --no-cache --virtual .deps util-linux-dev; \
     apk add --no-cache --virtual .build-dependencies $PHPIZE_DEPS; \
-    pecl install uuid; \
+    pecl install uuid-1.3.0; \
     docker-php-ext-enable uuid; \
     docker-php-source delete; \
     apk del .build-dependencies; \
@@ -184,13 +187,11 @@ RUN set -eux; \
 COPY --chown=www-data:www-data --from=builder /snappymail /snappymail
 # Use a custom snappymail data folder
 RUN mv -v /snappymail/data /var/lib/snappymail;
-# Setup configs and the isolated, unprivileged streaming sidecar
+# Setup configs and the unprivileged account used by optional streaming.
 COPY --chown=root:root .docker/release/files /
-COPY --chown=root:root --from=rust-builder /build/target/release/snappy-ai-proxy /usr/local/bin/snappy-ai-proxy
 RUN set -eux; \
     addgroup -S snappy-ai-proxy; \
     adduser -S -D -H -G snappy-ai-proxy -s /sbin/nologin snappy-ai-proxy; \
-    chmod 755 /usr/local/bin/snappy-ai-proxy; \
     mkdir -p /etc/supervisor.d; \
     chown www-data:www-data /snappymail/include.php; \
     chmod 440 /snappymail/include.php; \
@@ -209,9 +210,20 @@ RUN set -eux; \
 # Verify the runtime filesystem, including the effective safe rollout settings.
 RUN php -r 'if (!extension_loaded("Zend OPcache")) { fwrite(STDERR, "OPcache is not loaded\n"); exit(1); } foreach (["opcache.enable" => true, "opcache.enable_cli" => false, "opcache.validate_timestamps" => true, "opcache.save_comments" => true] as $name => $expected) { if (filter_var(ini_get($name), FILTER_VALIDATE_BOOL) !== $expected) { fwrite(STDERR, "Unexpected $name setting\n"); exit(1); } }'
 
+# The official Rust Alpine image has no 386 manifest. Keep 386 explicitly
+# PHP-only instead of silently dropping it or pretending the sidecar exists.
+FROM runtime AS runtime-with-ai
+COPY --chown=root:root --from=rust-builder /build/target/release/snappy-ai-proxy /usr/local/bin/snappy-ai-proxy
+RUN chmod 755 /usr/local/bin/snappy-ai-proxy
+
+FROM runtime-with-ai AS runtime-amd64
+FROM runtime-with-ai AS runtime-arm64
+FROM runtime AS runtime-386
+FROM runtime-${TARGETARCH} AS selected-runtime
+
 # Reset inherited image metadata (php:fpm exposes 9000) without changing the tested filesystem.
 FROM scratch AS final
-COPY --from=runtime / /
+COPY --from=selected-runtime / /
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PHP_INI_DIR=/usr/local/etc/php
 LABEL org.label-schema.description="SnappyMail webmail client image using nginx, php-fpm and an optional Rust sidecar on Alpine"

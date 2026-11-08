@@ -31,16 +31,13 @@
 1. Edit data/\_data_/\_default_/configs/application.ini
 2. Set `[cache] system_data` to Off
 
-**Release**
+**Release and verification**
 
-1. Install gzip
-2. Install brotli
-3. php release.php
-
-Options:
-* `php release.php --aur` = Build Arch Linux package
-* `php release.php --docker` = Build Docker instance
-* `php release.php --plugins` = Build plugins
+1. Use the Node version from `.node-version` and install with `npm ci --prefix ui`.
+2. Run `node --test ui/test/*.test.mjs`, `npm run typecheck --prefix ui`, `npm run build --prefix ui`, and `npm run bundle:check --prefix ui`.
+3. Run `bash scripts/ci/php.sh` and `bash scripts/ci/package.sh` with the supported PHP runtimes.
+4. Package reviewed frontend artifacts deliberately with `php cli/release.php --frontend-dist`.
+5. Before tagging, follow `docs/release.md`: the tag must be exactly `v` plus `package.json.version`, every published image architecture must pass its runtime test, and fresh-install/upgrade/rollback evidence must be recorded. Images belong only in this fork's GHCR namespace.
 
 ---
 

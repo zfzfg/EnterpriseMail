@@ -3,91 +3,55 @@ name: docker-pr
 on:
   pull_request:
     branches:
-    - master
+      - master
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  runtime:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64 }
+          - { arch: arm64, platform: linux/arm64 }
+          - { arch: '386', platform: linux/386 }
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-
-    # This step generates the docker tags
-    - name: Docker meta
-      id: meta
-      uses: docker/metadata-action@v4
-      env:
-        # This env var ensures {{sha}} is a real commit SHA for type=ref,event=pr
-        DOCKER_METADATA_PR_HEAD_SHA: 'true'
-      with:
-        images: |
-          djmaze/snappymail
-          ghcr.io/${{ github.repository }}
-        # type=ref,event=pr generates tag(s) on PRs only. E.g. 'pr-123', 'pr-123-abc0123'
-        tags: |
-          type=ref,event=pr
-          type=ref,suffix=-{{sha}},event=pr
-        # The rest of the org.opencontainers.image.xxx labels are dynamically generated
-        labels: |
-          org.opencontainers.image.description=SnappyMail
-          org.opencontainers.image.licenses=AGPLv3
-
-    # See: https://github.com/docker/build-push-action/blob/v2.6.1/docs/advanced/cache.md#github-cache
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v2
-
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
-
-    # See: https://github.com/docker/buildx/issues/59
-    - name: Build
-      id: build
-      uses: docker/build-push-action@v3
-      with:
-        context: '.'
-        file: ./.docker/release/Dockerfile
-        platforms: linux/amd64
-        push: false
-        load: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-    - name: Docker images
-      run: |
-        docker images
-
-    - name: Test
-      run: |
-        TAG=$( echo "${{ steps.meta.outputs.tags }}" | head -n1 )
-        .docker/release/test/test.sh "$TAG"
-
-    - name: Build all archs
-      uses: docker/build-push-action@v3
-      with:
-        context: '.'
-        file: ./.docker/release/Dockerfile
-        platforms: linux/386,linux/amd64,linux/arm64
-        push: false
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-    # Temp fix
-    # https://github.com/docker/build-push-action/issues/252
-    # https://github.com/moby/buildkit/issues/1896
-    - name: Move cache
-      run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build architecture image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: .docker/release/Dockerfile
+          platforms: ${{ matrix.platform }}
+          pull: true
+          push: false
+          load: true
+          tags: snappymail:ci-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=SnappyMail fork with TypeScript UI and optional AI streaming
+            org.opencontainers.image.licenses=AGPLv3
+          cache-from: type=gha,scope=runtime-${{ matrix.arch }}
+          cache-to: type=gha,scope=runtime-${{ matrix.arch }},mode=max
+      - name: Test actual HTTP runtime
+        run: .docker/release/test/test.sh snappymail:ci-${{ matrix.arch }}
+      - name: Record image metadata
+        run: |
+          mkdir -p build/local/release
+          docker image inspect snappymail:ci-${{ matrix.arch }} > build/local/release/image-${{ matrix.arch }}.json
+          docker history --no-trunc snappymail:ci-${{ matrix.arch }} > build/local/release/image-${{ matrix.arch }}-history.txt
+      - name: Upload architecture image metadata
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: image-metadata-${{ matrix.arch }}
+          path: build/local/release/
+          if-no-files-found: error
+          retention-days: 14

@@ -5,7 +5,7 @@ WORKDIR /app/code
 
 # If you change the extraction below, be sure to test on scaleway
 VERSION=3.0.0
-RUN wget https://github.com/the-djmaze/snappymail/releases/download/v${VERSION}/snappymail-${VERSION}.zip -O /tmp/snappymail.zip && \
+RUN wget https://github.com/zfzfg/snappymail/releases/download/v${VERSION}/snappymail-${VERSION}.zip -O /tmp/snappymail.zip && \
     unzip /tmp/snappymail.zip -d /app/code && \
     rm /tmp/snappymail.zip && \
     find /app/code/snappymail -type d -exec chmod 755 {} \; && \

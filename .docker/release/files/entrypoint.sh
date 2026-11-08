@@ -10,6 +10,10 @@ UPLOAD_MAX_SIZE=${UPLOAD_MAX_SIZE:-25M}
 MEMORY_LIMIT=${MEMORY_LIMIT:-128M}
 SECURE_COOKIES=${SECURE_COOKIES:-true}
 SNAPPY_AI_PROXY_ENABLED=${SNAPPY_AI_PROXY_ENABLED:-false}
+if [ "$SNAPPY_AI_PROXY_ENABLED" = 'true' ] && [ ! -x /usr/local/bin/snappy-ai-proxy ]; then
+    echo '[ERROR] Rust streaming is unavailable on this architecture; use the default PHP-only mode' >&2
+    exit 1
+fi
 
 # The shared credential is inherited by PHP and Rust, never written to config or traced.
 if [ "$DEBUG" = 'true' ]; then

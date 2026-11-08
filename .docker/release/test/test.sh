@@ -7,4 +7,4 @@ echo "Testing image: $IMAGE"
 docker run --rm -i \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
     -v "$SCRIPT_DIR/config.yaml:/config.yaml:ro" \
-    gcr.io/gcp-runtimes/container-structure-test:latest test --image "$IMAGE" --config config.yaml
+    gcr.io/gcp-runtimes/container-structure-test@sha256:377f9a9bc00376b9fa6dc6a3a020dbe40e84ebe9481b71969aa3ff9d1c9ea17e test --image "$IMAGE" --config config.yaml
