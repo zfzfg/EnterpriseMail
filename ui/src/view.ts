@@ -247,6 +247,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     replySameFolder: false, attachmentLimit: 0, readReceipt: false, dsn: false, requireTLS: false, pgpSign: false, pgpEncrypt: false, gnupg: false
   };
   let composeIdentities: ComposeIdentity[] = [];
+  let lastListKey = "";
 
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
@@ -2005,6 +2006,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const moreBtn = shell?.querySelector("[data-action='more']") as HTMLButtonElement | null;
       const clearBtn = shell?.querySelector("[data-clear='list']") as HTMLButtonElement | null;
       const result = shell?.querySelector("#list-result") as HTMLElement | null;
+      const currentKey = rows.map((r) => r.uid).join(",");
+      const isFresh = Boolean(currentKey && currentKey !== lastListKey);
+      lastListKey = currentKey;
       if (box) {
         box.innerHTML = rows.map((row) => {
           const subject = row.subject || "(ohne Betreff)";
@@ -2016,7 +2020,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             ? `<button type="button" class="msg-thread${row.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row.uid}" aria-label="${esc(`${threadText} – ${subject}`)}" title="${esc(threadText)} (T)">${icon("thread")}<span>${row.threadCount}</span></button>`
             : "";
           return `${group}
-          <div class="msg-row${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}${row.unseen ? " unseen" : ""}">
+          <div class="msg-row${isFresh ? " entering" : ""}${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}${row.unseen ? " unseen" : ""}">
             <span class="unread-slot" aria-hidden="true">${row.unseen ? `<span class="unread-mark"></span>` : ""}</span>
             <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="Auswählen: ${esc(subject)}">
             <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" draggable="true" aria-current="${row.current ? "true" : "false"}">
@@ -2026,10 +2030,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <span class="peek">${esc(row.preview)}</span>
             </button>
             ${thread}
-            <div class="msg-actions">
-              <button type="button" class="msg-action" data-action="m-delete" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}: ${esc(subject)}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
-              <button type="button" class="msg-action" data-action="m-archive" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc(subject)}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
-              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc(subject)}" title="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+            <div class="msg-actions" role="toolbar" aria-label="Schnellaktionen">
+              <button type="button" class="msg-action msg-action-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc(subject)}" title="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
+              <button type="button" class="msg-action msg-action-archive" data-action="m-archive" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc(subject)}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="msg-action msg-action-delete" data-action="m-delete" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}: ${esc(subject)}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
             </div>
           </div>`;
         }).join("");
@@ -2088,6 +2092,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       shell?.classList.toggle("with-checks", visible);
     },
     setRefreshing(busy) {
+      if (busy) lastListKey = "";
       const button = shell?.querySelector("[data-action='m-refresh']") as HTMLButtonElement | null;
       if (!button) return;
       button.disabled = busy;

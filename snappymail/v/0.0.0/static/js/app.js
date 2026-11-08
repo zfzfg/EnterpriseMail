@@ -5481,6 +5481,7 @@ function createView(root3, actions) {
     gnupg: false
   };
   let composeIdentities = [];
+  let lastListKey = "";
   const wide = () => matchMedia("(min-width: 800px)").matches;
   const docked = () => matchMedia("(min-width: 1280px)").matches;
   function chooseDialog(title, text2, ok, alt = "", danger = true) {
@@ -7275,6 +7276,9 @@ function createView(root3, actions) {
       const moreBtn = shell?.querySelector("[data-action='more']");
       const clearBtn = shell?.querySelector("[data-clear='list']");
       const result = shell?.querySelector("#list-result");
+      const currentKey = rows2.map((r) => r.uid).join(",");
+      const isFresh = Boolean(currentKey && currentKey !== lastListKey);
+      lastListKey = currentKey;
       if (box) {
         box.innerHTML = rows2.map((row2) => {
           const subject = row2.subject || "(ohne Betreff)";
@@ -7282,7 +7286,7 @@ function createView(root3, actions) {
           const threadText = row2.threadCount ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung \xF6ffnen")}: ${row2.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row2.threadUnseen ? `, ${row2.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}` : "";
           const thread = row2.threadCount ? `<button type="button" class="msg-thread${row2.threadUnseen ? " unseen" : ""}" data-action="m-thread" data-ref="${row2.uid}" aria-label="${esc9(`${threadText} \u2013 ${subject}`)}" title="${esc9(threadText)} (T)">${icon("thread")}<span>${row2.threadCount}</span></button>` : "";
           return `${group2}
-          <div class="msg-row${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}${row2.unseen ? " unseen" : ""}">
+          <div class="msg-row${isFresh ? " entering" : ""}${row2.threadCount ? " has-thread" : ""}${row2.checked ? " checked" : ""}${row2.deleted ? " deleted" : ""}${row2.unseen ? " unseen" : ""}">
             <span class="unread-slot" aria-hidden="true">${row2.unseen ? `<span class="unread-mark"></span>` : ""}</span>
             <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row2.uid}"${row2.checked ? " checked" : ""} aria-label="Ausw\xE4hlen: ${esc9(subject)}">
             <button type="button" class="msg${row2.unseen ? " unseen" : ""}" data-uid="${row2.uid}" draggable="true" aria-current="${row2.current ? "true" : "false"}">
@@ -7292,10 +7296,10 @@ function createView(root3, actions) {
               <span class="peek">${esc9(row2.preview)}</span>
             </button>
             ${thread}
-            <div class="msg-actions">
-              <button type="button" class="msg-action" data-action="m-delete" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
-              <button type="button" class="msg-action" data-action="m-archive" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
-              <button type="button" class="msg-action msg-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc9(subject)}" title="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+            <div class="msg-actions" role="toolbar" aria-label="Schnellaktionen">
+              <button type="button" class="msg-action msg-action-flag" data-action="m-flag" data-ref="${row2.uid}" aria-pressed="${row2.flagged ? "true" : "false"}" aria-label="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc9(subject)}" title="${row2.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row2.flagged ? "flag-filled" : "flag")}</button>
+              <button type="button" class="msg-action msg-action-archive" data-action="m-archive" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
+              <button type="button" class="msg-action msg-action-delete" data-action="m-delete" data-ref="${row2.uid}" aria-label="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}: ${esc9(subject)}" title="${esc9(t("GLOBAL.DELETE", "L\xF6schen"))}">${icon("delete")}</button>
             </div>
           </div>`;
         }).join("");
@@ -7354,6 +7358,7 @@ function createView(root3, actions) {
       shell?.classList.toggle("with-checks", visible);
     },
     setRefreshing(busy) {
+      if (busy) lastListKey = "";
       const button3 = shell?.querySelector("[data-action='m-refresh']");
       if (!button3) return;
       button3.disabled = busy;
