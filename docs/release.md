@@ -75,3 +75,39 @@ Vor der Produktivfreigabe:
 Container-Rollback erfolgt durch erneutes Deployment mit `ghcr.io/zfzfg/snappymail@sha256:ALTER_DIGEST`, nicht durch ein bewegliches Tag. Alternativ kann zunächst `SNAPPY_AI_PROXY_ENABLED=false` den PHP-Pfad wiederherstellen. Ein bereits an den Provider abgesetzter Request wird niemals automatisch auf einem anderen Backend wiederholt; ein neuer Versuch ist eine bewusste Nutzeraktion.
 
 Diese Schritte sind das vorgesehene Prüf- und Rollbackverfahren. Sie gelten erst als durchgeführt, wenn ihre Ergebnisse für die jeweilige Version und Umgebung tatsächlich protokolliert wurden.
+
+## 6. Lokale, isolierte Release-Abnahme
+
+Vor einer Veröffentlichung werden das integrierte Image und die regulären Struktur- und Laufzeittests aus dem Repo-Wurzelverzeichnis ausgeführt:
+
+```sh
+export DOCKER_CONFIG="$PWD/build/docker-config"
+sh .docker/release/test/build_and_test.sh
+```
+
+Unter Git Bash mit Docker Desktop muss zusätzlich das Docker-Verzeichnis im `PATH` stehen oder den Drill-Skripten der vollständige Docker-Pfad über `DOCKER` übergeben werden. `MSYS_NO_PATHCONV=1` verhindert unerwünschte Pfadumwandlungen; die Skripte konvertieren Hostpfade für `docker cp` und Bind-Mounts mit `cygpath -w`.
+
+Für die Versionsprüfung werden ein aktuelles und ein tatsächlich älteres Fork-Image mit unterschiedlichen, paketierten Versionen benötigt. Beide Eingaben werden zunächst auf lokale Image-IDs aufgelöst; diese IDs sind keine Registry-Digests:
+
+```sh
+CURRENT_IMAGE=$(docker image inspect snappymail/snappymail:test --format '{{.Id}}')
+PREVIOUS_IMAGE=$(docker image inspect snappymail-fork-previous:2.38.2.1 --format '{{.Id}}')
+test "$CURRENT_IMAGE" != "$PREVIOUS_IMAGE"
+bash .docker/release/test/upgrade/run.sh "$CURRENT_IMAGE" "$PREVIOUS_IMAGE"
+```
+
+Der Drill prüft Fresh Install, sichere Update-Standardwerte, Upgrade von der vorherigen Fork-Version, unveränderliches Image-Rollback, Daten- und Konfigurationserhalt, unveränderte Admin-Zugangsdaten, Backups gestoppter Daten-Volumes sowie OPcache ausschließlich mit der ausgewählten Version. Mit dem realen Copilot-Plugin werden außerdem der PHP-SSE-Pfad, der Wechsel zum Rust-Sidecar und der Rückweg zu PHP ohne Provider geprüft. Container und Volumes mit eindeutigem Präfix werden am Ende entfernt; die Nachweise bleiben unter `build/local/upgrade/`.
+
+Für den PHP-only-Pfad werden die tatsächlich von den Builder-Stages erzeugten TAR-Archive der beiden Versionen übergeben:
+
+```sh
+CURRENT_ARCHIVE="$PWD/build/local/phase13-archives/snappymail-3.0.0.tar.gz"
+PREVIOUS_ARCHIVE="$PWD/build/local/phase13-archives/snappymail-2.38.2.1.tar.gz"
+test -f "$CURRENT_ARCHIVE" && test -f "$PREVIOUS_ARCHIVE"
+bash .docker/release/test/upgrade/php-only.sh \
+  "$CURRENT_IMAGE" "$CURRENT_ARCHIVE" "$PREVIOUS_ARCHIVE"
+```
+
+Dieser Drill verwendet `cli/upgrade.sh` in beide Richtungen, ausdrückliche HTTPS-URLs und SHA-256-Prüfsummen. Der Archivserver läuft nur in einem internen Docker-Netzwerk mit einer eintägigen Test-CA; das Anwendungscontainer-Netzwerk bleibt deaktiviert. Geprüft werden Anwendungs- und gestoppte Daten-Backups, Assets, Daten, Zugangsdaten, sichere Update-Einstellungen und OPcache-Neustarts. Nachweise liegen unter `build/local/upgrade-php/`. Da das Shell-Upgrade Archive überlagert, werden die ausgewählte Root-Version, deren Assets und der Cache geprüft, nicht das Verschwinden aller alten Versionsverzeichnisse.
+
+Die vollständigen Voraussetzungen, unveränderlichen Beispielbefehle und Prüfpunkte stehen in `.docker/release/test/upgrade/README.md`. Ein erfolgreicher lokaler AMD64-Lauf ersetzt weder ARM64-/386-Tests noch Staging-/Produktions-Canary, reale IMAP-/SMTP- oder Provider-Prüfungen. Er erzeugt insbesondere keinen veröffentlichten GHCR-Manifest-Digest; dieser darf erst aus einer tatsächlichen Veröffentlichung übernommen werden.
