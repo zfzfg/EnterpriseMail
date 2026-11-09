@@ -870,14 +870,14 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			foreach ((array) ($a['replies'] ?? []) as $r) {
 				if (\is_array($r) && !empty($r['body'])) {
 					$aReplies[] = [
-						'label' => \mb_substr(\trim((string) ($r['label'] ?? '')), 0, 40) ?: 'Antwort',
+						'label' => \mb_substr(\trim((string) ($r['label'] ?? '')), 0, 40),
 						'body' => \mb_substr(\trim((string) $r['body']), 0, 4000)
 					];
 				}
 			}
 			$aReplies = \array_slice($aReplies, 0, 3);
 			if (!$aReplies) {
-				throw new LlmException('Keine Vorschläge erhalten.', 502);
+				throw new LlmException('Keine Vorschläge erhalten.', 502, 'no_suggestions');
 			}
 			return ['replies' => $aReplies];
 		});
@@ -894,7 +894,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$this->account();
 			$sQuery = \trim((string) $this->jsonParam('query', ''));
 			if (!\strlen($sQuery)) {
-				throw new LlmException('Leere Anfrage.', 400);
+				throw new LlmException('Leere Anfrage.', 400, 'empty_query');
 			}
 			$this->requireConsent('search');
 			$aFolders = $this->paramFolders();
@@ -907,7 +907,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				$sFolder = '';
 			}
 			if (!\strlen($sSearch)) {
-				throw new LlmException('Die Anfrage konnte nicht in eine Suche übersetzt werden.', 422);
+				throw new LlmException('Die Anfrage konnte nicht in eine Suche übersetzt werden.', 422, 'search_untranslatable');
 			}
 			// Kategorie-Suche braucht gesetzte Schlagwoerter
 			$sTagFolder = $sFolder ?: $sCurrent;
@@ -934,14 +934,14 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return $this->respond(__FUNCTION__, function () {
 			$this->requireFeature('triage');
 			if (!$this->conf('store_keywords', true)) {
-				throw new LlmException('Das Speichern von Kategorien als Schlagwörter ist deaktiviert.', 403);
+				throw new LlmException('Das Speichern von Kategorien als Schlagwörter ist deaktiviert.', 403, 'keywords_disabled');
 			}
 			$sFolder = (string) $this->jsonParam('folder', 'INBOX');
 			$iLimit = \max(20, \min(500, (int) $this->jsonParam('limit', 300)));
 			try {
 				return (new Mailbox($this->mailClient(), $this->triage()))->tagByRules($sFolder, $iLimit, (string) $this->jsonParam('sent', ''));
 			} catch (\MailSo\RuntimeException $e) {
-				throw new LlmException('Der Mailserver erlaubt keine eigenen Schlagwörter in diesem Ordner.', 422);
+				throw new LlmException('Der Mailserver erlaubt keine eigenen Schlagwörter in diesem Ordner.', 422, 'keywords_not_allowed');
 			}
 		});
 	}
@@ -970,7 +970,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				}
 			}
 			if (!$aItems) {
-				throw new LlmException('Keine Mails in der Liste.', 400);
+				throw new LlmException('Keine Mails in der Liste.', 400, 'empty_list');
 			}
 			$aUids = \array_column($aItems, 'uid');
 			$oMailbox = new Mailbox($this->mailClient(), $this->triage());
@@ -1006,7 +1006,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$this->requireFeature('chat');
 			$aHistory = Chat::cleanHistory((array) $this->jsonParam('messages', []));
 			if (!$aHistory) {
-				throw new LlmException('Leere Nachricht.', 400);
+				throw new LlmException('Leere Nachricht.', 400, 'empty_message');
 			}
 			$this->requireConsent('chat');
 			$aFolders = $this->paramFolders();

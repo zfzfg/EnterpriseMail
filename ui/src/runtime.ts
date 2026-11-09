@@ -127,7 +127,7 @@ interface QueuedWork {
 }
 
 export function abortReason(signal: AbortSignal): unknown {
-  return signal.reason || new DOMException("Die Anfrage wurde abgebrochen.", "AbortError");
+  return signal.reason || new DOMException("The request was aborted.", "AbortError");
 }
 
 /** Small shared FIFO limiter; queued work can be aborted before it starts. */

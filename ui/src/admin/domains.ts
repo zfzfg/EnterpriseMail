@@ -176,10 +176,10 @@ async function openDomain(ctx: Ctx, slot: HTMLElement, name: string, creating: b
     ${field("IMAP.search_filter", t("GLOBAL.SEARCH", "Suchen"), String(imap.search_filter || ""))}
     ${field("IMAP.spam_headers", t("POPUPS_DOMAIN.VALID_SPAM_HEADERS", "Spam-Header beachten"), String(imap.spam_headers || ""))}
     ${field("IMAP.virus_headers", t("POPUPS_DOMAIN.VALID_VIRUS_HEADERS", "Virus-Header beachten"), String(imap.virus_headers || ""))}
-    ${check("IMAP.use_expunge_all_on_delete", "Expunge beim Löschen", Boolean(imap.use_expunge_all_on_delete))}
-    ${check("IMAP.fast_simple_search", "Schnelle Suche", imap.fast_simple_search !== false)}
-    ${check("IMAP.force_select", "SELECT erzwingen", Boolean(imap.force_select))}
-    ${check("IMAP.message_all_headers", "Alle Kopfzeilen", Boolean(imap.message_all_headers))}
+    ${check("IMAP.use_expunge_all_on_delete", t("APP_TEXT.EXPUNGE_ON_DELETE", "Expunge beim Löschen"), Boolean(imap.use_expunge_all_on_delete))}
+    ${check("IMAP.fast_simple_search", t("APP_TEXT.FAST_SEARCH", "Schnelle Suche"), imap.fast_simple_search !== false)}
+    ${check("IMAP.force_select", t("APP_TEXT.FORCE_SELECT", "SELECT erzwingen"), Boolean(imap.force_select))}
+    ${check("IMAP.message_all_headers", t("APP_TEXT.ALL_HEADERS", "Alle Kopfzeilen"), Boolean(imap.message_all_headers))}
     <h3 class="title title-md">SMTP</h3>
     ${conn("SMTP", smtp)}
     ${check("SMTP.useAuth", t("POPUPS_DOMAIN.LABEL_USE_AUTH", "Authentifizierung verwenden"), Boolean(smtp.useAuth))}
@@ -223,11 +223,11 @@ function conn(prefix: string, conn: Conn): string {
   return [
     field(`${prefix}.host`, t("POPUPS_DOMAIN.LABEL_SERVER", "Server"), String(conn.host || "")),
     field(`${prefix}.port`, t("POPUPS_DOMAIN.LABEL_PORT", "Port"), String(conn.port ?? ""), "inputmode=\"numeric\""),
-    `<label class="field"><span>${esc(t("POPUPS_DOMAIN.LABEL_SECURE", "Sicherheit"))}</span><select name="${prefix}.type">${SECURE.map(([id, label]) => `<option value="${id}"${id === type ? " selected" : ""}>${esc(id === "0" ? t("POPUPS_DOMAIN.SECURE_OPTION_NONE", label) : label)}</option>`).join("")}</select></label>`,
+    `<label class="field"><span>${esc(t("POPUPS_DOMAIN.LABEL_SECURE", "Sicherheit"))}</span><select name="${prefix}.type">${SECURE.map(([value, label]) => [value, value === "0" ? t("APP_TEXT.NONE", "Ohne") : label] as [string, string]).map(([id, label]) => `<option value="${id}"${id === type ? " selected" : ""}>${esc(id === "0" ? t("POPUPS_DOMAIN.SECURE_OPTION_NONE", label) : label)}</option>`).join("")}</select></label>`,
     field(`${prefix}.timeout`, t("POPUPS_DOMAIN.TIMEOUT", "Timeout"), String(conn.timeout ?? ""), "inputmode=\"numeric\""),
     check(`${prefix}.shortLogin`, t("POPUPS_DOMAIN.LABEL_USE_SHORT_LOGIN", "Kurze Benutzernamen verwenden"), Boolean(conn.shortLogin)),
     check(`${prefix}.lowerLogin`, t("POPUPS_DOMAIN.LABEL_LOWERCASE_LOGIN", "Login in Kleinbuchstaben konvertieren"), Boolean(conn.lowerLogin)),
-    field(`${prefix}.stripLogin`, "Login-Suffix entfernen", String(conn.stripLogin || ""))
+    field(`${prefix}.stripLogin`, t("APP_TEXT.REMOVE_LOGIN_SUFFIX", "Login-Suffix entfernen"), String(conn.stripLogin || ""))
   ].join("");
 }
 

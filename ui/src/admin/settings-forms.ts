@@ -52,7 +52,7 @@ export function paintContacts(ctx: Ctx, slot: HTMLElement): void {
     ${field("contactsPdoUser", t("TAB_CONTACTS.LABEL_STORAGE_USER", "Benutzer"), String(cell(ctx.cfg, "contacts", "pdo_user") || ""))}
     ${field("contactsPdoPassword", t("TAB_CONTACTS.LABEL_STORAGE_PASSWORD", "Passwort"), DUMMY, "type=\"password\" autocomplete=\"new-password\"")}
     ${field("contactsMySQLSSLCA", "MySQL SSL CA", String(cell(ctx.cfg, "contacts", "mysql_ssl_ca") || ""))}
-    ${check("contactsMySQLSSLVerify", "MySQL SSL prüfen", flag(cell(ctx.cfg, "contacts", "mysql_ssl_verify")))}
+    ${check("contactsMySQLSSLVerify", t("APP_TEXT.VERIFY_MYSQL_SSL", "MySQL SSL prüfen"), flag(cell(ctx.cfg, "contacts", "mysql_ssl_verify")))}
     ${field("contactsMySQLSSLCiphers", "MySQL SSL Ciphers", String(cell(ctx.cfg, "contacts", "mysql_ssl_ciphers") || ""))}
     ${check("contactsSQLiteGlobal", t("TAB_CONTACTS.SQLITE_GLOBAL", "Eine globale DB verwenden statt einer pro Account"), flag(cell(ctx.cfg, "contacts", "sqlite_global")))}
     ${field("contactsSuggestionsLimit", t("TAB_CONTACTS.SUGGESTIONS_LIMIT", "Limit für Empfehlungen"), String(cell(ctx.cfg, "contacts", "suggestions_limit") ?? "20"), "inputmode=\"numeric\"")}

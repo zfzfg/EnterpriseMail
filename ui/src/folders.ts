@@ -1,5 +1,5 @@
 import { icon, type IconName } from "./icons";
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 
 /** Ein Ordner aus `Folders`, ergänzt um Baumdaten. Fehlende Eltern werden als Konstruktionsknoten angelegt. */
 export interface FolderInfo {
@@ -103,7 +103,7 @@ export function bytes(value: number): string {
   let size = value;
   let unit = 0;
   while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
-  return `${size.toLocaleString("de-DE", { maximumFractionDigits: size < 10 && unit ? 1 : 0 })} ${units[unit]}`;
+  return `${size.toLocaleString(uiLocale(), { maximumFractionDigits: size < 10 && unit ? 1 : 0 })} ${units[unit]}`;
 }
 
 function parentOf(fullName: string, delimiter: string): string {
@@ -192,7 +192,7 @@ export function buildTree(folders: FolderInfo[], roleOf: (folder: FolderInfo) =>
   });
   const rank = (node: FolderNode) => ROLE_RANK[roleOf(node.info)] ?? 10;
   const sort = (list: FolderNode[]) => {
-    list.sort((a, b) => rank(a) - rank(b) || a.info.name.localeCompare(b.info.name, "de", { sensitivity: "base" }));
+    list.sort((a, b) => rank(a) - rank(b) || a.info.name.localeCompare(b.info.name, uiLocale(), { sensitivity: "base" }));
     list.forEach((node) => sort(node.children));
   };
   sort(roots);

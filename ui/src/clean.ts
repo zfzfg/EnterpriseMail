@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // HTML einer Mail für die Anzeige säubern. Übertragen aus dem alten Frontend (dev/Common/Html.js, cleanHtml).
 // Externe Bilder werden nie direkt geladen: Sie landen in data-x-src und werden erst nach Freigabe eingesetzt.
 
@@ -312,7 +313,7 @@ export function cleanHtml(source: string, options: CleanOptions): CleanResult {
     [...root.querySelectorAll("blockquote")].reverse().forEach((node) => {
       const details = document.createElement("details");
       details.className = "sm-bq";
-      details.innerHTML = "<summary>Zitat</summary>";
+      details.innerHTML = `<summary>${t("APP_TEXT.QUOTE", "Zitat")}</summary>`;
       node.replaceWith(details);
       details.append(node);
     });
@@ -403,7 +404,7 @@ export function plainToHtml(text: string, collapse: boolean): string {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   let level = 0;
   let out = "";
-  const open = () => collapse ? "<details class=\"sm-bq\"><summary>Zitat</summary><blockquote>" : "<blockquote>";
+  const open = () => collapse ? `<details class="sm-bq"><summary>${t("APP_TEXT.QUOTE", "Zitat")}</summary><blockquote>` : "<blockquote>";
   const close = () => collapse ? "</blockquote></details>" : "</blockquote>";
   for (const line of lines) {
     const match = line.match(/^((?:>\s?)+)/);

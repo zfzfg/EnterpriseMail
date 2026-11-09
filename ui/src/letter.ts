@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 // Der Brief im sandboxed iframe: srcdoc mit CSP, Druckfenster, Kalendereinträge, Abmelde-Links.
 
 export interface LetterLook {
@@ -66,7 +66,7 @@ export function openLetterWindow(data: PrintData, print: boolean): boolean {
     : "";
   const content = data.kind === "plain" ? `<div style="white-space:pre-wrap">${data.body}</div>` : data.body;
   win.document.open();
-  win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(data.subject || "Mail")}</title>
+  win.document.write(`<!doctype html><html lang="${esc(document.documentElement.lang || "de")}"><head><meta charset="utf-8"><title>${esc(data.subject || "Mail")}</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'">
 <style>
   :root {
@@ -85,7 +85,7 @@ export function openLetterWindow(data: PrintData, print: boolean): boolean {
   @media print{body{margin:0}a{color:inherit}}
 </style></head><body>
 <header><h1>${esc(data.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</h1>
-<p>Von: ${esc(data.from)}</p><p>An: ${esc(data.to)}</p>${data.cc ? `<p>Cc: ${esc(data.cc)}</p>` : ""}<p>${esc(data.when)}</p></header>
+<p>${esc(t("APP_TEXT.FROM", "Von"))}: ${esc(data.from)}</p><p>${esc(t("APP_TEXT.TO", "An"))}: ${esc(data.to)}</p>${data.cc ? `<p>Cc: ${esc(data.cc)}</p>` : ""}<p>${esc(data.when)}</p></header>
 ${content}${files}
 </body></html>`);
   win.document.close();
@@ -107,11 +107,11 @@ function icsDate(value: string): string {
   const m = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/);
   if (!m) return value;
   if (!m[4]) {
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(uiLocale(), { weekday: "short", day: "numeric", month: "long", year: "numeric" });
   }
   const args = [Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)] as const;
   const date = m[7] ? new Date(Date.UTC(...args)) : new Date(...args);
-  return date.toLocaleString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(uiLocale(), { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 /** Einfache Auswertung von text/calendar: erste VEVENT. */

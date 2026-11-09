@@ -25,11 +25,11 @@ class MailContext
 	public function message(string $sFolder, int $iUid): array
 	{
 		if (!\strlen($sFolder) || 1 > $iUid) {
-			throw new LlmException('Ungültige Mail-Angabe.', 400);
+			throw new LlmException('Ungültige Mail-Angabe.', 400, 'invalid_mail');
 		}
 		$oMessage = $this->oMailClient->Message($sFolder, $iUid, true);
 		if (!$oMessage) {
-			throw new LlmException('Mail nicht gefunden.', 404);
+			throw new LlmException('Mail nicht gefunden.', 404, 'mail_not_found');
 		}
 		$a = \json_decode(\json_encode($oMessage), true) ?: [];
 		$sPlain = (string) ($a['plain'] ?? '');
@@ -138,7 +138,7 @@ class MailContext
 			}
 		}
 		if (!$aMessages) {
-			throw new LlmException('Mail nicht gefunden.', 404);
+			throw new LlmException('Mail nicht gefunden.', 404, 'mail_not_found');
 		}
 		\usort($aMessages, fn($a, $b) => $a['date'] <=> $b['date']);
 		return [

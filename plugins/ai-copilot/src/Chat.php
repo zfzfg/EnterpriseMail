@@ -95,8 +95,9 @@ class Chat
 
 		$sReply = \trim((string) ($aData['reply'] ?? ''));
 		$aActions = $this->validateActions(\is_array($aData['actions'] ?? null) ? $aData['actions'] : [], $aSeen);
+		// The browser words an empty reply in the user's language.
 		if (!\strlen($sReply)) {
-			$sReply = $aActions ? 'Vorschläge:' : 'Keine Antwort erhalten.';
+			$sReply = '';
 		}
 		return ['reply' => $sReply, 'actions' => $aActions, 'trace' => $aTrace, 'known' => \array_slice(\array_keys($aSeen), -static::MAX_KNOWN)];
 	}

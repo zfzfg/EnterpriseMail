@@ -137,14 +137,27 @@ async function openPlugin(ctx: Ctx, slot: HTMLElement, id: string): Promise<void
   dialog.showModal();
 }
 
+/** German is the plugin's own text; other languages come from the admin pack. */
+function settingText(id: string, text: string): string {
+  return t(`PLUGIN_SETTINGS.${id.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}`, text);
+}
+
+function optionPair(entry: unknown): [string, string] {
+  if (entry && typeof entry === "object") {
+    const option = entry as { id?: unknown; name?: unknown };
+    return [String(option.id ?? ""), settingText(`option_${String(option.name ?? "")}`, String(option.name ?? ""))];
+  }
+  return [String(entry), String(entry)];
+}
+
 function prop(item: Prop): string {
   if (item.type === 7) {
-    return `<fieldset class="vacation-box"><legend>${esc(String(item.label || ""))}</legend>${(item.config || []).map((child) => prop(child)).join("")}</fieldset>`;
+    return `<fieldset class="vacation-box"><legend>${esc(settingText(String(item.label || ""), String(item.label || "")))}</legend>${(item.config || []).map((child) => prop(child)).join("")}</fieldset>`;
   }
   const name = String(item.name || "");
-  const label = String(item.label || name);
+  const label = settingText(name, String(item.label || name));
   const value = item.value == null ? "" : String(item.value);
-  const hint = item.desc ? `<p class="quiet">${esc(String(item.desc))}</p>` : "";
+  const hint = item.desc ? `<p class="quiet">${esc(settingText(`${name}_desc`, String(item.desc)))}</p>` : "";
   if (item.type === 5) {
     return `<label class="check"><input data-prop="${esc(name)}" type="checkbox"${item.value ? " checked" : ""}><span>${esc(label)}</span></label>${hint}`;
   }
@@ -153,7 +166,7 @@ function prop(item: Prop): string {
   }
   if (item.type === 4 || item.type === 8) {
     const options = Array.isArray(item.options)
-      ? item.options.map((entry) => [String(entry), String(entry)] as [string, string])
+      ? item.options.map((entry) => optionPair(entry))
       : Object.entries(item.options || {});
     return `<label class="field"><span>${esc(label)}</span><select data-prop="${esc(name)}">${options.map(([id, text]) => `<option value="${esc(id)}"${id === value ? " selected" : ""}>${esc(text)}</option>`).join("")}</select></label>${hint}`;
   }

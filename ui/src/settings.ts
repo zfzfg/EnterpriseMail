@@ -1,7 +1,7 @@
 import { ApiError, call, explain, plugin } from "./api";
 import { parseFolders } from "./folders";
 import { icon, type IconName } from "./icons";
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 import { renderFilterEditor } from "./sieve/form";
 import { parseFilterScript } from "./sieve/script";
 import { readAppearance, type Appearance } from "./theme";
@@ -257,7 +257,7 @@ export async function loadDesk(caps: Caps, currentEmail: string, mainEmail: stri
           id: text(row.id),
           name: text(row.CN),
           email: text(row.emailAddress),
-          until: until ? new Date(until * 1000).toLocaleDateString() : ""
+          until: until ? new Date(until * 1000).toLocaleDateString(uiLocale()) : ""
         };
       });
     }
@@ -302,12 +302,12 @@ async function pluginSafe(): Promise<{ settings: Record<string, unknown> | null;
 
 export async function applyDesk(name: string, data: Record<string, string>, snap: SettingsSnapshot): Promise<"reload" | "session" | "keep"> {
   if (name === "save-account") {
-    if (!data.email?.trim() || !data.password) throw new ApiError(0, "Adresse und Passwort eintragen.");
+    if (!data.email?.trim() || !data.password) throw new ApiError(0, t("APP_TEXT.ENTER_ADDRESS_AND_PASSWORD", "Adresse und Passwort eintragen."));
     await call("AccountSetup", { email: data.email.trim(), password: data.password, name: data.name || "", new: 1 });
     return "reload";
   }
   if (name === "edit-account") {
-    if (!data.email?.trim()) throw new ApiError(0, "Adresse eintragen.");
+    if (!data.email?.trim()) throw new ApiError(0, t("APP_TEXT.ENTER_AN_ADDRESS", "Adresse eintragen."));
     await call("AccountSetup", { email: data.email.trim(), password: data.password || "", name: data.name || "", new: 0 });
     return "reload";
   }
@@ -326,8 +326,8 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "reload";
   }
   if (name === "change-password") {
-    if (!data.PrevPassword || !data.NewPassword) throw new ApiError(0, "Beide Passwörter eintragen.");
-    if (data.NewPassword !== data.Repeat) throw new ApiError(0, "Die Wiederholung stimmt nicht.");
+    if (!data.PrevPassword || !data.NewPassword) throw new ApiError(0, t("APP_TEXT.ENTER_BOTH_PASSWORDS", "Beide Passwörter eintragen."));
+    if (data.NewPassword !== data.Repeat) throw new ApiError(0, t("APP_TEXT.THE_REPEATED_PASSWORD_DOES_NOT_MATCH", "Die Wiederholung stimmt nicht."));
     await call("ChangePassword", { PrevPassword: data.PrevPassword, NewPassword: data.NewPassword });
     return "reload";
   }
@@ -371,7 +371,7 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "session";
   }
   if (name === "save-identity") {
-    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    if (!data.email?.trim()) throw new ApiError(0, t("APP_TEXT.ENTER_AN_EMAIL_ADDRESS", "E-Mail eintragen."));
     await call("IdentityUpdate", {
       Id: data.id || "",
       Label: data.label || "",
@@ -411,7 +411,7 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "keep";
   }
   if (name === "save-script") {
-    if (!data.name?.trim()) throw new ApiError(0, "Name eintragen.");
+    if (!data.name?.trim()) throw new ApiError(0, t("APP_TEXT.ENTER_A_NAME", "Name eintragen."));
     await call("FiltersScriptSave", { name: data.name.trim(), body: data.body || "" });
     return "reload";
   }
@@ -424,8 +424,8 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "reload";
   }
   if (name === "import-key") {
-    if (!data.key?.trim()) throw new ApiError(0, "Schlüssel einfügen.");
-    if (!data.backup && !data.gnupg) throw new ApiError(0, "Speicherort wählen.");
+    if (!data.key?.trim()) throw new ApiError(0, t("APP_TEXT.PASTE_A_KEY", "Schlüssel einfügen."));
+    if (!data.backup && !data.gnupg) throw new ApiError(0, t("APP_TEXT.CHOOSE_A_STORAGE_LOCATION", "Speicherort wählen."));
     await call("PgpImportKey", {
       key: data.key,
       keyId: "",
@@ -436,7 +436,7 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "reload";
   }
   if (name === "import-cert") {
-    if (!data.pem?.trim()) throw new ApiError(0, "Zertifikat einfügen.");
+    if (!data.pem?.trim()) throw new ApiError(0, t("APP_TEXT.PASTE_A_CERTIFICATE", "Zertifikat einfügen."));
     await call("SMimeImportCertificate", { pem: data.pem });
     return "reload";
   }
@@ -446,17 +446,17 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
   }
   if (name === "delete-stored") {
     const row = snap.keys[Number(data.index)];
-    if (!row?.armored || !row.id) throw new ApiError(0, "Der gespeicherte Schlüssel fehlt.");
+    if (!row?.armored || !row.id) throw new ApiError(0, t("APP_TEXT.THE_STORED_KEY_IS_MISSING", "Der gespeicherte Schlüssel fehlt."));
     await call("DeletePGPKey", { key: row.armored, keyId: row.id });
     return "reload";
   }
   if (name === "generate-key") {
-    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    if (!data.email?.trim()) throw new ApiError(0, t("APP_TEXT.ENTER_AN_EMAIL_ADDRESS", "E-Mail eintragen."));
     await call("GnupgGenerateKey", { name: data.name || "", email: data.email.trim(), passphrase: data.passphrase || "" });
     return "reload";
   }
   if (name === "store-pair") {
-    if (!data.publicKey?.trim() && !data.privateKey?.trim()) throw new ApiError(0, "Mindestens einen Schlüssel einfügen.");
+    if (!data.publicKey?.trim() && !data.privateKey?.trim()) throw new ApiError(0, t("APP_TEXT.PASTE_AT_LEAST_ONE_KEY", "Mindestens einen Schlüssel einfügen."));
     const onServer = (data.publicOn ? 1 : 0) + (data.privateOn ? 2 : 0);
     const inGnuPG = (data.publicGnu ? 1 : 0) + (data.privateGnu ? 2 : 0);
     await call("PgpStoreKeyPair", {
@@ -468,7 +468,7 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     return "reload";
   }
   if (name === "create-cert") {
-    if (!data.email?.trim()) throw new ApiError(0, "E-Mail eintragen.");
+    if (!data.email?.trim()) throw new ApiError(0, t("APP_TEXT.ENTER_AN_EMAIL_ADDRESS", "E-Mail eintragen."));
     await call("SMimeCreateCertificate", {
       name: data.name || "",
       email: data.email.trim(),

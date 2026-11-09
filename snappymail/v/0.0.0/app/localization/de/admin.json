@@ -207,5 +207,14 @@
     },
     "ADMIN": {
         "ENTER_CREDENTIALS": "Benutzer und Passwort eintragen."
+    },
+    "APP_TEXT": {
+        "REMOVE_LOGIN_SUFFIX": "Login-Suffix entfernen",
+        "NONE": "Ohne",
+        "VERIFY_MYSQL_SSL": "MySQL SSL prüfen",
+        "EXPUNGE_ON_DELETE": "Expunge beim Löschen",
+        "FAST_SEARCH": "Schnelle Suche",
+        "FORCE_SELECT": "SELECT erzwingen",
+        "ALL_HEADERS": "Alle Kopfzeilen"
     }
 }

@@ -4,20 +4,20 @@
   "source": "Deliberately updated with npm run bundle:baseline.",
   "artifacts": {
     "app.js": {
-      "rawBytes": 476931,
-      "gzipBytes": 119774
+      "rawBytes": 487138,
+      "gzipBytes": 122492
     },
     "admin.js": {
-      "rawBytes": 116945,
-      "gzipBytes": 17537
+      "rawBytes": 117482,
+      "gzipBytes": 17779
     },
     "app.css": {
-      "rawBytes": 86013,
-      "gzipBytes": 16586
+      "rawBytes": 86176,
+      "gzipBytes": 16617
     },
     "admin.css": {
-      "rawBytes": 86013,
-      "gzipBytes": 16586
+      "rawBytes": 86176,
+      "gzipBytes": 16617
     }
   }
 }

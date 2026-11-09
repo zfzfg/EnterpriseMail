@@ -39,7 +39,7 @@ export function watchSession(handler: () => void): void {
 }
 
 export async function loadLanguage(code: string): Promise<void> {
-  const response = await fetch(`${root()}?/Lang/App/${encodeURIComponent(code)}/`, { credentials: "same-origin" });
+  const response = await fetch(`${root()}?/Lang/0/App/${encodeURIComponent(code)}/`, { credentials: "same-origin" });
   if (!response.ok) throw new ApiError(1, t("LOGIN.ERROR_LANG_LOAD", "Die Sprache konnte nicht geladen werden."));
   const script = await response.text();
   new Function(script)();
@@ -110,7 +110,7 @@ async function postJson<T>(url: string, action: string, params: Record<string, u
     body: JSON.stringify({ Action: action, ...params }),
     signal
   });
-  if (!response.ok) throw new ApiError(1, "Die Anfrage ist fehlgeschlagen.");
+  if (!response.ok) throw new ApiError(1, t("APP_TEXT.THE_REQUEST_FAILED", "Die Anfrage ist fehlgeschlagen."));
   const data = await response.json() as Envelope;
   if (data.System?.token) token = data.System.token;
   const result = data.Result as { System?: { token?: string } } | null;
@@ -154,19 +154,19 @@ export function upload(file: File, onProgress: (percent: number) => void): Uploa
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
     });
-    request.addEventListener("error", () => reject(new ApiError(1, "Der Upload ist fehlgeschlagen.")));
-    request.addEventListener("abort", () => reject(new ApiError(0, "Der Upload wurde abgebrochen.")));
+    request.addEventListener("error", () => reject(new ApiError(1, t("APP_TEXT.THE_UPLOAD_FAILED", "Der Upload ist fehlgeschlagen."))));
+    request.addEventListener("abort", () => reject(new ApiError(0, t("APP_TEXT.THE_UPLOAD_WAS_CANCELED", "Der Upload wurde abgebrochen."))));
     request.addEventListener("load", () => {
       try {
         const data = JSON.parse(request.responseText) as Envelope & { Result?: { Attachment?: UploadedFile; code?: number; message?: string } };
         const attachment = data.Result?.Attachment;
         if (request.status < 200 || request.status >= 300 || !attachment?.tempName) {
-          reject(new ApiError(Number(data.Result?.code || data.code || 999), String(data.Result?.message || data.message || "Der Upload ist fehlgeschlagen.")));
+          reject(new ApiError(Number(data.Result?.code || data.code || 999), String(data.Result?.message || data.message || t("APP_TEXT.THE_UPLOAD_FAILED", "Der Upload ist fehlgeschlagen."))));
           return;
         }
         resolve(attachment);
       } catch {
-        reject(new ApiError(1, "Der Server hat den Upload nicht bestätigt."));
+        reject(new ApiError(1, t("APP_TEXT.THE_SERVER_DID_NOT_CONFIRM_THE_UPLOAD", "Der Server hat den Upload nicht bestätigt.")));
       }
     });
     const body = new FormData();
@@ -205,7 +205,7 @@ export async function uploadContacts(file: File): Promise<number> {
   const data = readEnvelope(await response.text());
   takeToken(data);
   if (!response.ok || data.Result === false || data.Result == null) {
-    throw new ApiError(data.code || 999, data.message || "Der Import ist fehlgeschlagen.", data.messageAdditional || "");
+    throw new ApiError(data.code || 999, data.message || t("APP_TEXT.THE_IMPORT_FAILED", "Der Import ist fehlgeschlagen."), data.messageAdditional || "");
   }
   return Number(data.Result) || 0;
 }
@@ -264,7 +264,7 @@ export async function streamEvents(
     body: JSON.stringify(params),
     signal
   });
-  if (!response.ok || !response.body) throw new ApiError(1, "Verbindung unterbrochen.");
+  if (!response.ok || !response.body) throw new ApiError(1, t("APP_TEXT.CONNECTION_INTERRUPTED", "Verbindung unterbrochen."));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parser = new EventStreamParser();
@@ -290,7 +290,7 @@ export async function streamEvents(
     // Flush a split UTF-8 sequence and accept one final, unterminated SSE block.
     emit(parser.feed(decoder.decode()));
     emit(parser.finish());
-    if (!finished) throw new ApiError(1, "Verbindung unterbrochen.");
+    if (!finished) throw new ApiError(1, t("APP_TEXT.CONNECTION_INTERRUPTED", "Verbindung unterbrochen."));
   } finally {
     try { await reader.cancel(); } catch { /* Stream kann bereits geschlossen oder fehlerhaft sein. */ }
     reader.releaseLock();
@@ -350,11 +350,11 @@ async function boundedBlob(response: Response, limit: number): Promise<Blob> {
   const declared = Number(response.headers.get("Content-Length") || 0);
   if (declared > max) {
     try { await response.body?.cancel(); } catch { /* Der Stream kann bereits fehlerhaft sein. */ }
-    throw new ApiError(1, "Datei zu groß.");
+    throw new ApiError(1, t("APP_TEXT.FILE_TOO_LARGE", "Datei zu groß."));
   }
   if (!response.body) {
     const blob = await response.blob();
-    if (blob.size > max) throw new ApiError(1, "Datei zu groß.");
+    if (blob.size > max) throw new ApiError(1, t("APP_TEXT.FILE_TOO_LARGE", "Datei zu groß."));
     return blob;
   }
   const reader = response.body.getReader();
@@ -369,7 +369,7 @@ async function boundedBlob(response: Response, limit: number): Promise<Blob> {
         break;
       }
       size += chunk.value.byteLength;
-      if (size > max) throw new ApiError(1, "Datei zu groß.");
+      if (size > max) throw new ApiError(1, t("APP_TEXT.FILE_TOO_LARGE", "Datei zu groß."));
       parts.push(chunk.value);
     }
     return new Blob(parts.map((part) => part as Uint8Array<ArrayBuffer>), { type: response.headers.get("Content-Type") || "" });
@@ -387,17 +387,17 @@ const imageSlots = new ConcurrencyLimiter(4);
 export function fetchDataUrl(url: string, limit = 8 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
   return imageSlots.run(async () => {
     const response = await fetch(url, { credentials: "same-origin", signal });
-    if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+    if (!response.ok) throw new ApiError(1, t("APP_TEXT.FILE_NOT_REACHABLE", "Datei nicht erreichbar."));
     const blob = await boundedBlob(response, limit);
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       const cleanup = () => signal?.removeEventListener("abort", abort);
       const abort = () => reader.abort();
       reader.onload = () => { cleanup(); resolve(String(reader.result || "")); };
-      reader.onerror = () => { cleanup(); reject(new ApiError(1, "Datei nicht lesbar.")); };
-      reader.onabort = () => { cleanup(); reject(signal?.reason || new ApiError(0, "Der Vorgang wurde abgebrochen.")); };
+      reader.onerror = () => { cleanup(); reject(new ApiError(1, t("APP_TEXT.FILE_NOT_READABLE", "Datei nicht lesbar."))); };
+      reader.onabort = () => { cleanup(); reject(signal?.reason || new ApiError(0, t("APP_TEXT.THE_OPERATION_WAS_CANCELED", "Der Vorgang wurde abgebrochen."))); };
       if (signal?.aborted) {
-        reject(signal.reason || new ApiError(0, "Der Vorgang wurde abgebrochen."));
+        reject(signal.reason || new ApiError(0, t("APP_TEXT.THE_OPERATION_WAS_CANCELED", "Der Vorgang wurde abgebrochen.")));
         return;
       }
       signal?.addEventListener("abort", abort, { once: true });
@@ -408,7 +408,7 @@ export function fetchDataUrl(url: string, limit = 8 * 1024 * 1024, signal?: Abor
 
 export async function fetchText(url: string, limit = 2 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
   const response = await fetch(url, { credentials: "same-origin", signal });
-  if (!response.ok) throw new ApiError(1, "Datei nicht erreichbar.");
+  if (!response.ok) throw new ApiError(1, t("APP_TEXT.FILE_NOT_REACHABLE", "Datei nicht erreichbar."));
   return (await boundedBlob(response, limit)).text();
 }
 

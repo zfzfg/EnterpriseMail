@@ -2,7 +2,7 @@ import { ApiError, call, explain, upload, type UploadTask } from "./api";
 import { keysFor, loadGnuKeys, rememberedPass, rememberPass, type GnuKey } from "./crypto";
 import { hasDraftPlaceholder, joinPlainDraft, ownNodeRange, splitPlainDraft } from "./assist-state";
 import { icon, type IconName } from "./icons";
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 import type { IdentityRow } from "./settings";
 
 export interface ComposeIdentity extends IdentityRow {}
@@ -354,7 +354,7 @@ export class Composer {
 
   private makeRecipients(name: "to" | "cc" | "bcc"): void {
     const box = this.root.querySelector(`[data-recipient='${name}']`) as HTMLElement;
-    box.innerHTML = `<div class="recipient-chips"></div><input type="text" autocomplete="off" aria-label="${esc(name === "to" ? "An" : name === "cc" ? "Cc" : "Bcc")}"><div class="recipient-suggestions" role="listbox" hidden></div>`;
+    box.innerHTML = `<div class="recipient-chips"></div><input type="text" autocomplete="off" aria-label="${esc(name === "to" ? t("APP_TEXT.TO", "An") : name === "cc" ? "Cc" : "Bcc")}"><div class="recipient-suggestions" role="listbox" hidden></div>`;
     const field: RecipientField = { name, box, input: box.querySelector("input") as HTMLInputElement, list: box.querySelector(".recipient-suggestions") as HTMLElement, values: [], suggestions: [], active: -1, timer: 0, request: 0 };
     this.fields.set(name, field);
     field.input.addEventListener("input", () => this.suggestions(field));
@@ -526,7 +526,7 @@ export class Composer {
     const isHtml = signature.startsWith(":HTML:");
     if (isHtml) signature = signature.slice(6);
     const from = `${identity.name ? `${identity.name} ` : ""}<${identity.email}>`;
-    signature = signature.replace(/{{FROM-FULL}}|{{FROM}}/g, from).replace(/{{DATE}}/g, new Date().toLocaleString()).replace(/{{TIME}}/g, new Date().toLocaleTimeString()).replace(/{{MOMENT:[^}]+}}/g, "");
+    signature = signature.replace(/{{FROM-FULL}}|{{FROM}}/g, from).replace(/{{DATE}}/g, new Date().toLocaleString(uiLocale())).replace(/{{TIME}}/g, new Date().toLocaleTimeString(uiLocale())).replace(/{{MOMENT:[^}]+}}/g, "");
     return html ? (isHtml ? sanitizeHtml(signature) : plainToHtml(signature)) : (isHtml ? htmlToPlain(signature) : signature);
   }
 
@@ -919,7 +919,7 @@ export class Composer {
       const saved = await this.callbacks.save(values);
       this.draftRef = saved;
       this.baseline = this.fingerprint();
-      status = t("COMPOSE.SAVED_TIME", "Gespeichert um %TIME%").replace("%TIME%", new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      status = t("COMPOSE.SAVED_TIME", "Gespeichert um %TIME%").replace("%TIME%", new Date().toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit" }));
       if (closeAfter) this.finishClose(false);
     } catch (error) { this.setError(explain(error)); }
     finally { this.saving = false; this.setBusy(false, status); this.scheduleAutosave(); }

@@ -150,10 +150,10 @@ function categoryMark(category?: string): string {
 
 function rowMarks(row: MessageRow): string {
   const marks: [boolean | undefined, IconName, string][] = [
-    [row.attachment, "attachment", "Mit Anhang"],
-    [row.answered, "answered", "Beantwortet"],
-    [row.forwarded, "forwarded", "Weitergeleitet"],
-    [row.flagged, "flag-filled", "Markiert"]
+    [row.attachment, "attachment", t("APP_TEXT.WITH_ATTACHMENT", "Mit Anhang")],
+    [row.answered, "answered", t("APP_TEXT.ANSWERED", "Beantwortet")],
+    [row.forwarded, "forwarded", t("APP_TEXT.FORWARDED", "Weitergeleitet")],
+    [row.flagged, "flag-filled", t("APP_TEXT.FLAGGED", "Markiert")]
   ];
   const html = marks.filter(([on]) => on).map(([, name, label]) => icon(name, label)).join("");
   return html ? `<span class="marks">${html}</span>` : "";
@@ -361,8 +361,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   const showMail: MailView["showMail"] = (email, folderName, assist) => {
     root.innerHTML = `
       <div class="shell" data-pane="list" data-layout="1" data-surface="mail" data-sidebar="${docked() ? "open" : "closed"}">
-        <button type="button" class="scrim" data-action="close-sidebar" aria-label="Ordner schließen"></button>
-        <aside class="sidebar" aria-label="Ordner">
+        <button type="button" class="scrim" data-action="close-sidebar" aria-label="${esc(t("APP_TEXT.CLOSE_FOLDERS", "Ordner schließen"))}"></button>
+        <aside class="sidebar" aria-label="${esc(t("APP_TEXT.FOLDERS", "Ordner"))}">
           <div class="account">
             <button type="button" class="account-btn" data-action="account" aria-expanded="false" aria-controls="account-menu" aria-haspopup="menu"></button>
             <div class="menu" id="account-menu" role="menu" hidden>
@@ -385,9 +385,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </div>
           <ul class="menu folder-menu" id="folder-menu" role="menu" aria-label="${esc(t("FOLDERS_UI.ACTIONS", "Ordneraktionen"))}" hidden></ul>
         </aside>
-        <section class="list-pane" aria-label="Mails">
+        <section class="list-pane" aria-label="${esc(t("APP_TEXT.MAILS", "Mails"))}">
           <div class="pane-head">
-            <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="Ordner ein- oder ausblenden">${icon("menu")}</button>
+            <button type="button" class="icon-btn" data-action="toggle-sidebar" aria-label="${esc(t("APP_TEXT.SHOW_OR_HIDE_FOLDERS", "Ordner ein- oder ausblenden"))}">${icon("menu")}</button>
             <h1 class="title title-md" id="folder-title"></h1>
             <span class="spacer"></span>
             <div class="bar-more view-more">
@@ -407,10 +407,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
                 <button type="button" class="menu-item" role="menuitem" data-action="select-filter" data-filter="none">${icon("close")}<span>${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}</span></button>
               </div>
             </div>
-            <button type="button" class="icon-btn" data-action="m-refresh" aria-label="Aktualisieren" title="Aktualisieren">${icon("refresh")}</button>
+            <button type="button" class="icon-btn" data-action="m-refresh" aria-label="${esc(t("APP_TEXT.REFRESH", "Aktualisieren"))}" title="${esc(t("APP_TEXT.REFRESH", "Aktualisieren"))}">${icon("refresh")}</button>
             <div class="selection-head" id="selection-head" hidden>
               <button type="button" class="icon-btn" data-action="m-clear-selection" aria-label="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))}" title="${esc(t("MESSAGE_LIST.BUTTON_CLEAR_SELECTION", "Auswahl aufheben"))} (Esc)">${icon("close")}</button>
-              <span class="selection-count mono" id="selection-count">0 ausgewählt</span>
+              <span class="selection-count mono" id="selection-count">${esc(t("APP_TEXT.0_SELECTED", "0 ausgewählt"))}</span>
               <span class="spacer"></span>
               <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
               <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
@@ -419,11 +419,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             </div>
           </div>
           <form class="search-wrap" data-action="search">
-            <label class="sr" for="search">Suche</label>
+            <label class="sr" for="search">${esc(t("APP_TEXT.SEARCH", "Suche"))}</label>
             <div class="search-field">
               ${icon("search")}
               <input class="search" id="search" type="search" placeholder="" autocomplete="off" aria-keyshortcuts="Escape">
-              <button type="button" class="icon-btn search-clear" data-action="clear-search" data-clear="field" hidden aria-label="Suche löschen" title="Suche löschen">${icon("close")}</button>
+              <button type="button" class="icon-btn search-clear" data-action="clear-search" data-clear="field" hidden aria-label="${esc(t("APP_TEXT.CLEAR_SEARCH", "Suche löschen"))}" title="${esc(t("APP_TEXT.CLEAR_SEARCH", "Suche löschen"))}">${icon("close")}</button>
             </div>
             <button type="button" class="icon-btn" data-action="adv-search" aria-haspopup="dialog" aria-label="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}" title="${esc(t("SEARCH.TITLE_ADV", "Erweiterte Suche"))}">${icon("filter")}</button>
           </form>
@@ -444,19 +444,19 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="empty" id="list-empty" hidden>
               <span class="icon icon-lg">${icon("inbox")}</span>
               <p class="empty-title"></p>
-              <span class="empty-hint mono">R Aktualisieren · / Suchen</span>
+              <span class="empty-hint mono">${esc(t("APP_TEXT.R_REFRESH_SEARCH", "R Aktualisieren · / Suchen"))}</span>
             </div>
-            <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>Suche aufheben</button>
-            <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>Weitere</span></button>
+            <button type="button" class="text-btn" data-action="clear-search" data-clear="list" hidden>${esc(t("APP_TEXT.CLEAR_SEARCH_SUCHE_AUFHEBEN", "Suche aufheben"))}</button>
+            <button type="button" class="text-btn more-row" data-action="more" hidden>${icon("chevron-down")}<span>${esc(t("APP_TEXT.MORE", "Weitere"))}</span></button>
             <p class="error" id="list-error" role="alert" hidden></p>
           </div>
         </section>
-        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Breite der Liste" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
+        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="${esc(t("APP_TEXT.LIST_WIDTH", "Breite der Liste"))}" tabindex="0" aria-valuemin="288" aria-valuemax="640" aria-valuenow="384"></div>
         <section class="reader" aria-label="${esc(t("GLOBAL.MESSAGE", "Brief"))}">
           <div class="reader-bar" role="toolbar" aria-label="${esc(t("MESSAGE.TOOLBAR", "Aktionen für die geöffnete Mail"))}">
             <div class="bulk-bar" id="bulk-bar" hidden>
               <button type="button" class="icon-btn" data-action="back" aria-label="${esc(t("GLOBAL.BACK", "Zurück"))}" title="${esc(t("GLOBAL.BACK", "Zurück"))}" hidden>${icon("back")}</button>
-              <span class="bulk-bar-count mono" id="bulk-bar-count">0 ausgewählt</span>
+              <span class="bulk-bar-count mono" id="bulk-bar-count">${esc(t("APP_TEXT.0_SELECTED", "0 ausgewählt"))}</span>
               <span class="spacer"></span>
               <button type="button" class="icon-btn" data-action="m-unread-all" aria-label="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}" title="${esc(t("MESSAGE.BUTTON_UNREAD", "Gelesen / ungelesen"))}">${icon("mark-unread")}</button>
               <button type="button" class="icon-btn" data-action="m-flag-all" aria-label="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}" title="${esc(t("MESSAGE_LIST.FLAG_SET", "Markieren"))}">${icon("flag")}</button>
@@ -536,9 +536,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         </section>
         <section class="book" id="book" hidden aria-label="${esc(t("GLOBAL.CONTACTS", "Kontakte"))}"></section>
         <div id="compose-host"></div>
-        <nav class="tabbar" aria-label="Navigation">
-          <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", "Ordner")}</button>
-          <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", "Suche")}</button>
+        <nav class="tabbar" aria-label="${esc(t("APP_TEXT.NAVIGATION", "Navigation"))}">
+          <button type="button" class="text-btn" data-action="pane-folders">${withIcon("folder", t("APP_TEXT.FOLDERS", "Ordner"))}</button>
+          <button type="button" class="text-btn" data-action="pane-search">${withIcon("search", t("APP_TEXT.SEARCH", "Suche"))}</button>
           <button type="button" class="ink-btn" data-action="compose">${withIcon("compose", t("FOLDER_LIST.BUTTON_NEW_MESSAGE", "Neue Nachricht"))}</button>
         </nav>
         <dialog id="settings" class="dialog-wide dialog-settings" aria-labelledby="settings-title">
@@ -552,20 +552,20 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="settings-body">
               <aside class="settings-sidebar">
                 <nav class="settings-nav" aria-label="${esc(t("GLOBAL.SETTINGS", "Einstellungen"))}">
-                  <span class="settings-nav-category" data-cat="personal">Persönlich</span>
+                  <span class="settings-nav-category" data-cat="personal">${esc(t("APP_TEXT.PERSONAL", "Persönlich"))}</span>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="look" aria-pressed="true">${withIcon("eye", t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="general">${withIcon("settings", t("SETTINGS_LABELS.GENERAL", "Allgemein"))}</button>
 
-                  <span class="settings-nav-category" data-cat="account">Konto</span>
+                  <span class="settings-nav-category" data-cat="account">${esc(t("APP_TEXT.ACCOUNT", "Konto"))}</span>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="security">${withIcon("key", t("SETTINGS_LABELS.SECURITY", "Sicherheit"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="accounts">${withIcon("users", t("SETTINGS_LABELS.ACCOUNTS", "Konten"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="identities">${withIcon("identity", t("SETTINGS_ACCOUNTS.LEGEND_IDENTITIES", "Identitäten"))}</button>
 
-                  <span class="settings-nav-category" data-cat="mail">Postfach</span>
+                  <span class="settings-nav-category" data-cat="mail">${esc(t("APP_TEXT.MAILBOX", "Postfach"))}</span>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="folders">${withIcon("folder", t("SETTINGS_LABELS.FOLDERS", "Ordner"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="filters" hidden>${withIcon("filter", t("SETTINGS_LABELS.FILTERS", "Filter"))}</button>
 
-                  <span class="settings-nav-category" data-cat="advanced">Erweitert</span>
+                  <span class="settings-nav-category" data-cat="advanced">${esc(t("APP_TEXT.ADVANCED", "Erweitert"))}</span>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="assistant" hidden>${withIcon("assist", t("AI_COPILOT.TITLE", "Assistent"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="contacts" hidden>${withIcon("contacts", t("SETTINGS_LABELS.CONTACTS", "Kontakte"))}</button>
                   <button type="button" class="text-btn" data-action="settings-section" data-section="keys">${withIcon("key", t("SETTINGS_DESK.KEYS", "Schlüssel"))}</button>
@@ -580,46 +580,46 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <dialog id="keys" aria-labelledby="keys-title">
           <div class="dialog-body">
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
-              <h2 id="keys-title" class="title title-md">Tasten</h2>
+              <h2 id="keys-title" class="title title-md">${esc(t("APP_TEXT.KEYBOARD_SHORTCUTS", "Tasten"))}</h2>
               <span class="spacer"></span>
               <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
             <ul class="keys">
-              <li><span>Nächste, vorige Mail</span><kbd>J</kbd> <kbd>K</kbd></li>
-              <li><span>Öffnen</span><kbd>Enter</kbd></li>
-              <li><span>Unterhaltung öffnen</span><kbd>T</kbd></li>
-              <li><span>Zurück zur Liste (Unterhaltung)</span><kbd>Esc</kbd></li>
-              <li><span>Ordner auf-, zuklappen</span><kbd>←</kbd> <kbd>→</kbd></li>
-              <li><span>Ordneraktionen</span><kbd>Umschalt</kbd> <kbd>F10</kbd></li>
-              <li><span>Schreiben</span><kbd>C</kbd></li>
-              <li><span>Antworten</span><kbd>R</kbd></li>
-              <li><span>Allen antworten</span><kbd>A</kbd></li>
-              <li><span>Weiterleiten</span><kbd>F</kbd></li>
-              <li><span>Archivieren</span><kbd>E</kbd></li>
-              <li><span>Markieren</span><kbd>I</kbd></li>
-              <li><span>Gelesen / ungelesen</span><kbd>U</kbd></li>
-              <li><span>Verschieben</span><kbd>M</kbd></li>
-              <li><span>Löschen</span><kbd>#</kbd> <kbd>Entf</kbd></li>
-              <li><span>Endgültig löschen</span><kbd>Umschalt</kbd> <kbd>Entf</kbd></li>
-              <li><span>Alle auswählen</span><kbd>Strg</kbd> <kbd>A</kbd></li>
-              <li><span>Auswahl erweitern</span><kbd>Umschalt</kbd> <kbd>Klick</kbd></li>
-              <li><span>Aktualisieren</span><kbd>Umschalt</kbd> <kbd>R</kbd></li>
-              <li><span>Seitenleiste</span><kbd>\\</kbd></li>
-              <li><span>Gelesen</span><kbd>Umschalt</kbd> <kbd>U</kbd></li>
-              <li><span>Ordner, Liste, Brief</span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></li>
-              <li><span>Vollbild</span><kbd>V</kbd></li>
-              <li><span>Zitate ein oder aus</span><kbd>Q</kbd></li>
-              <li><span>Senden im Editor</span><kbd>Strg</kbd> <kbd>Enter</kbd></li>
-              <li><span>Entwurf speichern</span><kbd>Strg</kbd> <kbd>S</kbd></li>
-              <li><span>Editor minimieren</span><kbd>,</kbd></li>
-              <li><span>Schließen</span><kbd>Esc</kbd></li>
-              <li><span>Diese Liste</span><kbd>?</kbd></li>
+              <li><span>${esc(t("APP_TEXT.NEXT_PREVIOUS_MAIL", "Nächste, vorige Mail"))}</span><kbd>J</kbd> <kbd>K</kbd></li>
+              <li><span>${esc(t("APP_TEXT.OPEN", "Öffnen"))}</span><kbd>Enter</kbd></li>
+              <li><span>${esc(t("APP_TEXT.OPEN_CONVERSATION", "Unterhaltung öffnen"))}</span><kbd>T</kbd></li>
+              <li><span>${esc(t("APP_TEXT.BACK_TO_LIST_CONVERSATION", "Zurück zur Liste (Unterhaltung)"))}</span><kbd>Esc</kbd></li>
+              <li><span>${esc(t("APP_TEXT.EXPAND_OR_COLLAPSE_FOLDER", "Ordner auf-, zuklappen"))}</span><kbd>←</kbd> <kbd>→</kbd></li>
+              <li><span>${esc(t("APP_TEXT.FOLDER_ACTIONS", "Ordneraktionen"))}</span><kbd>${esc(t("APP_TEXT.SHIFT", "Umschalt"))}</kbd> <kbd>F10</kbd></li>
+              <li><span>${esc(t("APP_TEXT.COMPOSE", "Schreiben"))}</span><kbd>C</kbd></li>
+              <li><span>${esc(t("APP_TEXT.REPLY", "Antworten"))}</span><kbd>R</kbd></li>
+              <li><span>${esc(t("APP_TEXT.REPLY_ALL", "Allen antworten"))}</span><kbd>A</kbd></li>
+              <li><span>${esc(t("APP_TEXT.FORWARD", "Weiterleiten"))}</span><kbd>F</kbd></li>
+              <li><span>${esc(t("APP_TEXT.ARCHIVE", "Archivieren"))}</span><kbd>E</kbd></li>
+              <li><span>${esc(t("APP_TEXT.FLAG", "Markieren"))}</span><kbd>I</kbd></li>
+              <li><span>${esc(t("APP_TEXT.READ_UNREAD", "Gelesen / ungelesen"))}</span><kbd>U</kbd></li>
+              <li><span>${esc(t("APP_TEXT.MOVE", "Verschieben"))}</span><kbd>M</kbd></li>
+              <li><span>${esc(t("APP_TEXT.DELETE", "Löschen"))}</span><kbd>#</kbd> <kbd>${esc(t("APP_TEXT.DEL", "Entf"))}</kbd></li>
+              <li><span>${esc(t("APP_TEXT.DELETE_PERMANENTLY", "Endgültig löschen"))}</span><kbd>${esc(t("APP_TEXT.SHIFT", "Umschalt"))}</kbd> <kbd>${esc(t("APP_TEXT.DEL", "Entf"))}</kbd></li>
+              <li><span>${esc(t("APP_TEXT.SELECT_ALL", "Alle auswählen"))}</span><kbd>${esc(t("APP_TEXT.CTRL", "Strg"))}</kbd> <kbd>A</kbd></li>
+              <li><span>${esc(t("APP_TEXT.EXTEND_SELECTION", "Auswahl erweitern"))}</span><kbd>${esc(t("APP_TEXT.SHIFT", "Umschalt"))}</kbd> <kbd>${esc(t("APP_TEXT.CLICK", "Klick"))}</kbd></li>
+              <li><span>${esc(t("APP_TEXT.REFRESH", "Aktualisieren"))}</span><kbd>${esc(t("APP_TEXT.SHIFT", "Umschalt"))}</kbd> <kbd>R</kbd></li>
+              <li><span>${esc(t("APP_TEXT.SIDEBAR", "Seitenleiste"))}</span><kbd>\\</kbd></li>
+              <li><span>${esc(t("APP_TEXT.READ", "Gelesen"))}</span><kbd>${esc(t("APP_TEXT.SHIFT", "Umschalt"))}</kbd> <kbd>U</kbd></li>
+              <li><span>${esc(t("APP_TEXT.FOLDERS_LIST_MESSAGE", "Ordner, Liste, Brief"))}</span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></li>
+              <li><span>${esc(t("APP_TEXT.FULL_SCREEN", "Vollbild"))}</span><kbd>V</kbd></li>
+              <li><span>${esc(t("APP_TEXT.SHOW_OR_HIDE_QUOTES", "Zitate ein oder aus"))}</span><kbd>Q</kbd></li>
+              <li><span>${esc(t("APP_TEXT.SEND_FROM_EDITOR", "Senden im Editor"))}</span><kbd>${esc(t("APP_TEXT.CTRL", "Strg"))}</kbd> <kbd>Enter</kbd></li>
+              <li><span>${esc(t("APP_TEXT.SAVE_DRAFT", "Entwurf speichern"))}</span><kbd>${esc(t("APP_TEXT.CTRL", "Strg"))}</kbd> <kbd>S</kbd></li>
+              <li><span>${esc(t("APP_TEXT.MINIMIZE_EDITOR", "Editor minimieren"))}</span><kbd>,</kbd></li>
+              <li><span>${esc(t("APP_TEXT.CLOSE", "Schließen"))}</span><kbd>Esc</kbd></li>
+              <li><span>${esc(t("APP_TEXT.THIS_LIST", "Diese Liste"))}</span><kbd>?</kbd></li>
             </ul>
           </div>
         </dialog>
         <dialog id="confirm" aria-labelledby="confirm-title">
           <div class="dialog-body">
-            <h2 id="confirm-title" class="title title-md">Wirklich löschen?</h2>
+            <h2 id="confirm-title" class="title title-md">${esc(t("APP_TEXT.REALLY_DELETE", "Wirklich löschen?"))}</h2>
             <p class="quiet" id="confirm-text" hidden></p>
             <div class="dialog-actions">
               <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
@@ -631,13 +631,13 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <dialog id="picker" aria-labelledby="picker-title">
           <form class="dialog-body" method="dialog" data-action="picker">
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
-              <h2 id="picker-title" class="title title-md">Verschieben nach</h2>
+              <h2 id="picker-title" class="title title-md">${esc(t("APP_TEXT.MOVE_TO", "Verschieben nach"))}</h2>
               <span class="spacer"></span>
               <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
-            <label class="sr" for="picker-q">Ordner suchen</label>
-            <input class="search" id="picker-q" type="search" placeholder="Ordner suchen" autocomplete="off">
-            <div class="picker-list" id="picker-list" role="listbox" aria-label="Ordner"></div>
+            <label class="sr" for="picker-q">${esc(t("APP_TEXT.SEARCH_FOLDERS", "Ordner suchen"))}</label>
+            <input class="search" id="picker-q" type="search" placeholder="${esc(t("APP_TEXT.SEARCH_FOLDERS", "Ordner suchen"))}" autocomplete="off">
+            <div class="picker-list" id="picker-list" role="listbox" aria-label="${esc(t("APP_TEXT.FOLDERS", "Ordner"))}"></div>
           </form>
         </dialog>
         <dialog id="prompt-dlg" aria-labelledby="prompt-title">
@@ -647,7 +647,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <label class="check" id="prompt-remember-row" hidden><input id="prompt-remember" type="checkbox"> ${esc(t("CRYPTO.REMEMBER_SESSION", "Für diese Sitzung merken"))}</label>
             <div class="dialog-actions">
               <button type="button" class="text-btn" data-action="close-dialog">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-              <button type="submit" class="ink-btn">${withIcon("check", "Übernehmen")}</button>
+              <button type="submit" class="ink-btn">${withIcon("check", t("APP_TEXT.APPLY", "Übernehmen"))}</button>
             </div>
           </form>
         </dialog>
@@ -656,7 +656,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             <div class="sheet-head" style="padding:0;border:0;min-height:0">
               <h2 id="lightbox-title" class="title title-md"></h2>
               <span class="spacer"></span>
-              <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="In neuem Tab öffnen" title="In neuem Tab öffnen">${icon("external")}</a>
+              <a class="icon-btn" id="lightbox-open" target="_blank" rel="noopener" aria-label="${esc(t("APP_TEXT.OPEN_IN_NEW_TAB", "In neuem Tab öffnen"))}" title="${esc(t("APP_TEXT.OPEN_IN_NEW_TAB", "In neuem Tab öffnen"))}">${icon("external")}</a>
               <button type="button" class="icon-btn" data-action="close-dialog" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
             </div>
             <div class="lightbox-body" id="lightbox-body"></div>
@@ -695,9 +695,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           </div>
         </dialog>
         <ul class="menu addr-menu" id="addr-menu" role="menu" hidden>
-          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>Mail schreiben</span></button></li>
-          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>Adresse kopieren</span></button></li>
-          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>Mails von dieser Adresse</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-write">${icon("compose")}<span>${esc(t("APP_TEXT.WRITE_MAIL", "Mail schreiben"))}</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-copy">${icon("copy")}<span>${esc(t("APP_TEXT.COPY_ADDRESS", "Adresse kopieren"))}</span></button></li>
+          <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-search">${icon("search")}<span>${esc(t("APP_TEXT.MAILS_FROM_THIS_ADDRESS", "Mails von dieser Adresse"))}</span></button></li>
           <li><button type="button" class="menu-item" role="menuitem" data-action="m-addr-contact" hidden>${icon("contacts")}<span>${esc(t("CONTACTS.BUTTON_ADD_CONTACT", "Kontakt hinzufügen"))}</span></button></li>
         </ul>
       </div>`;
@@ -725,7 +725,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     (next.querySelector("#folder-title") as HTMLElement).textContent = folderName;
     (next.querySelector("#reader-place") as HTMLElement).textContent = folderName;
     const search = next.querySelector("#search") as HTMLInputElement;
-    search.placeholder = `In ${folderName} suchen`;
+    search.placeholder = t("APP_TEXT.SEARCH_IN", "In %FOLDER% suchen").replace("%FOLDER%", () => folderName);
     wireShell();
     if (assist) installAssist(assist);
   };
@@ -944,7 +944,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     const on = force ?? shell.dataset.full !== "true";
     shell.dataset.full = on ? "true" : "false";
     const button = shell.querySelector("[data-action='m-fullscreen']") as HTMLElement | null;
-    if (button) button.innerHTML = `${icon(on ? "fullscreen-exit" : "fullscreen")}<span>${on ? "Vollbild beenden" : "Vollbild"}</span>`;
+    if (button) button.innerHTML = `${icon(on ? "fullscreen-exit" : "fullscreen")}<span>${esc(on ? t("APP_TEXT.EXIT_FULL_SCREEN", "Vollbild beenden") : t("APP_TEXT.FULL_SCREEN", "Vollbild"))}</span>`;
     if (on && !wide()) pane("reader");
   }
 
@@ -1154,10 +1154,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           const url = `${location.origin}${location.pathname.replace(/\/+$/, "")}/?/Mailto/&q[]=/0/?to=%s`;
           navigator.registerProtocolHandler("mailto", url);
           const slot = shell?.querySelector<HTMLElement>("#settings-error");
-          if (slot) { slot.className = "quiet"; slot.hidden = false; slot.textContent = "Die Registrierung wurde im Browser angefragt."; }
+          if (slot) { slot.className = "quiet"; slot.hidden = false; slot.textContent = t("APP_TEXT.REGISTRATION_WAS_REQUESTED_IN_THE_BROWSER", "Die Registrierung wurde im Browser angefragt."); }
         } catch {
           const slot = shell?.querySelector<HTMLElement>("#settings-error");
-          if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = "Der Browser erlaubt diese Registrierung nicht."; }
+          if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = t("APP_TEXT.THE_BROWSER_DOES_NOT_ALLOW_THIS_REGISTRATION", "Der Browser erlaubt diese Registrierung nicht."); }
         }
       } else if (action === "settings-section") {
         section = target.dataset.section || "look";
@@ -1185,7 +1185,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           if (action === "settings-delete") {
             const dialog = shell?.querySelector("#confirm") as HTMLDialogElement | null;
             if (!dialog) return;
-            (dialog.querySelector("#confirm-title") as HTMLElement).textContent = "Wirklich löschen?";
+            (dialog.querySelector("#confirm-title") as HTMLElement).textContent = t("APP_TEXT.REALLY_DELETE", "Wirklich löschen?");
             (dialog.querySelector("#confirm-text") as HTMLElement).hidden = true;
             const ok_ = dialog.querySelector("#confirm-ok") as HTMLElement;
             ok_.className = "danger";
@@ -1312,7 +1312,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             data.body = compileFilterForm(form, capa);
           } catch (error) {
             const slot = shell?.querySelector<HTMLElement>("#settings-error");
-            if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = error instanceof Error ? error.message : "Das Skript lässt sich nicht speichern."; }
+            if (slot) { slot.className = "error"; slot.hidden = false; slot.textContent = error instanceof Error ? error.message : t("APP_TEXT.THE_SCRIPT_CANNOT_BE_SAVED", "Das Skript lässt sich nicht speichern."); }
             return;
           }
         }
@@ -1486,7 +1486,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           if (label) label.textContent = t("SETTINGS_FILTERS.SHOW_RULES", "Als Regeln zeigen");
           if (slot) slot.hidden = true;
         } catch (error) {
-          fail(error instanceof Error ? error.message : "Das Skript lässt sich nicht zeigen.");
+          fail(error instanceof Error ? error.message : t("APP_TEXT.THE_SCRIPT_CANNOT_BE_SHOWN", "Das Skript lässt sich nicht zeigen."));
         }
         return;
       }
@@ -1552,7 +1552,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           event.preventDefault();
           searchField.value = "";
           const status = shell.querySelector("#list-status");
-          if (status) status.textContent = "Suche gelöscht";
+          if (status) status.textContent = t("APP_TEXT.SEARCH_CLEARED", "Suche gelöscht");
           actions.clearSearch();
           return;
         }
@@ -1985,7 +1985,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     consent.id = "consent";
     consent.innerHTML = `
       <div class="dialog-body">
-        <h2 class="title title-md">Assistent</h2>
+        <h2 class="title title-md">${esc(t("APP_TEXT.ASSISTANT", "Assistent"))}</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
           <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
@@ -2109,7 +2109,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         title.title = data.currentName;
         (shell.querySelector("#reader-place") as HTMLElement).textContent = data.currentName;
         const search = shell.querySelector("#search") as HTMLInputElement;
-        if (document.activeElement !== search) search.placeholder = `In ${data.currentName} suchen`;
+        if (document.activeElement !== search) search.placeholder = t("APP_TEXT.SEARCH_IN", "In %FOLDER% suchen").replace("%FOLDER%", () => data.currentName);
       }
     },
     setFolderDesk(desk) {
@@ -2146,8 +2146,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const fieldClear = shell?.querySelector(".search-clear") as HTMLButtonElement | null;
       if (fieldClear) fieldClear.hidden = !(input?.value.trim());
       const names: Record<string, string> = {
-        from: "Von", to: "An", subject: "Betreff", text: "Text", body: "Text",
-        since: "Seit", before: "Bis", attachment: "Mit Anhang", unseen: "Ungelesen", flagged: "Markiert"
+        from: t("APP_TEXT.FROM", "Von"), to: t("APP_TEXT.TO", "An"), subject: t("APP_TEXT.SUBJECT", "Betreff"), text: "Text", body: "Text",
+        since: t("APP_TEXT.SINCE", "Seit"), before: t("APP_TEXT.UNTIL", "Bis"), attachment: t("APP_TEXT.WITH_ATTACHMENT", "Mit Anhang"), unseen: t("APP_TEXT.UNREAD", "Ungelesen"), flagged: t("APP_TEXT.FLAGGED", "Markiert")
       };
       const box = shell?.querySelector("#criteria") as HTMLElement | null;
       if (box) {
@@ -2213,7 +2213,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       lastListKey = currentKey;
       if (box) {
         box.innerHTML = rows.map((row) => {
-          const subject = row.subject || "(ohne Betreff)";
+          const subject = row.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)");
           const group = row.group ? `<h2 class="list-group mono">${esc(row.group)}</h2>` : "";
           const threadText = row.threadCount
             ? `${t("FOLDERS_UI.THREAD_OPEN", "Unterhaltung öffnen")}: ${row.threadCount} ${t("FOLDERS_UI.MAILS", "Mails")}${row.threadUnseen ? `, ${row.threadUnseen} ${t("FOLDERS_UI.UNREAD", "ungelesen")}` : ""}`
@@ -2224,7 +2224,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           return `${group}
           <div class="msg-row${isFresh ? " entering" : ""}${row.threadCount ? " has-thread" : ""}${row.checked ? " checked" : ""}${row.deleted ? " deleted" : ""}${row.unseen ? " unseen" : ""}">
             <span class="unread-slot" aria-hidden="true">${row.unseen ? `<span class="unread-mark"></span>` : ""}</span>
-            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="Auswählen: ${esc(subject)}">
+            <input type="checkbox" class="msg-check" data-action="m-check" data-ref="${row.uid}"${row.checked ? " checked" : ""} aria-label="${esc(t("APP_TEXT.SELECT", "Auswählen: %SUBJECT%").replace("%SUBJECT%", () => subject))}">
             <button type="button" class="msg${row.unseen ? " unseen" : ""}" data-uid="${row.uid}" draggable="true" aria-current="${row.current ? "true" : "false"}">
               <span class="who">${esc(row.who)}</span>
               <span class="when">${rowMarks({ ...row, flagged: false })}${esc(row.when)}</span>
@@ -2232,7 +2232,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <span class="peek">${esc(row.preview)}</span>
             </button>
             ${thread}
-            <div class="msg-actions" role="toolbar" aria-label="Schnellaktionen">
+            <div class="msg-actions" role="toolbar" aria-label="${esc(t("APP_TEXT.QUICK_ACTIONS", "Schnellaktionen"))}">
               <button type="button" class="msg-action msg-action-flag" data-action="m-flag" data-ref="${row.uid}" aria-pressed="${row.flagged ? "true" : "false"}" aria-label="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}: ${esc(subject)}" title="${row.flagged ? t("MESSAGE_LIST.FLAG_REMOVE", "Markierung entfernen") : t("MESSAGE_LIST.FLAG_SET", "Markieren")}">${icon(row.flagged ? "flag-filled" : "flag")}</button>
               <button type="button" class="msg-action msg-action-archive" data-action="m-archive" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}: ${esc(subject)}" title="${esc(t("GLOBAL.TO_ARCHIVE", "Archivieren"))}">${icon("archive")}</button>
               <button type="button" class="msg-action msg-action-delete" data-action="m-delete" data-ref="${row.uid}" aria-label="${esc(t("GLOBAL.DELETE", "Löschen"))}: ${esc(subject)}" title="${esc(t("GLOBAL.DELETE", "Löschen"))}">${icon("delete")}</button>
@@ -2304,7 +2304,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       paneHead?.classList.toggle("is-selecting", on);
       if (head) head.hidden = !on;
       if (bulkBar) bulkBar.hidden = !on;
-      const text = count === 1 ? "1 ausgewählt" : `${count} ausgewählt`;
+      const text = t("APP_TEXT.SELECTED", "%COUNT% ausgewählt").replace("%COUNT%", String(count));
       if (countLabel) countLabel.textContent = text;
       if (bulkBarCount) bulkBarCount.textContent = text;
     },
@@ -2332,14 +2332,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       button.disabled = busy;
       button.innerHTML = icon(busy ? "loading" : "refresh");
       const status = shell?.querySelector("#list-status");
-      if (status) status.textContent = busy ? "Wird aktualisiert …" : "";
+      if (status) status.textContent = busy ? t("APP_TEXT.REFRESHING", "Wird aktualisiert …") : "";
     },
     setAccounts(items) {
       const box = shell?.querySelector("#account-list") as HTMLElement | null;
       if (!box) return;
       const others = items.filter((item) => !item.current);
       box.innerHTML = others.length
-        ? `<p class="menu-label mono">Konten</p>` + others.map((item) =>
+        ? `<p class="menu-label mono">${esc(t("APP_TEXT.ACCOUNTS", "Konten"))}</p>` + others.map((item) =>
           `<button type="button" class="menu-item" role="menuitem" data-action="m-switch" data-email="${esc(item.email)}">${icon("user")}<span class="grow">${esc(item.email)}</span>${item.unread ? `<span class="count">${item.unread}</span>` : ""}</button>`
         ).join("") + `<hr class="menu-sep">`
         : "";
@@ -2355,7 +2355,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const rows = folders.filter((folder) => folder.fullName !== exclude && (!q || folder.fullName.toLowerCase().includes(q)));
         list.innerHTML = rows.map((folder) =>
           `<button type="button" class="folder" role="option" data-pick="${esc(folder.fullName)}" style="padding-left:${8 + (q ? 0 : folder.depth) * 12}px">${icon(ROLE_ICON[folder.role] || (folder.fullName.toUpperCase() === "INBOX" ? "inbox" : "folder"))}<span class="folder-name">${esc(q ? folder.fullName : folder.name)}</span></button>`
-        ).join("") || `<p class="quiet">Kein Ordner gefunden.</p>`;
+        ).join("") || `<p class="quiet">${esc(t("APP_TEXT.NO_FOLDER_FOUND", "Kein Ordner gefunden."))}</p>`;
       };
       query.value = "";
       paint();
@@ -2442,7 +2442,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (slot) slot.textContent = text;
     },
     confirmDelete() {
-      return this.confirm("Wirklich löschen?", "", t("GLOBAL.DELETE", "Löschen"));
+      return this.confirm(t("APP_TEXT.REALLY_DELETE", "Wirklich löschen?"), "", t("GLOBAL.DELETE", "Löschen"));
     },
     confirmConsent(text) {
       const dialog = shell?.querySelector("#consent") as HTMLDialogElement | null;
@@ -2605,7 +2605,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           button.className = "prompt";
           button.dataset.action = "use-reply";
           button.dataset.index = String(index);
-          button.textContent = reply.label;
+          button.textContent = reply.label || t("AI_COPILOT.ACTION_REPLY", "Antworten");
           prompts.append(button);
         });
         group.append(label, prompts);
@@ -2759,7 +2759,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!hint) return;
       hint.hidden = !subject;
       const span = hint.querySelector("span");
-      if (span) span.textContent = subject ? `Betreff: ${subject}` : "";
+      if (span) span.textContent = subject ? t("APP_TEXT.SUBJECT_BETREFF", "Betreff: %SUBJECT%").replace("%SUBJECT%", () => subject) : "";
       hint.dataset.subject = subject;
     },
     showReauth() {

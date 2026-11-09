@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 /** Sieve-Teilmenge für das Filterformular. Alles andere bleibt Rohtext. */
 
 export type Field = "from" | "to" | "subject" | "header" | "body" | "size";
@@ -53,7 +54,7 @@ export function parseFilterScript(source: string): ParseResult {
     const script = walk(tokens);
     return { ok: true, script };
   } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "Das Skript lässt sich nicht in Regeln lesen." };
+    return { ok: false, reason: error instanceof Error ? error.message : t("APP_TEXT.THE_SCRIPT_CANNOT_BE_READ_AS_RULES", "Das Skript lässt sich nicht in Regeln lesen.") };
   }
 }
 
@@ -63,12 +64,12 @@ export function compileFilterScript(script: FilterScript, capa: string[]): strin
   const blocks: string[] = [];
   const rules = script.rules.filter((rule) => rule.actions.length || rule.conditions.length);
   rules.forEach((rule, index) => {
-    if (!rule.actions.length) throw new Error(`Regel ${index + 1} braucht eine Aktion.`);
+    if (!rule.actions.length) throw new Error(t("APP_TEXT.RULE_NEEDS_AN_ACTION", "Regel %NAME% braucht eine Aktion.").replace("%NAME%", () => String(index + 1)));
     blocks.push(compileRule(rule, index, need));
   });
   if (script.vacation?.on) blocks.unshift(compileVacation(script.vacation, need));
   for (const name of need) {
-    if (!has(name)) throw new Error(`Der Server nennt die Erweiterung „${name}“ nicht.`);
+    if (!has(name)) throw new Error(t("APP_TEXT.THE_SERVER_DOES_NOT_LIST_THE_EXTENSION", "Der Server nennt die Erweiterung „%NAME%“ nicht.").replace("%NAME%", () => name));
   }
   const require = need.size ? `require [${[...need].map(quote).join(", ")}];\r\n\r\n` : "";
   return `${require}# This is SnappyMail sieve script.\r\n${blocks.join("\r\n")}`;
@@ -129,17 +130,17 @@ function readRule(node: HTMLElement): Rule {
 }
 
 function compileVacation(vacation: Vacation, need: Set<string>): string {
-  if (!vacation.text.trim()) throw new Error("Die Abwesenheitsnotiz braucht einen Text.");
+  if (!vacation.text.trim()) throw new Error(t("APP_TEXT.THE_VACATION_NOTICE_NEEDS_A_TEXT", "Die Abwesenheitsnotiz braucht einen Text."));
   need.add("vacation");
   const days = Math.max(1, Number.parseInt(vacation.days, 10) || 7);
   const addresses = vacation.addresses.split(/[,;\s]+/).map((item) => item.trim()).filter(Boolean);
   addresses.forEach((email) => {
-    if (!email.includes("@")) throw new Error("Jede Adresse der Abwesenheitsnotiz braucht ein @.");
+    if (!email.includes("@")) throw new Error(t("APP_TEXT.EVERY_VACATION_ADDRESS_NEEDS_AN", "Jede Adresse der Abwesenheitsnotiz braucht ein @."));
   });
   const lines: string[] = [];
   if (vacation.from || vacation.until) {
-    if (vacation.from && !/^\d{4}-\d{2}-\d{2}$/.test(vacation.from)) throw new Error("Der Beginn braucht das Format JJJJ-MM-TT.");
-    if (vacation.until && !/^\d{4}-\d{2}-\d{2}$/.test(vacation.until)) throw new Error("Das Ende braucht das Format JJJJ-MM-TT.");
+    if (vacation.from && !/^\d{4}-\d{2}-\d{2}$/.test(vacation.from)) throw new Error(t("APP_TEXT.THE_START_MUST_USE_THE_FORMAT_YYYY_MM_DD", "Der Beginn braucht das Format JJJJ-MM-TT."));
+    if (vacation.until && !/^\d{4}-\d{2}-\d{2}$/.test(vacation.until)) throw new Error(t("APP_TEXT.THE_END_MUST_USE_THE_FORMAT_YYYY_MM_DD", "Das Ende braucht das Format JJJJ-MM-TT."));
     need.add("relational");
     need.add("date");
     const tests = [
@@ -163,7 +164,7 @@ function vacationCommand(vacation: Vacation, days: number, addresses: string[]):
 }
 
 function compileRule(rule: Rule, index: number, need: Set<string>): string {
-  const name = rule.name.trim() || `Regel ${index + 1}`;
+  const name = rule.name.trim() || t("APP_TEXT.RULE_NAME", "Regel %NAME%").replace("%NAME%", () => String(index + 1));
   const tests = rule.conditions.map((condition) => conditionToTest(condition, need));
   const actions = rule.actions.map((action) => actionToCommand(action, need));
   const body = actions.map((line) => `    ${line}`).join("\r\n");
@@ -176,10 +177,10 @@ function compileRule(rule: Rule, index: number, need: Set<string>): string {
 }
 
 function conditionToTest(condition: Condition, need: Set<string>): string {
-  if (!condition.value) throw new Error("Eine Bedingung braucht einen Wert.");
+  if (!condition.value) throw new Error(t("APP_TEXT.A_CONDITION_NEEDS_A_VALUE", "Eine Bedingung braucht einen Wert."));
   if (condition.field === "size") {
-    if (condition.op !== "over" && condition.op !== "under") throw new Error("Die Größe vergleicht nur größer oder kleiner.");
-    if (!/^[0-9]+[KkMmGg]?$/.test(condition.value)) throw new Error("Die Größe ist eine Zahl, optional mit K, M oder G.");
+    if (condition.op !== "over" && condition.op !== "under") throw new Error(t("APP_TEXT.SIZE_CAN_ONLY_COMPARE_GREATER_OR_LESS", "Die Größe vergleicht nur größer oder kleiner."));
+    if (!/^[0-9]+[KkMmGg]?$/.test(condition.value)) throw new Error(t("APP_TEXT.SIZE_IS_A_NUMBER_OPTIONALLY_WITH_K_M_OR_G", "Die Größe ist eine Zahl, optional mit K, M oder G."));
     return `size :${condition.op} ${condition.value}`;
   }
   let tag = ":contains";
@@ -187,7 +188,7 @@ function conditionToTest(condition: Condition, need: Set<string>): string {
   else if (condition.op === "regex") { tag = ":regex"; need.add("regex"); }
   else if (condition.op === "starts") tag = ":matches";
   else if (condition.op === "ends") tag = ":matches";
-  else if (condition.op !== "contains") throw new Error("Dieser Vergleich gilt nur für die Größe.");
+  else if (condition.op !== "contains") throw new Error(t("APP_TEXT.THIS_COMPARISON_ONLY_APPLIES_TO_SIZE", "Dieser Vergleich gilt nur für die Größe."));
   const written = condition.op === "starts" ? `${condition.value}*` : condition.op === "ends" ? `*${condition.value}` : condition.value;
   if (condition.field === "body") {
     need.add("body");
@@ -197,32 +198,32 @@ function conditionToTest(condition: Condition, need: Set<string>): string {
     : condition.field === "to" ? "To"
     : condition.field === "subject" ? "Subject"
     : condition.header.trim();
-  if (!header) throw new Error("Die Kopfzeile braucht einen Namen.");
+  if (!header) throw new Error(t("APP_TEXT.THE_HEADER_NEEDS_A_NAME", "Die Kopfzeile braucht einen Namen."));
   const list = condition.field === "to" ? `["To", "Cc"]` : `[${quote(header)}]`;
   return `header ${tag} ${list} ${quote(written)}`;
 }
 
 function actionToCommand(action: Action, need: Set<string>): string {
   if (action.type === "move" || action.type === "copy") {
-    if (!action.value) throw new Error("Der Ordner fehlt.");
+    if (!action.value) throw new Error(t("APP_TEXT.THE_FOLDER_IS_MISSING", "Der Ordner fehlt."));
     need.add("fileinto");
     if (action.type === "copy") need.add("copy");
     return `fileinto${action.type === "copy" ? " :copy" : ""} ${quote(action.value)};`;
   }
   if (action.type === "forward" || action.type === "forward-drop") {
-    if (!action.value.includes("@")) throw new Error("Die Weiterleitung braucht eine E-Mail-Adresse.");
+    if (!action.value.includes("@")) throw new Error(t("APP_TEXT.FORWARDING_NEEDS_AN_EMAIL_ADDRESS", "Die Weiterleitung braucht eine E-Mail-Adresse."));
     const redirect = `redirect ${quote(action.value)};`;
     return action.type === "forward-drop" ? `${redirect}\r\n    discard;` : redirect;
   }
   if (action.type === "reject") {
-    if (!action.value) throw new Error("Die Ablehnung braucht einen Text.");
+    if (!action.value) throw new Error(t("APP_TEXT.THE_REJECTION_NEEDS_A_TEXT", "Die Ablehnung braucht einen Text."));
     need.add("reject");
     return `reject ${quote(action.value)};`;
   }
   if (action.type === "discard") return "discard;";
   if (action.type === "seen") { need.add("imap4flags"); return 'addflag "\\\\Seen";'; }
   if (action.type === "flag") {
-    if (!action.value || /\s/.test(action.value)) throw new Error("Die Markierung ist ein Wort ohne Leerzeichen.");
+    if (!action.value || /\s/.test(action.value)) throw new Error(t("APP_TEXT.THE_FLAG_IS_ONE_WORD_WITHOUT_SPACES", "Die Markierung ist ein Wort ohne Leerzeichen."));
     need.add("imap4flags");
     return `addflag ${quote(action.value)};`;
   }
@@ -248,7 +249,7 @@ function tokenize(source: string): Tok[] {
     }
     if (char === "/" && source[i + 1] === "*") {
       const end = source.indexOf("*/", i + 2);
-      if (end < 0) throw new Error("Ein Kommentar ist nicht geschlossen.");
+      if (end < 0) throw new Error(t("APP_TEXT.A_COMMENT_IS_NOT_CLOSED", "Ein Kommentar ist nicht geschlossen."));
       const body = source.slice(i + 2, end);
       if (body.trimStart().startsWith("@disabled")) {
         out.push({ k: "off" });
@@ -265,7 +266,7 @@ function tokenize(source: string): Tok[] {
         v += source[i];
         i += 1;
       }
-      if (source[i] !== '"') throw new Error("Eine Zeichenkette ist nicht geschlossen.");
+      if (source[i] !== '"') throw new Error(t("APP_TEXT.A_STRING_IS_NOT_CLOSED", "Eine Zeichenkette ist nicht geschlossen."));
       out.push({ k: "str", v });
       i += 1;
       continue;
@@ -274,7 +275,7 @@ function tokenize(source: string): Tok[] {
       i += 1;
       let v = "";
       while (i < source.length && /[A-Za-z0-9_-]/.test(source[i])) { v += source[i]; i += 1; }
-      if (!v) throw new Error("Ein Schlüsselwort nach dem Doppelpunkt fehlt.");
+      if (!v) throw new Error(t("APP_TEXT.A_KEYWORD_AFTER_THE_COLON_IS_MISSING", "Ein Schlüsselwort nach dem Doppelpunkt fehlt."));
       out.push({ k: "tag", v: v.toLowerCase() });
       continue;
     }
@@ -293,7 +294,7 @@ function tokenize(source: string): Tok[] {
     }
     const punct: Record<string, "lpar" | "rpar" | "lbrace" | "rbrace" | "lbrack" | "rbrack" | "comma" | "semi"> = { "(": "lpar", ")": "rpar", "{": "lbrace", "}": "rbrace", "[": "lbrack", "]": "rbrack", ",": "comma", ";": "semi" };
     const kind = punct[char];
-    if (!kind) throw new Error(`Unbekanntes Zeichen „${char}“.`);
+    if (!kind) throw new Error(t("APP_TEXT.UNKNOWN_CHARACTER", "Unbekanntes Zeichen „%NAME%“.").replace("%NAME%", () => char));
     out.push({ k: kind });
     i += 1;
   }
@@ -303,7 +304,7 @@ function tokenize(source: string): Tok[] {
 class Cursor {
   constructor(private readonly tokens: Tok[], private at = 0) {}
   peek(): Tok | null { return this.tokens[this.at] || null; }
-  take(): Tok { const tok = this.tokens[this.at]; if (!tok) throw new Error("Das Skript endet zu früh."); this.at += 1; return tok; }
+  take(): Tok { const tok = this.tokens[this.at]; if (!tok) throw new Error(t("APP_TEXT.THE_SCRIPT_ENDS_TOO_EARLY", "Das Skript endet zu früh.")); this.at += 1; return tok; }
   eat(kind: Tok["k"]): boolean { if (this.peek()?.k === kind) { this.at += 1; return true; } return false; }
 }
 
@@ -317,16 +318,16 @@ function walk(tokens: Tok[]): FilterScript {
     const tok = cur.peek();
     if (tok?.k === "name") { pending = tok.v; cur.take(); continue; }
     if (tok?.k === "off") { disabled = true; cur.take(); continue; }
-    if (tok?.k !== "id") throw new Error("An dieser Stelle steht kein Befehl.");
+    if (tok?.k !== "id") throw new Error(t("APP_TEXT.THERE_IS_NO_COMMAND_AT_THIS_POSITION", "An dieser Stelle steht kein Befehl."));
     const word = tok.v;
     cur.take();
     if (word === "require") { skipRequire(cur); pending = ""; disabled = false; continue; }
     if (word === "if") {
       const test = readTest(cur);
-      if (cur.take().k !== "lbrace") throw new Error("Dem Vergleich fehlt der Block.");
+      if (cur.take().k !== "lbrace") throw new Error(t("APP_TEXT.THE_COMPARISON_HAS_NO_BLOCK", "Dem Vergleich fehlt der Block."));
       const commands = readCommands(cur);
       if (isVacation(test, commands)) {
-        if (vacation) throw new Error("Mehr als eine Abwesenheitsnotiz.");
+        if (vacation) throw new Error(t("APP_TEXT.MORE_THAN_ONE_VACATION_NOTICE", "Mehr als eine Abwesenheitsnotiz."));
         vacation = vacationFrom(test, commands);
       } else rules.push(ruleFrom(pending, !disabled, test, commands));
       pending = "";
@@ -335,7 +336,7 @@ function walk(tokens: Tok[]): FilterScript {
     }
     const commands = readOneCommand(word, cur);
     if (word === "vacation") {
-      if (vacation) throw new Error("Mehr als eine Abwesenheitsnotiz.");
+      if (vacation) throw new Error(t("APP_TEXT.MORE_THAN_ONE_VACATION_NOTICE", "Mehr als eine Abwesenheitsnotiz."));
       vacation = vacationFrom(null, commands);
     } else rules.push(ruleFrom(pending, !disabled, null, commands));
     pending = "";
@@ -349,10 +350,10 @@ function skipRequire(cur: Cursor): void {
     if (cur.peek()?.k === "lbrack") {
       cur.take();
       while (cur.peek() && cur.peek()?.k !== "rbrack") cur.take();
-      if (cur.take().k !== "rbrack") throw new Error("require ist nicht geschlossen.");
+      if (cur.take().k !== "rbrack") throw new Error(t("APP_TEXT.REQUIRE_IS_NOT_CLOSED", "require ist nicht geschlossen."));
     } else cur.take();
   }
-  if (!cur.eat("semi")) throw new Error("require endet nicht mit einem Strichpunkt.");
+  if (!cur.eat("semi")) throw new Error(t("APP_TEXT.REQUIRE_DOES_NOT_END_WITH_A_SEMICOLON", "require endet nicht mit einem Strichpunkt."));
 }
 
 interface Test { kind: "all" | "any" | "one"; tests: OneTest[] }
@@ -366,15 +367,15 @@ interface Cmd { name: string; copy: boolean; args: string[] }
 
 function readTest(cur: Cursor): Test {
   const tok = cur.take();
-  if (tok.k !== "id") throw new Error("Dem if fehlt der Vergleich.");
+  if (tok.k !== "id") throw new Error(t("APP_TEXT.THE_IF_HAS_NO_COMPARISON", "Dem if fehlt der Vergleich."));
   if (tok.v === "allof" || tok.v === "anyof") {
-    if (cur.take().k !== "lpar") throw new Error("allof oder anyof braucht Klammern.");
+    if (cur.take().k !== "lpar") throw new Error(t("APP_TEXT.ALLOF_OR_ANYOF_NEEDS_PARENTHESES", "allof oder anyof braucht Klammern."));
     const tests: OneTest[] = [];
     while (!cur.eat("rpar")) {
       tests.push(readOneTest(cur));
       cur.eat("comma");
     }
-    if (!tests.length) throw new Error("Der Vergleich ist leer.");
+    if (!tests.length) throw new Error(t("APP_TEXT.THE_COMPARISON_IS_EMPTY", "Der Vergleich ist leer."));
     return { kind: tok.v === "anyof" ? "any" : "all", tests };
   }
   return { kind: "one", tests: [readOneTest(cur, tok)] };
@@ -382,13 +383,13 @@ function readTest(cur: Cursor): Test {
 
 function readOneTest(cur: Cursor, first?: Tok): OneTest {
   const tok = first || cur.take();
-  if (tok.k !== "id") throw new Error("Unbekannter Vergleich.");
+  if (tok.k !== "id") throw new Error(t("APP_TEXT.UNKNOWN_COMPARISON", "Unbekannter Vergleich."));
   if (tok.v === "true") return { kind: "true" };
   if (tok.v === "size") {
     const tag = cur.take();
-    if (tag.k !== "tag" || (tag.v !== "over" && tag.v !== "under")) throw new Error("size kennt hier nur :over und :under.");
+    if (tag.k !== "tag" || (tag.v !== "over" && tag.v !== "under")) throw new Error(t("APP_TEXT.SIZE_ONLY_KNOWS_OVER_AND_UNDER_HERE", "size kennt hier nur :over und :under."));
     const num = cur.take();
-    if (num.k !== "num") throw new Error("size braucht eine Zahl.");
+    if (num.k !== "num") throw new Error(t("APP_TEXT.SIZE_NEEDS_A_NUMBER", "size braucht eine Zahl."));
     return { kind: "size", op: tag.v, value: num.v };
   }
   if (tok.v === "currentdate") {
@@ -398,14 +399,14 @@ function readOneTest(cur: Cursor, first?: Tok): OneTest {
       const item = cur.take();
       if (item.k === "tag") tags.push(item.v);
       else if (item.k === "str") strings.push(item.v);
-      else throw new Error("currentdate hat eine unbekannte Form.");
+      else throw new Error(t("APP_TEXT.CURRENTDATE_HAS_AN_UNKNOWN_FORM", "currentdate hat eine unbekannte Form."));
     }
-    if (!tags.includes("value") || strings[1] !== "date" || !strings[2]) throw new Error("Der Zeitraum nutzt currentdate :value.");
+    if (!tags.includes("value") || strings[1] !== "date" || !strings[2]) throw new Error(t("APP_TEXT.THE_PERIOD_USES_CURRENTDATE_VALUE", "Der Zeitraum nutzt currentdate :value."));
     if (strings[0] === "ge") return { kind: "date", which: "from", value: strings[2] };
     if (strings[0] === "le") return { kind: "date", which: "until", value: strings[2] };
-    throw new Error("Der Zeitraum vergleicht nur ab und bis.");
+    throw new Error(t("APP_TEXT.THE_PERIOD_ONLY_COMPARES_FROM_AND_UNTIL", "Der Zeitraum vergleicht nur ab und bis."));
   }
-  if (tok.v !== "header" && tok.v !== "body" && tok.v !== "address") throw new Error(`Der Vergleich „${tok.v}“ steht nicht im Formular.`);
+  if (tok.v !== "header" && tok.v !== "body" && tok.v !== "address") throw new Error(t("APP_TEXT.THE_COMPARISON_IS_NOT_IN_THE_FORM", "Der Vergleich „%NAME%“ steht nicht im Formular.").replace("%NAME%", () => String(tok.v)));
   const tags: string[] = [];
   const strings: string[][] = [];
   while (cur.peek() && !["comma", "rpar", "lbrace"].includes(cur.peek()?.k || "")) {
@@ -414,21 +415,21 @@ function readOneTest(cur: Cursor, first?: Tok): OneTest {
     strings.push(readStringList(cur));
   }
   const op = opFromTags(tags);
-  if (!op) throw new Error("Dieser Vergleich steht nicht im Formular.");
+  if (!op) throw new Error(t("APP_TEXT.THIS_COMPARISON_IS_NOT_IN_THE_FORM", "Dieser Vergleich steht nicht im Formular."));
   if (tok.v === "body") {
     const value = strings[0]?.[0] || "";
-    if (strings.length !== 1 || strings[0].length !== 1) throw new Error("Der Textvergleich hat mehrere Werte.");
+    if (strings.length !== 1 || strings[0].length !== 1) throw new Error(t("APP_TEXT.THE_TEXT_COMPARISON_HAS_SEVERAL_VALUES", "Der Textvergleich hat mehrere Werte."));
     return { kind: "header", name: "body", extra: "", op, value };
   }
-  if (strings.length < 2) throw new Error("Dem Kopfzeilenvergleich fehlt der Wert.");
+  if (strings.length < 2) throw new Error(t("APP_TEXT.THE_HEADER_COMPARISON_HAS_NO_VALUE", "Dem Kopfzeilenvergleich fehlt der Wert."));
   const names = strings[0];
   const values = strings[1];
-  if (values.length !== 1) throw new Error("Ein Vergleich mit mehreren Werten bleibt im Rohtext.");
+  if (values.length !== 1) throw new Error(t("APP_TEXT.A_COMPARISON_WITH_SEVERAL_VALUES_STAYS_IN_RAW_TE", "Ein Vergleich mit mehreren Werten bleibt im Rohtext."));
   const known = names.length === 1 && names[0].toLowerCase() === "from" ? "from"
     : names.length === 1 && names[0].toLowerCase() === "subject" ? "subject"
     : (names.length === 1 && names[0].toLowerCase() === "to") || (names.length === 2 && names.map((item) => item.toLowerCase()).sort().join() === "cc,to") ? "to"
     : names.length === 1 ? "header" : "";
-  if (!known) throw new Error("Diese Kopfzeilen bleiben im Rohtext.");
+  if (!known) throw new Error(t("APP_TEXT.THESE_HEADERS_STAY_IN_RAW_TEXT", "Diese Kopfzeilen bleiben im Rohtext."));
   return { kind: "header", name: known, extra: known === "header" ? names[0] : "", op, value: values[0] };
 }
 
@@ -446,14 +447,14 @@ function readStringList(cur: Cursor): string[] {
     const list: string[] = [];
     while (!cur.eat("rbrack")) {
       const tok = cur.take();
-      if (tok.k !== "str") throw new Error("In der Liste steht keine Zeichenkette.");
+      if (tok.k !== "str") throw new Error(t("APP_TEXT.THE_LIST_CONTAINS_NO_STRING", "In der Liste steht keine Zeichenkette."));
       list.push(tok.v);
       cur.eat("comma");
     }
     return list;
   }
   const tok = cur.take();
-  if (tok.k !== "str") throw new Error("Hier steht keine Zeichenkette.");
+  if (tok.k !== "str") throw new Error(t("APP_TEXT.THERE_IS_NO_STRING_HERE", "Hier steht keine Zeichenkette."));
   return [tok.v];
 }
 
@@ -461,11 +462,11 @@ function readCommands(cur: Cursor): Cmd[] {
   const list: Cmd[] = [];
   while (cur.peek() && cur.peek()?.k !== "rbrace") {
     const tok = cur.take();
-    if (tok.k !== "id") throw new Error("In der Regel steht kein Befehl.");
-    if (tok.v === "if") throw new Error("Verschachtelte Regeln bleiben im Rohtext.");
+    if (tok.k !== "id") throw new Error(t("APP_TEXT.THE_RULE_CONTAINS_NO_COMMAND", "In der Regel steht kein Befehl."));
+    if (tok.v === "if") throw new Error(t("APP_TEXT.NESTED_RULES_STAY_IN_RAW_TEXT", "Verschachtelte Regeln bleiben im Rohtext."));
     list.push(readOneCommand(tok.v, cur)[0]);
   }
-  if (cur.take().k !== "rbrace") throw new Error("Der Block ist nicht geschlossen.");
+  if (cur.take().k !== "rbrace") throw new Error(t("APP_TEXT.THE_BLOCK_IS_NOT_CLOSED", "Der Block ist nicht geschlossen."));
   return list;
 }
 
@@ -484,18 +485,18 @@ function readOneCommand(name: string, cur: Cursor): Cmd[] {
         if (tok.v === "addresses") args.push(`addresses:${readStringList(cur).join(",")}`);
         else {
           const value = cur.take();
-          if (value.k !== "str" && value.k !== "num") throw new Error(`:${tok.v} hat einen unbekannten Wert.`);
+          if (value.k !== "str" && value.k !== "num") throw new Error(t("APP_TEXT.HAS_AN_UNKNOWN_VALUE", ":%NAME% hat einen unbekannten Wert.").replace("%NAME%", () => String(tok.v)));
           args.push(`${tok.v}:${value.v}`);
         }
-      } else if (tok.v !== "copy" && tok.v !== "mime") throw new Error(`Die Angabe :${tok.v} bleibt im Rohtext.`);
+      } else if (tok.v !== "copy" && tok.v !== "mime") throw new Error(t("APP_TEXT.THE_OPTION_STAYS_IN_RAW_TEXT", "Die Angabe :%NAME% bleibt im Rohtext.").replace("%NAME%", () => String(tok.v)));
       continue;
     }
     if (tok?.k === "str" || tok?.k === "num") { args.push(tok.v); cur.take(); continue; }
-    throw new Error(`Der Befehl „${name}“ bleibt im Rohtext.`);
+    throw new Error(t("APP_TEXT.THE_COMMAND_STAYS_IN_RAW_TEXT", "Der Befehl „%NAME%“ bleibt im Rohtext.").replace("%NAME%", () => name));
   }
-  if (!cur.eat("semi")) throw new Error(`„${name}“ endet nicht mit einem Strichpunkt.`);
+  if (!cur.eat("semi")) throw new Error(t("APP_TEXT.DOES_NOT_END_WITH_A_SEMICOLON", "„%NAME%“ endet nicht mit einem Strichpunkt.").replace("%NAME%", () => name));
   if (!["fileinto", "redirect", "reject", "ereject", "discard", "stop", "addflag", "vacation"].includes(name)) {
-    throw new Error(`Der Befehl „${name}“ bleibt im Rohtext.`);
+    throw new Error(t("APP_TEXT.THE_COMMAND_STAYS_IN_RAW_TEXT", "Der Befehl „%NAME%“ bleibt im Rohtext.").replace("%NAME%", () => name));
   }
   return [{ name, copy: copy || tags.includes("copy"), args }];
 }
@@ -508,7 +509,7 @@ function isVacation(test: Test | null, commands: Cmd[]): boolean {
 
 function vacationFrom(test: Test | null, commands: Cmd[]): Vacation {
   const cmd = commands.find((item) => item.name === "vacation");
-  if (!cmd) throw new Error("Die Abwesenheitsnotiz hat keinen Text.");
+  if (!cmd) throw new Error(t("APP_TEXT.THE_VACATION_NOTICE_HAS_NO_TEXT", "Die Abwesenheitsnotiz hat keinen Text."));
   const text = [...cmd.args].reverse().find((item) => !/^(days|subject|addresses|from|handle):/.test(item)) || "";
   const pick = (key: string) => cmd.args.find((item) => item.startsWith(`${key}:`))?.slice(key.length + 1) || "";
   const from = test?.tests.find((item) => item.kind === "date" && item.which === "from");
@@ -529,7 +530,7 @@ function ruleFrom(name: string, enabled: boolean, test: Test | null, commands: C
   if (test) {
     test.tests.forEach((item) => {
       if (item.kind === "true") return;
-      if (item.kind === "date") throw new Error("Ein Zeitraum gehört zur Abwesenheitsnotiz.");
+      if (item.kind === "date") throw new Error(t("APP_TEXT.A_PERIOD_BELONGS_TO_THE_VACATION_NOTICE", "Ein Zeitraum gehört zur Abwesenheitsnotiz."));
       if (item.kind === "size") {
         conditions.push({ field: "size", header: "", op: item.op, value: item.value });
         return;
@@ -539,7 +540,7 @@ function ruleFrom(name: string, enabled: boolean, test: Test | null, commands: C
       if (op === "starts") {
         if (value.endsWith("*") && !value.slice(0, -1).includes("*")) { op = "starts"; value = value.slice(0, -1); }
         else if (value.startsWith("*") && !value.slice(1).includes("*")) { op = "ends"; value = value.slice(1); }
-        else throw new Error("Dieser Platzhalter bleibt im Rohtext.");
+        else throw new Error(t("APP_TEXT.THIS_PLACEHOLDER_STAYS_IN_RAW_TEXT", "Dieser Platzhalter bleibt im Rohtext."));
       }
       conditions.push({
         field: item.name === "body" ? "body" : item.name as Field,
@@ -552,7 +553,7 @@ function ruleFrom(name: string, enabled: boolean, test: Test | null, commands: C
   const actions: Action[] = [];
   for (let i = 0; i < commands.length; i += 1) {
     const cmd = commands[i];
-    if (cmd.name === "vacation") throw new Error("Die Abwesenheitsnotiz steht für sich.");
+    if (cmd.name === "vacation") throw new Error(t("APP_TEXT.THE_VACATION_NOTICE_STANDS_ON_ITS_OWN", "Die Abwesenheitsnotiz steht für sich."));
     if (cmd.name === "redirect" && commands[i + 1]?.name === "discard") {
       actions.push({ type: "forward-drop", value: cmd.args[0] || "" });
       i += 1;
@@ -568,7 +569,7 @@ function ruleFrom(name: string, enabled: boolean, test: Test | null, commands: C
       actions.push(flag === "\\Seen" ? { type: "seen", value: "" } : { type: "flag", value: flag });
     }
   }
-  if (!actions.length) throw new Error("Die Regel hat keine Aktion.");
+  if (!actions.length) throw new Error(t("APP_TEXT.THE_RULE_HAS_NO_ACTION", "Die Regel hat keine Aktion."));
   return { name, enabled, match: test?.kind === "any" ? "any" : "all", conditions, actions };
 }
 

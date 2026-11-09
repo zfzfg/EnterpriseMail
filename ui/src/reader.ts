@@ -420,8 +420,8 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
           <li class="bulk-msg-item">
             <span class="bulk-msg-status" aria-hidden="true">${msg.unseen ? '<span class="unread-mark"></span>' : ""}${msg.flagged ? icon("flag-filled") : ""}</span>
             <div class="bulk-msg-meta">
-              <span class="bulk-msg-who">${esc(msg.who || "(unbekannt)")}</span>
-              <span class="bulk-msg-subj">${esc(msg.subject || "(ohne Betreff)")}</span>
+              <span class="bulk-msg-who">${esc(msg.who || t("APP_TEXT.UNKNOWN", "(unbekannt)"))}</span>
+              <span class="bulk-msg-subj">${esc(msg.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</span>
             </div>
             <time class="bulk-msg-when quiet">${esc(msg.when)}</time>
             <button type="button" class="icon-btn bulk-msg-remove" data-action="m-check" data-ref="${msg.uid}" aria-label="${esc(t("BULK.DESELECT_MAIL", "Aus Auswahl entfernen: %SUBJ%").replace("%SUBJ%", msg.subject || ""))}" title="${esc(t("BULK.DESELECT", "Aus Auswahl entfernen"))}">${icon("close")}</button>

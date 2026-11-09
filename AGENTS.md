@@ -34,7 +34,7 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
 
 ## 2. User Interface & Design System
 
-* **Language & Localization:** German as primary default with full English localization support via `t(path, fallback)` and `rl.I18N`. Add new translation strings to `snappymail/v/0.0.0/app/localization/de` and `en`.
+* **Language & Localization:** German as primary default with full English localization support via `t(path, fallback)` and `rl.I18N`. Add new translation strings to `snappymail/v/0.0.0/app/localization/de` and `en`; never hardcode visible text. `ui/test/i18n.test.mjs` enforces this.
 * **Design Philosophy (Mistral Visual Language):**
   * Clean, dense, tactile enterprise interface. Sharp hairline borders (1px), clear typographic hierarchy (Inter headings, Space Mono badges).
   * **Primary Actions:** Solid ink styling (background: `var(--foreground)`, text: `var(--background)`).

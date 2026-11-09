@@ -242,7 +242,7 @@ class LlmClient
 		[, $body] = $this->curl($this->buildPayload($messages, $opts, false));
 		$json = \json_decode($body, true);
 		if (!\is_array($json) || !isset($json['choices'][0]['message'])) {
-			throw new LlmException('Unerwartete Antwort von „' . $this->profileName . '“.', 502);
+			throw new LlmException('Unerwartete Antwort von „' . $this->profileName . '“.', 502, 'upstream_unexpected');
 		}
 		return static::flatten($json['choices'][0]['message']['content'] ?? '');
 	}

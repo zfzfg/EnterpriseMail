@@ -338,7 +338,7 @@ export class AssistController {
       if (retry) void this.consent().then((granted) => { if (granted) retry(); });
       return t("AI_COPILOT.ERROR_CONSENT_REQUIRED", "Bitte bestätigen Sie zuerst den Hinweis zur Übermittlung an den KI-Anbieter.");
     }
-    return error instanceof ApiError && error.reason ? t(`AI_COPILOT.ERROR_${error.reason.toUpperCase()}`, explain(error)) : explain(error);
+    return error instanceof ApiError && error.reason ? t(`AI_COPILOT.ERROR_${error.reason.toUpperCase()}`, explain(error)).replace("%STATUS%", String(error.code)) : explain(error);
   }
 
   async assist(name: string, data: Record<string, string | undefined>): Promise<void> {
@@ -596,7 +596,7 @@ export class AssistController {
             bulk: message.category === "newsletter" || message.category === "notification"
           }))
         });
-        this.host.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
+        this.host.view.notice(result.warning ? t("APP_TEXT.CATEGORIES_COULD_NOT_BE_SAVED_KEYWORDS_NOT_ALLOW", "Kategorien konnten nicht gespeichert werden (Schlagwörter nicht erlaubt).") : t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
         await this.host.loadList(false);
       } catch (error) {
         this.host.view.notice(this.assistError(error, () => void this.assist(name, data)));
@@ -648,10 +648,11 @@ export class AssistController {
           timezone: timezone()
         }, controller.signal);
         this.chatKnown = result.known || [];
-        this.chat.push({ role: "assistant", content: result.reply || "" });
+        const reply = result.reply || ((result.actions || []).length ? t("APP_TEXT.SUGGESTIONS", "Vorschläge:") : t("APP_TEXT.NO_ANSWER_RECEIVED", "Keine Antwort erhalten."));
+        this.chat.push({ role: "assistant", content: reply });
         this.turns.push({
           role: "assistant",
-          text: result.reply || "",
+          text: reply,
           trace: (result.trace || []).map(traceText).filter(Boolean),
           actions: (result.actions || []).map((payload) => ({ label: String(payload.label || payload.type || ""), state: "", payload }))
         });

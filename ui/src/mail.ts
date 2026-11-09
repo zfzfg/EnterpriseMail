@@ -15,7 +15,7 @@ import {
   autocryptHeader, autocryptKey, bodyFromDecrypt, clearRememberedPasses, emptyParts, gnupgDecrypt, loadGnuKeys, readParts,
   pgpVerify, rememberedPass, rememberPass, smimeDecrypt, smimeVerify, downloadText, type CryptoParts
 } from "./crypto";
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 import { BoundedCache, pollBackoff } from "./runtime";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
@@ -159,14 +159,14 @@ function when(stamp: number): string {
   const now = new Date();
   const clock = hourCycle ? { hourCycle } : {};
   if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...clock });
+    return date.toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit", ...clock });
   }
-  return date.toLocaleDateString([], { day: "numeric", month: "short" });
+  return date.toLocaleDateString(uiLocale(), { day: "numeric", month: "short" });
 }
 
 function whenFull(stamp: number): string {
   if (!stamp) return "";
-  return new Date(stamp * 1000).toLocaleString([], { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return new Date(stamp * 1000).toLocaleString(uiLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function hasFlag(flags: string[], name: string): boolean {
@@ -513,13 +513,13 @@ class Session implements AssistHost {
     this.collapsed = this.readCollapsed();
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(100, Math.max(10, page || PAGE_FALLBACK));
-    document.title = this.email || String(data.title || "Postfach");
+    document.title = this.email || String(data.title || t("APP_TEXT.MAILBOX", "Postfach"));
     const assistFlags = await this.assistant.loadFlags(data);
     if (generation !== this.accountGeneration) return;
     this.assistant.setFlags(assistFlags);
     const cycle = String(data.hourCycle || "");
     hourCycle = cycle === "h12" || cycle === "h23" ? cycle : undefined;
-    this.view.showMail(this.email, "Posteingang", this.assistant.flags);
+    this.view.showMail(this.email, t("APP_TEXT.INBOX", "Posteingang"), this.assistant.flags);
     const sync = data.ContactsSync;
     this.view.setBook(this.caps.contacts, Boolean(sync && typeof sync === "object"), Number((sync as { Mode?: unknown } | null)?.Mode || 0));
     const layoutMode = Number(data.Layout ?? 1);
@@ -604,7 +604,7 @@ class Session implements AssistHost {
           this.view.showSettings(this.desk);
         }
         if (Number(data.Mode || 0) === 0) {
-          this.view.settingsNotice("Die Synchronisierung ist aus.");
+          this.view.settingsNotice(t("APP_TEXT.SYNCHRONIZATION_IS_OFF", "Die Synchronisierung ist aus."));
           this.view.setBook(this.caps.contacts, true, 0);
           return;
         }
@@ -789,7 +789,7 @@ class Session implements AssistHost {
       collapsed: new Set(), filter: "", hidden: (folder) => this.hiddenFolder(folder), current: "",
       roleOf: (folder) => this.roleOf(folder), actions: () => []
     });
-    return [{ value: "", label: "Oberste Ebene" }].concat(rows
+    return [{ value: "", label: t("APP_TEXT.TOP_LEVEL", "Oberste Ebene") }].concat(rows
       .filter((row) => row.info.exists && !row.info.noInferiors)
       .map((row) => ({ value: row.info.fullName, label: `${"\u00a0\u00a0".repeat(row.depth)}${this.folderName(row.info)}` })));
   }
@@ -798,8 +798,8 @@ class Session implements AssistHost {
     if (!name.trim()) return;
     const delimiter = this.folders.find((folder) => folder.fullName === parent)?.delimiter || this.folders[0]?.delimiter || "/";
     if (delimiter && name.includes(delimiter)) {
-      this.view.notice(`Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`);
-      this.deskNotice = `Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`;
+      this.view.notice(t("APP_TEXT.THE_NAME_MUST_NOT_CONTAIN_THE_SEPARATOR", "Der Name darf das Trennzeichen „%DELIMITER%“ nicht enthalten.").replace("%DELIMITER%", () => delimiter));
+      this.deskNotice = t("APP_TEXT.THE_NAME_MUST_NOT_CONTAIN_THE_SEPARATOR", "Der Name darf das Trennzeichen „%DELIMITER%“ nicht enthalten.").replace("%DELIMITER%", () => delimiter);
       return;
     }
     await call("FolderCreate", { folder: name.trim(), parent, subscribe: subscribe ? 1 : 0 });
@@ -823,8 +823,8 @@ class Session implements AssistHost {
         if (!old) return;
         const leaf = (data.name || old.name).trim();
         const delimiter = old.delimiter || "/";
-        if (!leaf) throw new ApiError(0, "Name eintragen.");
-        if (delimiter && leaf.includes(delimiter)) throw new ApiError(0, `Der Name darf das Trennzeichen „${delimiter}“ nicht enthalten.`);
+        if (!leaf) throw new ApiError(0, t("APP_TEXT.ENTER_A_NAME", "Name eintragen."));
+        if (delimiter && leaf.includes(delimiter)) throw new ApiError(0, t("APP_TEXT.THE_NAME_MUST_NOT_CONTAIN_THE_SEPARATOR", "Der Name darf das Trennzeichen „%DELIMITER%“ nicht enthalten.").replace("%DELIMITER%", () => delimiter));
         const parent = data.parent ?? old.parent;
         const target = parent ? `${parent}${delimiter}${leaf}` : leaf;
         const kolab = this.prefs.kolab && this.capability("METADATA")
@@ -840,7 +840,7 @@ class Session implements AssistHost {
           if (Boolean(data.subscribe) !== old.subscribed && this.roleOf(old) !== "inbox") await call("FolderSubscribe", { folder: old.fullName, subscribe: data.subscribe ? 1 : 0 });
           if (old.selectable && Boolean(data.checkable) !== old.checkable) await call("FolderCheckable", { folder: old.fullName, checkable: data.checkable ? 1 : 0 });
           if (kolab && (data.kolab || "") !== old.kolabType) await call("FolderSetMetadata", { folder: old.fullName, key: KOLAB_KEYS[0], value: data.kolab || "" });
-          this.deskNotice = "Gespeichert.";
+          this.deskNotice = t("APP_TEXT.SAVED", "Gespeichert.");
         }
         this.view.notice(this.deskNotice);
         await this.reloadFolders(this.folder === old.fullName ? target : "");
@@ -865,7 +865,7 @@ class Session implements AssistHost {
         await call("SettingsUpdate", params);
         this.prefs.hideUnsubscribed = Boolean(data.hideUnsubscribed);
         this.prefs.unhideKolab = Boolean(data.unhideKolab);
-        this.deskNotice = "Gespeichert.";
+        this.deskNotice = t("APP_TEXT.SAVED", "Gespeichert.");
         this.view.notice(this.deskNotice);
         await this.reloadFolders();
         return;
@@ -931,13 +931,13 @@ class Session implements AssistHost {
           const next = await this.view.ask(t("FOLDERS_UI.TITLE_RENAME", "Ordner umbenennen"), t("FOLDERS_UI.LABEL_NEW_NAME", "Neuer Name"), folder.name);
           if (!next || next === folder.name) return;
           if (folder.delimiter && next.includes(folder.delimiter)) {
-            this.view.notice(`Der Name darf das Trennzeichen „${folder.delimiter}“ nicht enthalten.`);
+            this.view.notice(t("APP_TEXT.THE_NAME_MUST_NOT_CONTAIN_THE_SEPARATOR", "Der Name darf das Trennzeichen „%DELIMITER%“ nicht enthalten.").replace("%DELIMITER%", () => folder.delimiter));
             return;
           }
           const target = folder.parent ? `${folder.parent}${folder.delimiter}${next}` : next;
           await call("FolderRename", { oldName: folder.fullName, newName: target, subscribe: folder.subscribed ? 1 : 0, checkable: folder.checkable ? 1 : 0 });
           if (this.collapsed.delete(folder.fullName)) { this.collapsed.add(target); this.writeCollapsed(); }
-          this.view.notice(`Umbenannt in „${next}“.`);
+          this.view.notice(t("APP_TEXT.RENAMED_TO", "Umbenannt in „%NAME%“.").replace("%NAME%", () => next));
           await this.reloadFolders(this.folder === folder.fullName ? target : "");
           return;
         }
@@ -960,7 +960,7 @@ class Session implements AssistHost {
           );
           if (!ok) return;
           await call("FolderClear", { folder: folder.fullName });
-          this.view.notice(`„${this.folderName(folder)}“ ist leer.`);
+          this.view.notice(t("APP_TEXT.IS_EMPTY", "„%NAME%“ ist leer.").replace("%NAME%", () => this.folderName(folder)));
           if (folder.fullName === this.folder) {
             this.current = null;
             this.selected = 0;
@@ -1065,7 +1065,7 @@ class Session implements AssistHost {
       threadsAvailable: this.threadsAvailable(),
       useThreads: this.prefs.useThreads,
       grouped: this.prefs.listGrouped,
-      threadOpen: this.threadUid ? (this.threadSubject || "(ohne Betreff)") : ""
+      threadOpen: this.threadUid ? (this.threadSubject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)")) : ""
     };
     this.view.setListMode(mode);
   }
@@ -1113,7 +1113,7 @@ class Session implements AssistHost {
     const seq = ++this.listSeq;
     // Eine neuere Anfrage ersetzt und beendet die ältere; Kontext und Generierung schützen zusätzlich.
     const stale = () => seq !== this.listSeq || generation !== this.accountGeneration || context !== this.listContext();
-    if (!append && !quiet) this.view.setList([], "Mails werden geladen …", "", false, Boolean(query));
+    if (!append && !quiet) this.view.setList([], t("APP_TEXT.LOADING_MAILS", "Mails werden geladen …"), "", false, Boolean(query));
     try {
       const result = await call<ListResult>("MessageList", {
         folder: this.folder,
@@ -1167,7 +1167,7 @@ class Session implements AssistHost {
       };
       const hash = fileHash(key);
       return {
-        name: String(file.fileName || "Anhang"),
+        name: String(file.fileName || t("APP_TEXT.ATTACHMENT", "Anhang")),
         size: Number(file.estimatedSize || 0),
         mimeType: key.mimeType,
         mimeIndex: key.mimeIndex,
@@ -1247,7 +1247,7 @@ class Session implements AssistHost {
     if (date.getTime() >= start.getTime() - day) return t("MESSAGE_LIST.YESTERDAY", "Gestern");
     const weekStart = new Date(start.getTime() - ((start.getDay() + 6) % 7) * day);
     if (date >= weekStart) return t("MESSAGE_LIST.THIS_WEEK", "Diese Woche");
-    return date.toLocaleDateString(document.documentElement.lang === "en" ? "en-US" : "de-DE", { month: "long", year: "numeric" });
+    return date.toLocaleDateString(uiLocale(), { month: "long", year: "numeric" });
   }
 
   private rows(): MessageRow[] {
@@ -1316,7 +1316,7 @@ class Session implements AssistHost {
     this.checked.clear();
     this.assistant.clearMessage();
     this.paintList();
-    this.view.setReader(null, "Brief wird geladen …", "");
+    this.view.setReader(null, t("APP_TEXT.LOADING_MESSAGE", "Brief wird geladen …"), "");
     try {
       const result = await call<Record<string, unknown>>("Message", { folder, uid }, controller.signal);
       if (this.selected !== uid || this.folder !== folder || generation !== this.accountGeneration) return;
@@ -1483,9 +1483,9 @@ class Session implements AssistHost {
     // Feld `hasVirus` (falls ein Server es liefert), sonst die Kopfzeilen wie bisher.
     const virus = message.hasVirus || /infected|virus/i.test(message.headers["x-virus-status"] || message.headers["x-virus-scanned"] || "")
       && !/clean|no/i.test(message.headers["x-virus-status"] || "clean");
-    const spam = virus ? "Virenwarnung: Der Server hat in dieser Mail einen Virus gemeldet."
-      : message.isSpam ? `Als Spam erkannt${message.spamScore ? ` (Wert ${message.spamScore})` : ""}${message.spamResult ? ` · ${message.spamResult}` : ""}.`
-      : message.spamScore > 0 ? `Spam-Wert ${message.spamScore}${message.spamResult ? ` · ${message.spamResult}` : ""}.`
+    const spam = virus ? t("APP_TEXT.VIRUS_WARNING_THE_SERVER_REPORTED_A_VIRUS_IN_THI", "Virenwarnung: Der Server hat in dieser Mail einen Virus gemeldet.")
+      : message.isSpam ? `${t("APP_TEXT.DETECTED_AS_SPAM", "Als Spam erkannt")}${message.spamScore ? ` (${t("APP_TEXT.SCORE", "Wert")} ${message.spamScore})` : ""}${message.spamResult ? ` · ${message.spamResult}` : ""}.`
+      : message.spamScore > 0 ? `${t("APP_TEXT.SPAM_SCORE", "Spam-Wert")} ${message.spamScore}${message.spamResult ? ` · ${message.spamResult}` : ""}.`
       : "";
     const receiptKey = `${message.folder}:${message.uid}`;
     const data: ReaderData = {
@@ -1668,7 +1668,7 @@ class Session implements AssistHost {
     try {
       await call("SendMessage", params);
       this.view.closeCompose();
-      this.view.notice("Gesendet.");
+      this.view.notice(t("APP_TEXT.SENT", "Gesendet."));
       this.assistant.refreshAlerts(true);
       this.replyKind = "";
       const wasDraft = Boolean(this.draftRef) || this.isExistingDraft;
@@ -1694,10 +1694,10 @@ class Session implements AssistHost {
       return;
     }
     if (this.folder === this.archiveFolder) {
-      this.view.notice("Die Mail liegt schon im Archiv.");
+      this.view.notice(t("APP_TEXT.THIS_MAIL_IS_ALREADY_IN_THE_ARCHIVE", "Die Mail liegt schon im Archiv."));
       return;
     }
-    await this.moveTo(uids, this.archiveFolder, false, uids.length === 1 ? "Archiviert." : `${uids.length} Mails archiviert.`);
+    await this.moveTo(uids, this.archiveFolder, false, uids.length === 1 ? t("APP_TEXT.ARCHIVED", "Archiviert.") : t("APP_TEXT.MAILS_ARCHIVED", "%COUNT% Mails archiviert.").replace("%COUNT%", String(uids.length)));
   }
 
   /** Löschen: in den Papierkorb verschieben. Im Papierkorb oder ohne Papierkorb endgültig, dann mit Bestätigung. */
@@ -1717,7 +1717,7 @@ class Session implements AssistHost {
       }
       return;
     }
-    await this.moveTo(uids, this.trashFolder, false, uids.length === 1 ? "In den Papierkorb verschoben." : `${uids.length} Mails in den Papierkorb verschoben.`);
+    await this.moveTo(uids, this.trashFolder, false, uids.length === 1 ? t("APP_TEXT.MOVED_TO_TRASH", "In den Papierkorb verschoben.") : t("APP_TEXT.MAILS_MOVED_TO_TRASH", "%COUNT% Mails in den Papierkorb verschoben.").replace("%COUNT%", String(uids.length)));
   }
 
   private async moveTo(uids: number[], target: string, copy: boolean, done: string): Promise<void> {
@@ -1923,7 +1923,7 @@ class Session implements AssistHost {
     const summaries: BulkMessageSummary[] = selectedMsgs.map((m) => ({
       uid: m.uid,
       who: label(m.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
-      subject: m.subject || "(ohne Betreff)",
+      subject: m.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"),
       when: when(m.date),
       unseen: !seen(m.flags),
       flagged: hasFlag(m.flags, "\\flagged")
@@ -2046,7 +2046,7 @@ class Session implements AssistHost {
     }
     if (this.prefs.desktop && "Notification" in window && Notification.permission === "granted" && document.hidden) {
       try {
-        const note = new Notification(count === 1 ? "Eine neue Mail" : `${count} neue Mails`, { body: this.email, tag: "sm-new-mail" });
+        const note = new Notification(count === 1 ? t("APP_TEXT.ONE_NEW_MAIL", "Eine neue Mail") : t("APP_TEXT.NEW_MAILS", "%COUNT% neue Mails").replace("%COUNT%", String(count)), { body: this.email, tag: "sm-new-mail" });
         note.onclick = () => { window.focus(); note.close(); };
       } catch { /* Browser ohne Hinweise */ }
     }
@@ -2277,8 +2277,7 @@ class Session implements AssistHost {
         const uids = this.checked.has(uid) ? [...this.checked] : [uid];
         const copy = data.copy === "1";
         if (!data.folder || (!copy && data.folder === this.folder)) return;
-        const n = uids.length === 1 ? "Mail" : `${uids.length} Mails`;
-        await this.moveTo(uids, data.folder, copy, `${n} ${copy ? "kopiert" : "verschoben"} nach ${data.folder}.`);
+                await this.moveTo(uids, data.folder, copy, (copy ? t("APP_TEXT.MAIL_S_COPIED_TO", "%COUNT% Mail(s) kopiert nach %FOLDER%.") : t("APP_TEXT.MAIL_S_MOVED_TO", "%COUNT% Mail(s) verschoben nach %FOLDER%.")).replace("%COUNT%", String(uids.length)).replace("%FOLDER%", () => String(data.folder)));
         return;
       }
       case "archive":
@@ -2290,7 +2289,7 @@ class Session implements AssistHost {
         const inbox = this.folders.find((folder) => folder.role === "inbox" || folder.fullName.toUpperCase() === "INBOX")?.fullName || "INBOX";
         const target = name === "spam" ? this.junkFolder : inbox;
         if (!uids.length || !target) return;
-        await this.moveTo(uids, target, false, name === "spam" ? "Als Spam verschoben." : "In den Posteingang verschoben.");
+        await this.moveTo(uids, target, false, name === "spam" ? t("APP_TEXT.MOVED_TO_SPAM", "Als Spam verschoben.") : t("APP_TEXT.MOVED_TO_INBOX", "In den Posteingang verschoben."));
         return;
       }
       case "delete":
@@ -2302,7 +2301,7 @@ class Session implements AssistHost {
       case "restore": {
         const uids = this.targets();
         await this.setFlag(uids, "\\deleted", false, "MessageSetDeleted");
-        this.view.notice("Wiederhergestellt.");
+        this.view.notice(t("APP_TEXT.RESTORED", "Wiederhergestellt."));
         return;
       }
       case "tag": {
@@ -2404,7 +2403,7 @@ class Session implements AssistHost {
       case "window": {
         const print = this.letterPrint();
         if (!print) return;
-        if (!openLetterWindow(print, name === "print")) this.view.notice("Das Fenster wurde vom Browser blockiert.");
+        if (!openLetterWindow(print, name === "print")) this.view.notice(t("APP_TEXT.THE_BROWSER_BLOCKED_THE_WINDOW", "Das Fenster wurde vom Browser blockiert."));
         return;
       }
       case "source":
@@ -2458,7 +2457,7 @@ class Session implements AssistHost {
         this.replyKind = "";
         this.draftRef = null;
         const subject = list.length === 1 ? (/^fw:/i.test(list[0].subject) ? list[0].subject : `Fw: ${list[0].subject}`) : t("MESSAGE.FORWARDED_MESSAGES_SUBJECT", "Weitergeleitete Nachrichten");
-        this.view.openCompose({ title: "Als Anhang weiterleiten", to: "", cc: "", subject, body: "", mode: "new" });
+        this.view.openCompose({ title: t("APP_TEXT.FORWARD_AS_ATTACHMENT", "Als Anhang weiterleiten"), to: "", cc: "", subject, body: "", mode: "new" });
         void this.view.attachCompose(list.map((item) => ({ key: this.messageKey(item), name: `${(item.subject || "Mail").slice(0, 60)}.eml`, size: item.size })));
         return;
       }
@@ -2482,11 +2481,11 @@ class Session implements AssistHost {
         try {
           const result = await call<{ fileHash?: string }>("AttachmentsActions", {
             target: "zip",
-            filename: name === "zip" ? (message?.subject || "Anhänge") : "Mails",
+            filename: name === "zip" ? (message?.subject || t("APP_TEXT.ATTACHMENTS", "Anhänge")) : "Mails",
             hashes,
             folder: this.folder
           });
-          if (!result.fileHash) throw new ApiError(1, "ZIP konnte nicht erstellt werden.");
+          if (!result.fileHash) throw new ApiError(1, t("APP_TEXT.THE_ZIP_COULD_NOT_BE_CREATED", "ZIP konnte nicht erstellt werden."));
           const link = document.createElement("a");
           link.href = rawUrl("Download", result.fileHash);
           link.download = `${result.fileHash}.zip`;
@@ -2519,7 +2518,7 @@ class Session implements AssistHost {
       case "addr-copy":
         try {
           await navigator.clipboard.writeText(data.email || "");
-          this.view.notice("Adresse kopiert.");
+          this.view.notice(t("APP_TEXT.ADDRESS_COPIED", "Adresse kopiert."));
         } catch {
           this.view.notice(data.email || "");
         }
