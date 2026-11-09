@@ -2475,6 +2475,9 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .ink-btn .ai-tag { opacity: .85; }
 .assist-result { padding: 12px; }
 .assist-summary { margin: 4px 0 8px; line-height: 1.55; }
+.assist-result .bulk-summary-points { margin: 4px 0 8px; }
+.dues { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.dues .text-btn { height: auto; text-align: left; white-space: normal; }
 .assist-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; }
 .assist-caveat { margin: 4px 0 0; font-size: 12px; }
 .assist-status { margin: 0; padding: 12px; }

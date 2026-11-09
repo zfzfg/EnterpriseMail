@@ -92,15 +92,20 @@ class Mailbox
 			}
 		}
 
+		$aSettled = [];
 		foreach ($aList as $m) {
 			++$iChecked;
-			if (Triage::fromFlags((array) ($m['flags'] ?? []))) {
-				continue;
-			}
 			$sCat = $this->oTriage->classify($m)['category'] ?? null;
 			$sId = \strtolower(\trim((string) ($m['messageId'] ?? ''), " <>\t"));
 			if ('needs_reply' === $sCat && $sId && isset($aAnswered[$sId])) {
 				$sCat = 'personal';
+			}
+			if ($sStored = Triage::fromFlags((array) ($m['flags'] ?? []))) {
+				// A stored "needs reply" must leave that tab once it is settled.
+				if ('needs_reply' === $sStored && 'personal' === $sCat) {
+					$aSettled[(int) $m['uid']] = $sCat;
+				}
+				continue;
 			}
 			if ($sCat) {
 				$aGroups[$sCat][] = (int) $m['uid'];
@@ -110,6 +115,9 @@ class Mailbox
 		foreach ($aGroups as $sCat => $aUids) {
 			$this->oMailClient->MessageSetFlag($sFolder, new SequenceSet($aUids), Triage::keyword($sCat), true);
 			$iTagged += \count($aUids);
+		}
+		if ($aSettled) {
+			$iTagged += $this->setCategories($sFolder, $aSettled);
 		}
 		return ['tagged' => $iTagged, 'checked' => $iChecked];
 	}

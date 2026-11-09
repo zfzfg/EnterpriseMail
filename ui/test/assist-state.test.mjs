@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { actionFacts, assistKey, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
+import { actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
 
 const action = (label) => ({ label, state: "", payload: { type: label } });
 
@@ -38,6 +38,11 @@ test("action facts ignore the model's label", () => {
 test("assist cache keys ignore selection order and separate folders", () => {
   assert.equal(assistKey("INBOX", [3, 1, 2]), assistKey("INBOX", [1, 2, 3]));
   assert.notEqual(assistKey("INBOX", [1]), assistKey("Archiv", [1]));
+});
+
+test("summary tasks read as one line", () => {
+  assert.equal(summaryActionText({ who: "Max", what: "Bericht senden", due: "2026-11-12" }), "Max: Bericht senden (2026-11-12)");
+  assert.equal(summaryActionText({ what: "Bericht senden" }), "Bericht senden");
 });
 
 test("an empty key is never live", () => {

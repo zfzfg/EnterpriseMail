@@ -129,6 +129,49 @@ namespace MailSo\Imap {
 	class SearchCriterias
 	{
 		public const RegEx = 'from|to|subject|text|body|has|is|since|before|on|sentsince|sentbefore|senton|newer_than|older_than|larger|smaller|keyword';
+
+		public static function escapeSearchString(object $oImapClient, string $sValue): string
+		{
+			return '"' . $sValue . '"';
+		}
+	}
+}
+
+namespace MailSo\Mail {
+	/** Serves canned messages and answers Message-ID searches, recording what was asked. */
+	class MailClient
+	{
+		public array $searches = [];
+		public array $examined = [];
+		public array $messagesByFolder = [];
+
+		public function ImapClient(): self
+		{
+			return $this;
+		}
+
+		public function FolderExamine(string $sFolder): void
+		{
+			$this->examined[] = $sFolder;
+		}
+
+		public function MessageSearch(string $sSearch, bool $bUid): array
+		{
+			$this->searches[] = $sSearch;
+			$sFolder = (string) \end($this->examined);
+			$aUids = [];
+			foreach ($this->messagesByFolder[$sFolder] ?? [] as $iUid => $aMessage) {
+				if (\str_contains($sSearch, '"' . \trim($aMessage['messageId'], '<>') . '"')) {
+					$aUids[] = $iUid;
+				}
+			}
+			return $aUids;
+		}
+
+		public function Message(string $sFolder, int $iUid, bool $bBody): ?array
+		{
+			return $this->messagesByFolder[$sFolder][$iUid] ?? null;
+		}
 	}
 }
 

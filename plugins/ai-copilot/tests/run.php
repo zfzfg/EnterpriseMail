@@ -791,4 +791,50 @@ $aMessages = \AiCopilot\Prompts::summarize(['language' => 'de'], 'Inhalt');
 check(\str_contains($aMessages[1]['content'], "<mail_inhalt>\nInhalt\n</mail_inhalt>"), 'Summary context is not fenced.');
 check(\str_contains($aMessages[0]['content'], 'mail_inhalt'), 'The model is not told about the data block.');
 
+/* Referenced mails come from a targeted search in the folder and in Sent. */
+function mailFixture(string $sId, string $sReferences, int $iDate, string $sBody): array
+{
+	return ['messageId' => "<{$sId}>", 'references' => $sReferences, 'inReplyTo' => '', 'subject' => 'Thema', 'dateTimestamp' => $iDate, 'plain' => $sBody];
+}
+$oClient = new \MailSo\Mail\MailClient();
+$oClient->messagesByFolder = [
+	'INBOX' => [
+		30 => mailFixture('c@x', '<a@x> <b@x>', 300, 'Neueste Nachricht'),
+		10 => mailFixture('a@x', '', 100, 'Erste Nachricht')
+	],
+	'Sent' => [5 => mailFixture('b@x', '<a@x>', 200, 'Meine Antwort')]
+];
+$aThread = (new \AiCopilot\MailContext($oClient))->threadWithSent('INBOX', [30], 'Sent', 12000);
+same(['<a@x>', '<b@x>', '<c@x>'], \array_column($aThread['messages'], 'messageId'), 'Thread is incomplete or out of order.');
+same(['INBOX', 'Sent'], $oClient->examined, 'Thread sources were not searched.');
+same(2, \count($oClient->searches), 'Reference lookup used more than one search per folder.');
+check(\str_contains($aThread['text'], 'Meine Antwort') && \str_contains($aThread['text'], 'Erste Nachricht'), 'Referenced mails are missing from the context.');
+$oClient = new \MailSo\Mail\MailClient();
+$oClient->messagesByFolder = ['INBOX' => [1 => mailFixture('a@x', '', 100, 'Allein')]];
+(new \AiCopilot\MailContext($oClient))->threadWithSent('INBOX', [1], 'Sent', 12000);
+same([], $oClient->searches, 'A mail without references triggered a search.');
+
+/* A selection of unrelated mails is not described as one conversation. */
+check(\str_contains(\AiCopilot\Prompts::summarize(['language' => 'de'], 'x', true)[0]['content'], 'nicht als Gespräch'), 'Selection prompt is missing.');
+check(!\str_contains(\AiCopilot\Prompts::summarize(['language' => 'de'], 'x')[0]['content'], 'nicht als Gespräch'), 'Thread prompt changed.');
+
+/* A stored "needs reply" expires when answered or too old. */
+$oTriage = new \AiCopilot\Triage(['me@example.com'], 14);
+$fCategory = fn(array $aFlags, int $iAge) => $oTriage->classify(['flags' => \array_merge(['$ai_needs_reply'], $aFlags), 'dateTimestamp' => \time() - $iAge * 86400])['category'];
+same('needs_reply', $fCategory([], 1), 'Open request was dropped.');
+same('personal', $fCategory(['\\Answered'], 1), 'Answered mail still needs a reply.');
+same('personal', $fCategory(['$replied'], 1), '$replied was ignored for stored categories.');
+same('personal', $fCategory([], 30), 'Expired mail still needs a reply.');
+
+/* "Today" follows the user's calendar, with a safe fallback. */
+$oPlugin = new StreamTestPlugin(['query' => 'heute', 'folders' => [], 'currentFolder' => 'INBOX', 'timezone' => 'Pacific/Kiritimati'], true);
+$oPlugin->chatContent = '{"search":"is:unseen","folder":"","explanation":"x"}';
+check(!isset($oPlugin->DoSearch()['error']), 'Search failed.');
+$sExpected = (new \DateTimeImmutable('now', new \DateTimeZone('Pacific/Kiritimati')))->format('Y-m-d');
+check(\str_contains($oPlugin->payloads[0]['messages'][0]['content'], "Heute ist {$sExpected}"), 'Client timezone was ignored.');
+$oPlugin = new StreamTestPlugin(['query' => 'heute', 'folders' => [], 'currentFolder' => 'INBOX', 'timezone' => 'Not/AZone'], true);
+$oPlugin->chatContent = '{"search":"is:unseen","folder":"","explanation":"x"}';
+check(!isset($oPlugin->DoSearch()['error']), 'An invalid timezone broke the search.');
+check(\str_contains($oPlugin->payloads[0]['messages'][0]['content'], 'Heute ist ' . \gmdate('Y-m-d')), 'Invalid timezone did not fall back to UTC.');
+
 print 'OK: ' . $iAssertions . " assertions; deterministic mock only, no live provider.\n";

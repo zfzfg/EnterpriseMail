@@ -54,17 +54,21 @@ class Prompts
 		return $s;
 	}
 
-	public static function summarize(array $aUser, string $sThread): array
+	public static function summarize(array $aUser, string $sThread, bool $bSelection = false): array
 	{
+		$sLabel = $bSelection ? 'Ausgewählte Mails' : 'Mailverlauf';
 		return [
 			['role' => 'system', 'content' => static::system($aUser)
-				. "\nAufgabe: Fasse den Mailverlauf zusammen. Antworte nur mit einem JSON-Objekt:"
+				. ($bSelection
+					? "\nAufgabe: Fasse die ausgewählten Mails zusammen. Sie gehören meist nicht zusammen, behandle sie nicht als Gespräch."
+					: "\nAufgabe: Fasse den Mailverlauf zusammen.")
+				. " Antworte nur mit einem JSON-Objekt:"
 				. "\n{\"tldr\": \"ein Satz\", \"points\": [\"wichtigste Punkte, höchstens 6\"],"
 				. " \"decisions\": [\"getroffene Entscheidungen\"], \"actions\": [{\"who\": \"wer\", \"what\": \"was\", \"due\": \"bis wann oder leer\"}],"
 				. " \"next\": \"nächster sinnvoller Schritt für den Benutzer oder leer\"}"
 				. "\nLeere Listen sind erlaubt. Kurz und konkret, keine Wiederholungen."
 				. static::sender($aUser)],
-			['role' => 'user', 'content' => "Mailverlauf:\n\n" . static::mailData($sThread)]
+			['role' => 'user', 'content' => "{$sLabel}:\n\n" . static::mailData($sThread)]
 		];
 	}
 
@@ -154,7 +158,7 @@ class Prompts
 				. ' „diese Woche“ = since:Montag dieser Woche; „seit 2 Wochen“ = newer_than:2w.'
 				. "\nWähle den passenden Ordner aus der Liste oder lass ihn leer für den aktuellen Ordner."
 				. ' Rechnungen am besten über keyword:$ai_invoice oder subject:Rechnung, nicht als from:.'
-				. "\nAntworte nur mit JSON: {\"search\": \"...\", \"folder\": \"Ordnername oder leer\", \"explanation\": \"kurz auf Deutsch, was gesucht wird\"}"],
+				. "\nAntworte nur mit JSON: {\"search\": \"...\", \"folder\": \"Ordnername oder leer\", \"explanation\": \"kurz in der Sprache der Anfrage, was gesucht wird\"}"],
 			['role' => 'user', 'content' => \mb_substr($sQuery, 0, 500)]
 		];
 	}

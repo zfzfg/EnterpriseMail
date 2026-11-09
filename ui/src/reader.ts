@@ -90,6 +90,10 @@ export interface BulkReplyItem {
 export interface BulkSummaryState {
   tldr: string;
   points: string[];
+  decisions?: string[];
+  actions?: string[];
+  next?: string;
+  shown?: number;
   cached?: boolean;
   model?: string;
 }
@@ -102,6 +106,7 @@ export interface BulkAssistState {
   error?: string;
   summary?: BulkSummaryState | null;
   repliesList?: BulkReplyItem[];
+  repliesNote?: string;
 }
 
 export interface BulkData {
@@ -345,6 +350,10 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     badges.push(`<span class="chip chip-static">${icon("flag-filled")}<span>${data.flaggedCount === 1 ? t("MESSAGE.ONE_FLAGGED", "1 markiert") : `${data.flaggedCount} markiert`}</span></span>`);
   }
 
+  const bulkList = (title: string, items?: string[]): string => items?.length ? `
+      <span class="mono quiet">${esc(title)}</span>
+      <ul class="bulk-summary-points">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "";
+
   const aiStatus = (data.assist && (data.assist.loadingSummary || data.assist.loadingReplies || data.assist.error)) ? `
     <div class="bulk-ai-status ${data.assist.error ? "error" : "quiet"}" role="${data.assist.error ? "alert" : "status"}">
       ${icon(data.assist.error ? "error" : "loading")}
@@ -355,13 +364,16 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung der ausgewählten Mails"))}">
       <div class="bulk-ai-head">
         <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}</span>
-        <span class="quiet">(${data.count} Mails)</span>
+        <span class="quiet">(${data.assist.summary.shown && data.assist.summary.shown < data.count ? `${data.assist.summary.shown} / ${data.count}` : data.count} Mails)</span>
       </div>
       <p class="bulk-summary-tldr">${esc(data.assist.summary.tldr)}</p>
       ${data.assist.summary.points && data.assist.summary.points.length ? `
         <ul class="bulk-summary-points">
           ${data.assist.summary.points.map((pt) => `<li>${esc(pt)}</li>`).join("")}
         </ul>` : ""}
+      ${bulkList(t("AI_COPILOT.DECISIONS", "Entscheidungen"), data.assist.summary.decisions)}
+      ${bulkList(t("AI_COPILOT.TASKS", "Aufgaben"), data.assist.summary.actions)}
+      ${bulkList(t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), data.assist.summary.next ? [data.assist.summary.next] : [])}
       <div class="bulk-summary-meta">
         <button type="button" class="text-btn ai-action text-btn-sm" data-action="m-bulk-summarize" data-force="1">
           ${withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"))}
@@ -376,6 +388,7 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
       <div class="bulk-ai-head">
         <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_REPLIES_TITLE", "Antwortvorschläge für ausgewählte Mails"))}</span>
         <p class="quiet">${esc(t("AI_COPILOT.BULK_REPLIES_SUBTITLE", "Vorschlag auswählen, um eine Antwort auf die jeweilige Mail zu verfassen:"))}</p>
+        ${data.assist.repliesNote ? `<p class="quiet">${esc(data.assist.repliesNote)}</p>` : ""}
       </div>
       <div class="bulk-replies-list">
         ${data.assist.repliesList.map((item) => `

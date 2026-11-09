@@ -448,6 +448,17 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return $a;
 	}
 
+	/** "Today" is the user's calendar day, which differs from UTC around midnight. */
+	private function localDate(string $sFormat): string
+	{
+		try {
+			$oZone = new \DateTimeZone((string) $this->jsonParam('timezone', 'UTC'));
+		} catch (\Throwable $e) {
+			$oZone = new \DateTimeZone('UTC');
+		}
+		return (new \DateTimeImmutable('now', $oZone))->format($sFormat);
+	}
+
 	private function paramFolders(): array
 	{
 		$m = $this->jsonParam('folders', []);
@@ -544,9 +555,11 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			\sort($aUids);
 			$this->requireConsent('summarize');
 			$oContext = new MailContext($this->mailClient());
-			$aThread = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) $this->conf('context_budget', 12000));
+			// A selection is a set of unrelated mails, not one conversation to complete.
+			$bSelection = !empty($this->jsonParam('selection', false));
+			$aThread = $oContext->threadWithSent($sFolder, $aUids, $bSelection ? '' : (string) $this->jsonParam('sent', ''), (int) $this->conf('context_budget', 12000));
 			$oLlm = $this->llm('summarize');
-			$a = $oLlm->chatJson(Prompts::summarize($this->promptUser(), $aThread['text']), ['max_tokens' => 1200]);
+			$a = $oLlm->chatJson(Prompts::summarize($this->promptUser(), $aThread['text'], $bSelection), ['max_tokens' => 1200]);
 			$aSummary = [
 				'tldr' => \trim((string) ($a['tldr'] ?? '')),
 				'points' => static::stringList($a['points'] ?? []),
@@ -886,7 +899,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$this->requireConsent('search');
 			$aFolders = $this->paramFolders();
 			$sCurrent = (string) $this->jsonParam('currentFolder', 'INBOX');
-			$sToday = \gmdate('Y-m-d (l)');
+			$sToday = $this->localDate('Y-m-d (l)');
 			$a = $this->llm('search')->chatJson(Prompts::search($this->promptUser(), $sQuery, $aFolders, $sToday, $sCurrent), ['temperature' => 0, 'max_tokens' => 400]);
 			$sSearch = Mailbox::sanitizeSearch((string) ($a['search'] ?? ''));
 			$sFolder = (string) ($a['folder'] ?? '');
@@ -1022,7 +1035,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				$bTag ? function (string $sFolder) use ($oMailbox) {
 					$oMailbox->tagByRules($sFolder, 300, (string) $this->jsonParam('sent', ''));
 				} : null);
-			$aSystem = Prompts::chat($this->promptUser(), $sContext, \gmdate('Y-m-d (l)'), $aFolders, $aKnown);
+			$aSystem = Prompts::chat($this->promptUser(), $sContext, $this->localDate('Y-m-d (l)'), $aFolders, $aKnown);
 			return $oChat->run($aSystem, $aHistory, $aKnown);
 		});
 	}
@@ -1069,7 +1082,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!$aParts) {
 				return ['alerts' => []];
 			}
-			$a = $this->llm('alerts')->chatJson(Prompts::alertsExtract($this->promptUser(), \implode("\n\n", $aParts), \gmdate('Y-m-d')), ['temperature' => 0, 'max_tokens' => 1000]);
+			$a = $this->llm('alerts')->chatJson(Prompts::alertsExtract($this->promptUser(), \implode("\n\n", $aParts), $this->localDate('Y-m-d')), ['temperature' => 0, 'max_tokens' => 1000]);
 			$aResult = [];
 			foreach ((array) ($a['alerts'] ?? []) as $al) {
 				$iUid = (int) ($al['uid'] ?? 0);

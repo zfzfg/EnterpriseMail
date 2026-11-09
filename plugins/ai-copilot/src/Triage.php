@@ -113,11 +113,13 @@ class Triage
 		$sSubject = (string) ($aMessage['subject'] ?? '');
 		$iDate = (int) ($aMessage['dateTimestamp'] ?? 0);
 		$bBulk = static::isBulk($aHeaders);
+		$bAnswered = \in_array('\\answered', $aFlags, true) || \in_array('$replied', $aFlags, true);
+		$bRecent = !$iDate || $iDate > \time() - $this->iNeedsReplyDays * 86400;
 
 		$sStored = static::fromFlags($aFlags);
 		if ($sStored) {
-			// beantwortete Mails brauchen keine Antwort mehr
-			if ('needs_reply' === $sStored && \in_array('\\answered', $aFlags, true)) {
+			// Beantwortete oder zu alte Mails warten nicht mehr auf eine Antwort.
+			if ('needs_reply' === $sStored && ($bAnswered || !$bRecent)) {
 				$sStored = 'personal';
 			}
 			return ['category' => $sStored, 'bulk' => $bBulk];
@@ -158,9 +160,6 @@ class Triage
 				}
 			}
 		}
-
-		$bAnswered = \in_array('\\answered', $aFlags, true) || \in_array('$replied', $aFlags, true);
-		$bRecent = !$iDate || $iDate > \time() - $this->iNeedsReplyDays * 86400;
 
 		if ($bDirect && !$bAnswered && $bRecent) {
 			return ['category' => 'needs_reply', 'bulk' => false];

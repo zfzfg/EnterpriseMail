@@ -9,6 +9,8 @@ namespace AiCopilot;
 class MailContext
 {
 	public const MAX_THREAD = 15;
+	/** Upper bound of Message-IDs in one IMAP search, newest references first. */
+	public const MAX_REFERENCE_SEARCH = 20;
 
 	private \MailSo\Mail\MailClient $oMailClient;
 
@@ -54,15 +56,12 @@ class MailContext
 	 * innerhalb des Budgets. Neueste Mails bekommen den meisten Platz.
 	 */
 	/**
-	 * Wie thread(), ergaenzt um eigene Antworten aus dem Gesendet-Ordner, die
-	 * im Verlauf referenziert werden (SnappyMail-Threads gelten nur je Ordner).
+	 * Wie thread(), ergaenzt um referenzierte Mails aus dem Ordner selbst und aus
+	 * dem Gesendet-Ordner (SnappyMail-Threads gelten nur je Ordner).
 	 */
 	public function threadWithSent(string $sFolder, array $aUids, string $sSent, int $iBudget = 12000): array
 	{
 		$aThread = $this->thread($sFolder, $aUids, $iBudget);
-		if (!$sSent || $sSent === $sFolder) {
-			return $aThread;
-		}
 		$aWanted = [];
 		$aHave = [];
 		foreach ($aThread['messages'] as $m) {
@@ -75,31 +74,54 @@ class MailContext
 		if (!$aWanted) {
 			return $aThread;
 		}
-		try {
-			$oParams = new \MailSo\Mail\MessageListParams;
-			$oParams->sFolderName = $sSent;
-			$oParams->sSearch = 'sentsince:' . \gmdate('Y-m-d', \time() - 180 * 86400);
-			$oParams->iLimit = 300;
-			$oParams->bUseSort = true;
-			$aList = \json_decode(\json_encode($this->oMailClient->MessageList($oParams)), true) ?: [];
-			$iAdded = 0;
-			foreach (static::items($aList) as $s) {
-				$sId = \strtolower(\trim((string) ($s['messageId'] ?? ''), ' <>'));
-				if ($sId && isset($aWanted[$sId]) && $iAdded < 5) {
-					try {
-						$aThread['messages'][] = $this->message($sSent, (int) $s['uid']);
-						++$iAdded;
-					} catch (\Throwable $e) {
-					}
+		// References list the oldest first; the newest matter most within the limit.
+		$aIds = \array_slice(\array_keys($aWanted), -static::MAX_REFERENCE_SEARCH);
+		$iAdded = 0;
+		foreach (\array_unique(\array_filter([$sFolder, $sSent])) as $sSource) {
+			foreach ($this->referencedUids($sSource, $aIds) as $iUid) {
+				if (\count($aThread['messages']) >= static::MAX_THREAD) {
+					break 2;
+				}
+				try {
+					$m = $this->message($sSource, $iUid);
+				} catch (\Throwable $e) {
+					continue;
+				}
+				$sId = \strtolower(\trim($m['messageId'], ' <>'));
+				if (isset($aWanted[$sId])) {
+					unset($aWanted[$sId]);
+					$aThread['messages'][] = $m;
+					++$iAdded;
 				}
 			}
-			if ($iAdded) {
-				\usort($aThread['messages'], fn($a, $b) => $a['date'] <=> $b['date']);
-				$aThread['text'] = static::render($aThread['messages'], $iBudget);
-			}
-		} catch (\Throwable $e) {
+		}
+		if ($iAdded) {
+			\usort($aThread['messages'], fn($a, $b) => $a['date'] <=> $b['date']);
+			$aThread['text'] = static::render($aThread['messages'], $iBudget);
 		}
 		return $aThread;
+	}
+
+	/** One server-side search by Message-ID; a failure only leaves the context shorter. */
+	private function referencedUids(string $sFolder, array $aIds): array
+	{
+		if (!$aIds) {
+			return [];
+		}
+		try {
+			$oImap = $this->oMailClient->ImapClient();
+			$oImap->FolderExamine($sFolder);
+			$aTerms = \array_map(fn($sId) => 'HEADER Message-ID ' . \MailSo\Imap\SearchCriterias::escapeSearchString($oImap, $sId), $aIds);
+			$sSearch = \array_pop($aTerms);
+			foreach (\array_reverse($aTerms) as $sTerm) {
+				$sSearch = "OR {$sTerm} {$sSearch}";
+			}
+			$aUids = \array_map('intval', $oImap->MessageSearch($sSearch, true));
+			\rsort($aUids);
+			return $aUids;
+		} catch (\Throwable $e) {
+			return [];
+		}
 	}
 
 	public function thread(string $sFolder, array $aUids, int $iBudget = 12000): array

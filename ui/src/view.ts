@@ -81,6 +81,7 @@ export interface StripState {
   error: string;
   tldr: string;
   cached: boolean;
+  points: string[];
   decisions: string[];
   actions: string[];
   next: string;
@@ -220,7 +221,8 @@ export interface MailView {
   notice(text: string): void;
   confirmDelete(): Promise<boolean>;
   confirmConsent(text: string): Promise<boolean>;
-  setAlerts(reply: number, follow: number, invoice: number, dues: string): void;
+  setAlerts(reply: number, follow: number, invoice: number, dues: { folder: string; uid: number; title: string; due: string }[]): void;
+  showReaderPane(): void;
   pressCategory(id: string): void;
   setStrip(state: StripState | null): void;
   setChat(turns: ChatTurn[], thinking: string, context?: string): void;
@@ -1866,7 +1868,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>Offene Antworten</span><span class="count" data-count="reply">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
-        <p class="quiet" id="dues"></p>
+        <div class="dues" id="dues"></div>
         <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
       shell.querySelector(".account")?.after(block);
     }
@@ -2462,7 +2464,20 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       write("follow", follow);
       write("invoice", invoice);
       const line = shell?.querySelector("#dues");
-      if (line) line.textContent = dues;
+      if (!line) return;
+      line.replaceChildren(...dues.map((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "text-btn";
+        button.dataset.action = "open-due";
+        button.dataset.folder = item.folder;
+        button.dataset.mailUid = String(item.uid);
+        button.textContent = `${item.due} ${item.title}`;
+        return button;
+      }));
+    },
+    showReaderPane() {
+      if (!wide()) pane("reader");
     },
     setStrip(state) {
       const strip = shell?.querySelector("#strip") as HTMLElement | null;
@@ -2543,7 +2558,27 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const caveat = document.createElement("p");
         caveat.className = "quiet assist-caveat";
         caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit dem Brief abgleichen: Zusammenfassungen können Angaben falsch interpretieren.");
-        result.append(label, text, meta, caveat);
+        result.append(label, text);
+        ([
+          [t("AI_COPILOT.POINTS", "Wichtige Punkte"), state.points],
+          [t("AI_COPILOT.DECISIONS", "Entscheidungen"), state.decisions],
+          [t("AI_COPILOT.TASKS", "Aufgaben"), state.actions],
+          [t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), state.next ? [state.next] : []]
+        ] as [string, string[]][]).forEach(([title, items]) => {
+          if (!items.length) return;
+          const heading = document.createElement("span");
+          heading.className = "mono quiet";
+          heading.textContent = title;
+          const list = document.createElement("ul");
+          list.className = "bulk-summary-points";
+          items.forEach((entry) => {
+            const row = document.createElement("li");
+            row.textContent = entry;
+            list.append(row);
+          });
+          result.append(heading, list);
+        });
+        result.append(meta, caveat);
         strip.append(result);
       }
       if (state.replies.length) {

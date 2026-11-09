@@ -35,6 +35,11 @@ export function actionFacts(payload: Record<string, unknown>): ActionFacts {
   };
 }
 
+/** One line for an extracted task: who, what, and until when. */
+export function summaryActionText(action: { who?: string; what?: string; due?: string }): string {
+  return `${action.who ? `${action.who}: ` : ""}${action.what || ""}${action.due ? ` (${action.due})` : ""}`;
+}
+
 /** Session cache key for an assistant result about these mails. */
 export function assistKey(folder: string, uids: number[]): string {
   return `${folder}\n${[...uids].sort((a, b) => a - b).join(",")}`;

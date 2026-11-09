@@ -1,5 +1,5 @@
 import { readAssist, type AssistFlags } from "./assistant";
-import { assistKey, AssistScopes, chatActionAt, type AssistScope } from "./assist-state";
+import { assistKey, AssistScopes, chatActionAt, summaryActionText, type AssistScope } from "./assist-state";
 import {
   ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, syncContacts, watchSession
 } from "./api";
@@ -125,6 +125,10 @@ const PAGE_FALLBACK = 20;
 const DRAFT_TEXT_LIMIT = 8000;
 const AI_CACHE_ENTRIES = 200;
 const AI_CACHE_BYTES = 2 * 1024 * 1024;
+const TAG_MAX_AGE_MS = 5 * 60 * 1000;
+const ALERT_MIN_INTERVAL_MS = 60 * 1000;
+const BULK_REPLY_LIMIT = 10;
+const timezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 interface AssistSummary {
   tldr?: string;
@@ -134,6 +138,13 @@ interface AssistSummary {
   next?: string;
   model?: string;
   count?: number;
+}
+
+interface DueItem {
+  folder: string;
+  uid: number;
+  title: string;
+  due: string;
 }
 
 interface AssistReply {
@@ -277,8 +288,12 @@ class Session {
   private bulkRepliesError = "";
   private draftBackup = "";
   private draftAbort: AbortController | null = null;
-  private tagged = new Set<string>();
+  /** When each folder was last tagged; only user actions tag, background polling never writes. */
+  private tagged = new Map<string, number>();
   private alertItems: { folder: string; uid: number; type: string; title: string }[] = [];
+  private alertDues: DueItem[] = [];
+  private alertCursor: Record<string, number> = {};
+  private alertsLoadedAt = 0;
   private category = "all";
   /** Laufende Nummer der Listenanfragen. */
   private listSeq = 0;
@@ -423,6 +438,11 @@ class Session {
     this.aboCache = null;
     this.tagged.clear();
     this.alertItems = [];
+    this.alertDues = [];
+    this.alertCursor = {};
+    this.alertsLoadedAt = 0;
+    this.alertItems = [];
+    this.alertDues = [];
     this.chat = [];
     this.turns = [];
     this.chatKnown = [];
@@ -1728,6 +1748,7 @@ class Session {
       await call("SendMessage", params);
       this.view.closeCompose();
       this.view.notice("Gesendet.");
+      this.refreshAlerts(true);
       this.replyKind = "";
       const wasDraft = Boolean(this.draftRef) || this.isExistingDraft;
       this.draftRef = null;
@@ -2006,7 +2027,10 @@ class Session {
           loadingReplies: this.bulkRepliesLoading || undefined,
           error: this.bulkSummaryError || this.bulkRepliesError || undefined,
           summary: this.bulkSummary,
-          repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : undefined
+          repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : undefined,
+          repliesNote: this.bulkRepliesList.length && this.checked.size > BULK_REPLY_LIMIT
+            ? t("AI_COPILOT.BULK_REPLIES_LIMIT", "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.").replace("%LIMIT%", String(BULK_REPLY_LIMIT)).replace("%COUNT%", String(this.checked.size))
+            : undefined
         }
       : undefined;
 
@@ -2097,7 +2121,15 @@ class Session {
       this.pollFailures = 0;
       this.pollRetryAt = 0;
       this.paintFolders();
-      if (changed && generation === this.accountGeneration) await this.loadList(false, true);
+      if (changed && generation === this.accountGeneration) {
+        // Polling itself never writes keywords; only a manual refresh tags again.
+        this.tagged.delete(this.folder);
+        if (manual) {
+          try { await this.ensureTagged(); } catch { /* Der Filter zeigt dann den letzten Stand. */ }
+        }
+        await this.loadList(false, true);
+        this.refreshAlerts(manual);
+      }
     } catch (error) {
       if (generation !== this.accountGeneration || error instanceof Error && error.name === "AbortError") return;
       this.pollFailures += 1;
@@ -2712,9 +2744,10 @@ class Session {
       error: "",
       tldr: this.tldr,
       cached: this.summaryCached,
-      decisions: [],
-      actions: [],
-      next: "",
+      points: this.summaryDetail?.points || [],
+      decisions: this.summaryDetail?.decisions || [],
+      actions: (this.summaryDetail?.actions || []).map(summaryActionText),
+      next: this.summaryDetail?.next || "",
       replies: this.replies,
       model: this.summaryModel,
       showSummarize: Boolean(this.assistFlags?.summarize),
@@ -2725,6 +2758,7 @@ class Session {
   private tldr = "";
   private summaryCached = false;
   private summaryModel = "";
+  private summaryDetail: AssistSummary | null = null;
 
   private paintStrip(): void {
     if (!this.assistFlags?.summarize && !this.assistFlags?.replies) return;
@@ -2737,6 +2771,16 @@ class Session {
     this.tldr = "";
     this.summaryCached = false;
     this.summaryModel = "";
+    this.summaryDetail = null;
+  }
+
+  /** The open mail's conversation; replying only considers what came before it. */
+  private conversationUids(upToCurrent = false): number[] {
+    const message = this.current;
+    if (!message) return [];
+    const row = this.messages.find((item) => item.uid === message.uid);
+    const all = [...new Set([message.uid, ...(row?.threads || []), ...message.threads])];
+    return upToCurrent ? all.filter((uid) => uid <= message.uid) : all;
   }
 
   /** Scope for a provider request about the open message; stale once another message is shown. */
@@ -2751,15 +2795,15 @@ class Session {
     this.tldr = summary.tldr || "";
     this.summaryCached = cached;
     this.summaryModel = summary.model || this.assistFlags?.provider || "";
+    this.summaryDetail = summary;
   }
 
   /** Shows results from this session again without another provider request. */
   private restoreMessageAssist(): void {
     if (!this.current) return;
-    const key = assistKey(this.folder, [this.current.uid]);
-    const summary = this.summaryCache.get(key);
+    const summary = this.summaryCache.get(assistKey(this.folder, this.conversationUids()));
     if (summary && this.assistFlags?.summarize) this.applySummary(summary, true);
-    const replies = this.replyCache.get(key);
+    const replies = this.replyCache.get(assistKey(this.folder, this.conversationUids(true)));
     if (replies && this.assistFlags?.replies) this.replies = replies;
   }
 
@@ -2778,18 +2822,39 @@ class Session {
     return true;
   }
 
+  /** Tags on explicit user actions only, and not more often than needed. */
+  private async ensureTagged(): Promise<void> {
+    if (this.category === "all" || !this.assistFlags?.triage || !this.assistFlags.tabs) return;
+    if (Date.now() - (this.tagged.get(this.folder) || 0) < TAG_MAX_AGE_MS) return;
+    await plugin("AiTriageTag", { folder: this.folder, sent: this.sentFolder });
+    this.tagged.set(this.folder, Date.now());
+  }
+
+  private refreshAlerts(force: boolean): void {
+    if (!this.assistFlags?.alerts) return;
+    if (force || Date.now() - this.alertsLoadedAt >= ALERT_MIN_INTERVAL_MS) void this.loadAlerts();
+  }
+
+  private async openAssistMail(folder: string, uid: number): Promise<void> {
+    if (folder !== this.folder) await this.selectFolder(folder);
+    await this.selectMessage(uid);
+    this.view.showReaderPane();
+  }
+
   private async loadAlerts(): Promise<void> {
     const generation = this.accountGeneration;
     const inbox = this.folders.find((folder) => folder.role === "inbox")?.fullName || "INBOX";
     try {
+      this.alertsLoadedAt = Date.now();
       const result = await plugin<{ alerts: { type: string; folder: string; uid: number; title: string }[] }>("AiAlerts", {
         inbox,
         sent: this.sentFolder
       });
       if (generation !== this.accountGeneration) return;
       this.alertItems = result.alerts || [];
+      this.alertCursor = {};
       const count = (type: string) => this.alertItems.filter((item) => item.type === type).length;
-      this.view.setAlerts(count("reply"), count("followup"), count("invoice"), "");
+      this.view.setAlerts(count("reply"), count("followup"), count("invoice"), this.alertDues);
     } catch {
       /* Hinweise sind ergänzend */
     }
@@ -2798,34 +2863,29 @@ class Session {
   private async assist(name: string, data: Record<string, string | undefined>): Promise<void> {
     if (name === "cat") {
       this.category = data.cat || "all";
-      if (this.category !== "all" && this.assistFlags?.triage && !this.tagged.has(this.folder)) {
-        try {
-          await plugin("AiTriageTag", { folder: this.folder, sent: this.sentFolder });
-          this.tagged.add(this.folder);
-        } catch (error) {
-          this.view.notice(explain(error));
-          return;
-        }
+      try {
+        await this.ensureTagged();
+      } catch (error) {
+        this.view.notice(explain(error));
+        return;
       }
       this.offset = 0;
       await this.loadList(false);
       return;
     }
     if (name === "alert") {
-      if (data.kind === "follow") {
-        const sent = this.folders.find((folder) => folder.role === "sent")?.fullName || this.sentFolder;
-        if (sent) await this.selectFolder(sent);
-        return;
-      }
-      if (!this.assistFlags?.tabs) {
-        const item = this.alertItems.find((entry) => entry.type === (data.kind === "invoice" ? "invoice" : "reply"));
-        if (!item) return;
-        if (item.folder !== this.folder) await this.selectFolder(item.folder);
-        await this.selectMessage(item.uid);
-        return;
-      }
-      await this.assist("cat", { cat: data.kind === "invoice" ? "invoice" : "needs_reply" });
-      this.view.pressCategory(data.kind === "invoice" ? "invoice" : "needs_reply");
+      // The counter and the clicks cover exactly the same mails: each click opens the next one.
+      const type = data.kind === "follow" ? "followup" : data.kind === "invoice" ? "invoice" : "reply";
+      const items = this.alertItems.filter((item) => item.type === type);
+      if (!items.length) return;
+      const position = (this.alertCursor[type] || 0) % items.length;
+      this.alertCursor[type] = position + 1;
+      await this.openAssistMail(items[position].folder, items[position].uid);
+      return;
+    }
+    if (name === "open-due") {
+      const uid = Number(data.mailUid || 0);
+      if (uid && data.folder) await this.openAssistMail(data.folder, uid);
       return;
     }
     if (name === "ask") {
@@ -2851,7 +2911,8 @@ class Session {
           query: text,
           folders: this.folders.map((folder) => folder.fullName),
           currentFolder: this.folder,
-          sent: this.sentFolder
+          sent: this.sentFolder,
+          timezone: timezone()
         });
         if (result.folder && result.folder !== this.folder) await this.selectFolder(result.folder);
         this.view.showTranslation(result.search, result.explanation || "");
@@ -2869,7 +2930,8 @@ class Session {
     }
     if (name === "summarize" && this.current) {
       const scope = this.messageScope();
-      const key = assistKey(this.folder, [this.current.uid]);
+      const uids = this.conversationUids();
+      const key = assistKey(this.folder, uids);
       const known = data.force === "1" ? undefined : this.summaryCache.get(key);
       if (known) {
         this.applySummary(known, true);
@@ -2880,7 +2942,7 @@ class Session {
       try {
         const result = await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.folder,
-          uids: [this.current.uid],
+          uids,
           sent: this.sentFolder
         }, scope.signal);
         this.summaryCache.set(key, result.summary || {});
@@ -2896,10 +2958,11 @@ class Session {
       const scope = this.messageScope();
       this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschläge werden erstellt …") });
       try {
-        const key = assistKey(this.folder, [this.current.uid]);
+        const uids = this.conversationUids(true);
+        const key = assistKey(this.folder, uids);
         const result = await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
           folder: this.folder,
-          uids: [this.current.uid],
+          uids,
           sent: this.sentFolder
         }, scope.signal);
         const replies = (result.replies || []).slice(0, 3);
@@ -2930,12 +2993,16 @@ class Session {
         const summary = known || (await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.folder,
           uids: [...this.checked],
-          sent: this.sentFolder
+          selection: true
         })).summary || {};
         this.summaryCache.set(key, summary);
         this.bulkSummary = {
           tldr: summary.tldr || "",
           points: Array.isArray(summary.points) ? summary.points : [],
+          decisions: Array.isArray(summary.decisions) ? summary.decisions : [],
+          actions: (Array.isArray(summary.actions) ? summary.actions : []).map(summaryActionText),
+          next: summary.next || "",
+          shown: Number(summary.count) || this.checked.size,
           cached: Boolean(known),
           model: summary.model || this.assistFlags?.provider || ""
         };
@@ -2957,7 +3024,7 @@ class Session {
       const targetMsgs = checkedUids
         .map((uid) => this.messages.find((m) => m.uid === uid))
         .filter((m): m is Msg => Boolean(m))
-        .slice(0, 10);
+        .slice(0, BULK_REPLY_LIMIT);
       try {
         const results = await Promise.allSettled(
           targetMsgs.map(async (msg) => {
@@ -3019,8 +3086,11 @@ class Session {
           items: this.messages.map((message) => ({
             uid: message.uid,
             from: message.from.map(label).join(", "),
+            to: message.to.map(address).join(", "),
+            cc: message.cc.map(address).join(", "),
             subject: message.subject,
-            preview: message.preview
+            preview: message.preview,
+            bulk: message.category === "newsletter" || message.category === "notification"
           }))
         });
         this.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
@@ -3037,13 +3107,13 @@ class Session {
         return;
       }
       try {
-        const result = await plugin<{ alerts: { title: string; due: string }[] }>("AiAlertsLlm", { items });
-        const dues = (result.alerts || []).filter((item) => item.due).map((item) => `${item.due} ${item.title}`).join(" · ");
+        const result = await plugin<{ alerts: DueItem[] }>("AiAlertsLlm", { items, timezone: timezone() });
+        this.alertDues = (result.alerts || []).filter((item) => item.due);
         this.view.setAlerts(
           this.alertItems.filter((item) => item.type === "reply").length,
           this.alertItems.filter((item) => item.type === "followup").length,
           this.alertItems.filter((item) => item.type === "invoice").length,
-          dues
+          this.alertDues
         );
       } catch (error) {
         this.view.notice(explain(error));
@@ -3067,7 +3137,8 @@ class Session {
           context: this.useContext && this.current ? { folder: this.folder, uid: this.current.uid } : {},
           folders: this.folders.map((folder) => folder.fullName),
           known: this.chatKnown,
-          sent: this.sentFolder
+          sent: this.sentFolder,
+          timezone: timezone()
         });
         this.chatKnown = result.known || [];
         this.chat.push({ role: "assistant", content: result.reply || "" });
@@ -3127,6 +3198,9 @@ class Session {
       ? options.context || (this.current ? { folder: this.current.folder, uid: this.current.uid } : null)
       : null;
     this.draftBackup = options.body;
+    const contextUids = context
+      ? (context.uid === this.current?.uid && context.folder === this.folder ? this.conversationUids(true) : [context.uid])
+      : [];
     this.draftAbort = new AbortController();
     this.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben …"));
     let streamed = "";
@@ -3138,7 +3212,7 @@ class Session {
         current: options.body,
         wantSubject: options.mode === "new" || options.mode === "reply",
         folder: context?.folder || "",
-        uids: context ? [context.uid] : [],
+        uids: contextUids,
         sent: this.sentFolder
       }, (event, payload) => {
         if (event === "delta") {
@@ -3196,7 +3270,10 @@ class Session {
       }
       entry.state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
       this.view.setChat(this.turns, "", this.contextLabel());
-      if (uids) await this.loadList(false);
+      if (uids) {
+        await this.loadList(false);
+        this.refreshAlerts(true);
+      }
     } catch (error) {
       entry.state = explain(error);
       this.view.setChat(this.turns, "", this.contextLabel());
