@@ -7,10 +7,9 @@ Anbieter, wenn der Benutzer eine KI-Aktion anklickt.
 Funktionen
 - Zusammenfassung eines Verlaufs (Nachrichtenansicht, Button „Zusammenfassen“).
   Eigene Antworten aus dem Gesendet-Ordner werden mit einbezogen. Ergebnisse
-  werden 30 Tage zwischengespeichert und beim erneuten Öffnen ohne Anfrage gezeigt.
+  bleiben nur für die Sitzung im Arbeitsspeicher des Browsers.
 - Entwürfe im Compose-Fenster: KI-Entwurf, Umschreiben, Korrektur, Ton-Auswahl,
-  Betreffvorschlag, Streaming. Auch über den Zauberstab in der Editor-Leiste und
-  dreimal „c“ (außerhalb von Eingabefeldern).
+  Betreffvorschlag, Streaming. Zitat und Signatur bleiben erhalten.
 - Antwortvorschläge: drei Karten auf Klick, Klick öffnet die Antwort mit Text.
 - Suche in natürlicher Sprache: Text ins Suchfeld, dann KI-Knopf daneben. Nur
   die Anfrage geht an das Modell, die Suche läuft per IMAP.
@@ -36,11 +35,13 @@ Einrichtung
 - Benutzer: Einstellungen → KI-Assistent (Funktionen, Ton, Sprache, Name, Stil).
 
 Datenschutz
-- Ohne Klick wird nichts an den Anbieter gesendet. Beim ersten Mal erscheint ein
-  Hinweis mit dem Anbieter.
-- SnappyMail protokolliert bei aktiviertem Log POST-Parameter (INFO). Darin können
-  Chat-Nachrichten und Entwurfstexte stehen. Im Betrieb Logging aus oder auf
-  Warnungen beschränken.
+- Ohne Klick wird nichts an den Anbieter gesendet. Beim ersten Mal und nach einem
+  Wechsel des Anbieters erscheint ein Hinweis mit den betroffenen Anbietern.
+- Ein Profil ohne Modell ist ein Konfigurationsfehler. Es gibt kein stilles
+  Ausweichen auf ein anderes Profil.
+- Der Server speichert keine KI-Ergebnisse. Das JSON-Log nennt nur den Aktionsnamen,
+  keine Parameter. Protokolle auf Debug-Stufe können jedoch Mailinhalte aus dem
+  IMAP-Verkehr enthalten; im Betrieb Logging aus oder auf Warnungen beschränken.
 
 Entwicklung: siehe dev/ (Docker-Umgebung mit Testmailserver, Testdaten,
 API- und UI-Tests).

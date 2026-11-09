@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
+import { actionFacts, assistKey, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
 
 const action = (label) => ({ label, state: "", payload: { type: label } });
 
@@ -26,6 +26,18 @@ test("assist scopes go stale when the message changes", () => {
   assert.equal(first.signal.aborted, true);
   assert.equal(first.live(), false, "an aborted request stays stale");
   assert.equal(scopes.begin(() => key).signal.aborted, false);
+});
+
+test("action facts ignore the model's label", () => {
+  assert.deepEqual(actionFacts({ type: "delete", uids: [1, 2, 3], folder: "INBOX", label: "Nur archivieren" }), { type: "delete", count: 3, folder: "INBOX", to: "", search: "" });
+  assert.deepEqual(actionFacts({ type: "move", uids: [1], folder: "INBOX", to: "Archiv" }), { type: "move", count: 1, folder: "INBOX", to: "Archiv", search: "" });
+  assert.equal(actionFacts({ type: "open", uid: 4, folder: "INBOX" }).count, 1);
+  assert.equal(actionFacts({ type: "compose", to: "a@example.com" }).count, 0);
+});
+
+test("assist cache keys ignore selection order and separate folders", () => {
+  assert.equal(assistKey("INBOX", [3, 1, 2]), assistKey("INBOX", [1, 2, 3]));
+  assert.notEqual(assistKey("INBOX", [1]), assistKey("Archiv", [1]));
 });
 
 test("an empty key is never live", () => {

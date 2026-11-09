@@ -8,6 +8,7 @@ namespace RainLoop\Plugins {
 		public array $settings = [];
 		public array $config = [];
 		public array $logs = [];
+		public int $cacherCalls = 0;
 		public ?\Throwable $accountException = null;
 
 		public function __construct()
@@ -110,6 +111,7 @@ namespace RainLoop {
 
 		public function Cacher(\RainLoop\Model\Account $oAccount): never
 		{
+			++$this->oPlugin->cacherCalls;
 			throw new \RuntimeException('No cache in unit tests.');
 		}
 	}
@@ -120,6 +122,13 @@ namespace RainLoop {
 		{
 			return 'test-token';
 		}
+	}
+}
+
+namespace MailSo\Imap {
+	class SearchCriterias
+	{
+		public const RegEx = 'from|to|subject|text|body|has|is|since|before|on|sentsince|sentbefore|senton|newer_than|older_than|larger|smaller|keyword';
 	}
 }
 

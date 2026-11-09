@@ -16,6 +16,30 @@ export function chatActionAt<T extends ChatActionTurn>(turns: T[], turn: number,
   return turns[turn]?.actions[index] ?? null;
 }
 
+export interface ActionFacts {
+  type: string;
+  count: number;
+  folder: string;
+  to: string;
+  search: string;
+}
+
+/** What an action will really do, taken from validated fields instead of the model's own label. */
+export function actionFacts(payload: Record<string, unknown>): ActionFacts {
+  return {
+    type: String(payload.type || ""),
+    count: Array.isArray(payload.uids) ? payload.uids.length : payload.uid ? 1 : 0,
+    folder: String(payload.folder || ""),
+    to: String(payload.to || ""),
+    search: String(payload.search || "")
+  };
+}
+
+/** Session cache key for an assistant result about these mails. */
+export function assistKey(folder: string, uids: number[]): string {
+  return `${folder}\n${[...uids].sort((a, b) => a - b).join(",")}`;
+}
+
 export interface AssistScope {
   signal: AbortSignal;
   live(): boolean;

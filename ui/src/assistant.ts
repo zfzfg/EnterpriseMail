@@ -56,7 +56,8 @@ export async function readAssist(app: Record<string, unknown>, load: () => Promi
     chat: on(admin, settings, providers, "chat", "chat"),
     alerts: on(admin, settings, providers, "alerts"),
     provider: "",
-    providerName: String(providers.default?.name || ""),
+    // Consent covers every routed provider, so the notice has to name all of them.
+    providerName: [...new Set(["default", "triage", "search", "chat"].map((route) => String(providers[route]?.name || "")).filter(Boolean))].join(" / "),
     noticeAck: Boolean(settings.notice_ack)
   };
   const label = providers.default;

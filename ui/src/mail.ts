@@ -1,5 +1,5 @@
 import { readAssist, type AssistFlags } from "./assistant";
-import { AssistScopes, chatActionAt, type AssistScope } from "./assist-state";
+import { assistKey, AssistScopes, chatActionAt, type AssistScope } from "./assist-state";
 import {
   ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, syncContacts, watchSession
 } from "./api";
@@ -123,6 +123,23 @@ interface Prefs {
 const PAGE_FALLBACK = 20;
 /** Matches DraftRequest's limit for the `current` field. */
 const DRAFT_TEXT_LIMIT = 8000;
+const AI_CACHE_ENTRIES = 200;
+const AI_CACHE_BYTES = 2 * 1024 * 1024;
+
+interface AssistSummary {
+  tldr?: string;
+  points?: string[];
+  decisions?: string[];
+  actions?: { who?: string; what?: string; due?: string }[];
+  next?: string;
+  model?: string;
+  count?: number;
+}
+
+interface AssistReply {
+  label: string;
+  body: string;
+}
 const SYSTEM_FLAGS = /^(\\|\$ai_|\$forwarded$|\$mdnsent$|\$junk$|\$notjunk$|\$label|nonjunk$|junk$|\$phishing$|\$submitpending$|\$submitted$|\$hasattachment$|\$hasnoattachment$|\$important$|\$muted$|\$followed$)/i;
 
 function people(value: unknown): Person[] {
@@ -246,7 +263,11 @@ class Session {
   private chat: { role: "user" | "assistant"; content: string }[] = [];
   private turns: ChatTurn[] = [];
   private chatBusy = false;
+  private chatKnown: string[] = [];
   private assistScopes = new AssistScopes();
+  /** AI output stays in this tab's memory; the server keeps none of it. */
+  private summaryCache = new BoundedCache<string, AssistSummary>(AI_CACHE_ENTRIES, AI_CACHE_BYTES, (value) => JSON.stringify(value).length);
+  private replyCache = new BoundedCache<string, AssistReply[]>(AI_CACHE_ENTRIES, AI_CACHE_BYTES, (value) => JSON.stringify(value).length);
   private replies: { label: string; body: string }[] = [];
   private bulkSummary: BulkSummaryState | null = null;
   private bulkSummaryLoading = "";
@@ -404,6 +425,9 @@ class Session {
     this.alertItems = [];
     this.chat = [];
     this.turns = [];
+    this.chatKnown = [];
+    this.summaryCache.clear();
+    this.replyCache.clear();
     this.clearMessageAssist();
     this.clearBulkState();
     this.current = null;
@@ -654,6 +678,9 @@ class Session {
         });
         this.view.setAssist(this.assistFlags);
         this.noticeAck = Boolean(this.assistFlags?.noticeAck);
+        // Tone, language or provider may have changed, so earlier results no longer fit.
+        this.summaryCache.clear();
+        this.replyCache.clear();
       }
       if (next === "session") {
         await this.enter(await loadApp());
@@ -1360,8 +1387,8 @@ class Session {
       this.scheduleSeen(message);
       await this.paintLetter();
       if (this.current !== message || generation !== this.accountGeneration) return;
+      this.restoreMessageAssist();
       this.paintStrip();
-      void this.loadCachedSummary();
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       if (this.selected === uid && this.folder === folder && generation === this.accountGeneration) {
@@ -2720,31 +2747,27 @@ class Session {
     );
   }
 
-  private async loadCachedSummary(): Promise<void> {
-    if (!this.assistFlags?.summarize || !this.current) return;
-    const scope = this.messageScope();
-    try {
-      const result = await plugin<{ summary: { tldr?: string; model?: string } | null; cached?: boolean }>("AiSummarize", {
-        folder: this.folder,
-        uids: [this.current.uid],
-        cacheOnly: true,
-        sent: this.sentFolder
-      }, scope.signal);
-      if (!scope.live()) return;
-      this.tldr = result.summary?.tldr || "";
-      this.summaryCached = Boolean(result.cached);
-      this.summaryModel = result.summary?.model || "";
-      this.paintStrip();
-    } catch {
-      if (scope.live()) this.paintStrip();
-    }
+  private applySummary(summary: AssistSummary, cached: boolean): void {
+    this.tldr = summary.tldr || "";
+    this.summaryCached = cached;
+    this.summaryModel = summary.model || this.assistFlags?.provider || "";
+  }
+
+  /** Shows results from this session again without another provider request. */
+  private restoreMessageAssist(): void {
+    if (!this.current) return;
+    const key = assistKey(this.folder, [this.current.uid]);
+    const summary = this.summaryCache.get(key);
+    if (summary && this.assistFlags?.summarize) this.applySummary(summary, true);
+    const replies = this.replyCache.get(key);
+    if (replies && this.assistFlags?.replies) this.replies = replies;
   }
 
   private async consent(kind: "mail" | "query" = "mail"): Promise<boolean> {
     if (this.noticeAck) return true;
     const name = this.assistFlags?.providerName || "den Anbieter";
     const text = kind === "query"
-      ? `Nur die Suchanfrage geht an ${name}. Die Mails selbst bleiben auf dem Server. Fortfahren?`
+      ? `Ihre Suchanfrage geht an ${name}, die Mails bleiben dabei auf dem Server. Diese Einwilligung gilt auch für spätere KI-Aktionen, die nach einem Klick Mailinhalte an ${name} senden. Fortfahren?`
       : `Diese KI-Funktion sendet den Inhalt der betroffenen Mails an ${name}. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?`;
     const ok = await this.view.confirmConsent(text);
     if (!ok) return false;
@@ -2846,18 +2869,23 @@ class Session {
     }
     if (name === "summarize" && this.current) {
       const scope = this.messageScope();
+      const key = assistKey(this.folder, [this.current.uid]);
+      const known = data.force === "1" ? undefined : this.summaryCache.get(key);
+      if (known) {
+        this.applySummary(known, true);
+        this.paintStrip();
+        return;
+      }
       this.view.setStrip({ ...this.strip(), loading: "Verlauf wird zusammengefasst …", tldr: "" });
       try {
-        const result = await plugin<{ summary: { tldr?: string; model?: string }; cached?: boolean }>("AiSummarize", {
+        const result = await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.folder,
           uids: [this.current.uid],
-          force: data.force === "1",
           sent: this.sentFolder
         }, scope.signal);
+        this.summaryCache.set(key, result.summary || {});
         if (!scope.live()) return;
-        this.tldr = result.summary?.tldr || "";
-        this.summaryCached = Boolean(result.cached);
-        this.summaryModel = result.summary?.model || this.assistFlags?.provider || "";
+        this.applySummary(result.summary || {}, false);
         this.paintStrip();
       } catch (error) {
         if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
@@ -2868,13 +2896,16 @@ class Session {
       const scope = this.messageScope();
       this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschläge werden erstellt …") });
       try {
-        const result = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
+        const key = assistKey(this.folder, [this.current.uid]);
+        const result = await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
           folder: this.folder,
           uids: [this.current.uid],
           sent: this.sentFolder
         }, scope.signal);
+        const replies = (result.replies || []).slice(0, 3);
+        this.replyCache.set(key, replies);
         if (!scope.live()) return;
-        this.replies = (result.replies || []).slice(0, 3);
+        this.replies = replies;
         this.paintStrip();
       } catch (error) {
         if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
@@ -2894,17 +2925,19 @@ class Session {
       this.bulkSummaryError = "";
       this.paintBulk();
       try {
-        const result = await plugin<{ summary: { tldr?: string; points?: string[]; model?: string }; cached?: boolean }>("AiSummarize", {
+        const key = assistKey(this.folder, [...this.checked]);
+        const known = data.force === "1" ? undefined : this.summaryCache.get(key);
+        const summary = known || (await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.folder,
           uids: [...this.checked],
-          force: data.force === "1",
           sent: this.sentFolder
-        });
+        })).summary || {};
+        this.summaryCache.set(key, summary);
         this.bulkSummary = {
-          tldr: result.summary?.tldr || "",
-          points: Array.isArray(result.summary?.points) ? result.summary.points : [],
-          cached: Boolean(result.cached),
-          model: result.summary?.model || this.assistFlags?.provider || ""
+          tldr: summary.tldr || "",
+          points: Array.isArray(summary.points) ? summary.points : [],
+          cached: Boolean(known),
+          model: summary.model || this.assistFlags?.provider || ""
         };
         this.bulkSummaryLoading = "";
       } catch (error) {
@@ -2928,16 +2961,18 @@ class Session {
       try {
         const results = await Promise.allSettled(
           targetMsgs.map(async (msg) => {
-            const res = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
+            const key = assistKey(this.folder, [msg.uid]);
+            const replies = this.replyCache.get(key) || ((await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
               folder: this.folder,
               uids: [msg.uid],
               sent: this.sentFolder
-            });
+            })).replies || []).slice(0, 3);
+            this.replyCache.set(key, replies);
             return {
               uid: msg.uid,
               subject: msg.subject || "(ohne Betreff)",
               who: label(msg.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
-              replies: (res.replies || []).slice(0, 3)
+              replies
             };
           })
         );
@@ -3027,12 +3062,14 @@ class Session {
       this.turns.push({ role: "user", text, trace: [], actions: [] });
       this.view.setChat(this.turns, "Copilot arbeitet …", this.contextLabel());
       try {
-        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[] }>("AiChat", {
+        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[]; known?: string[] }>("AiChat", {
           messages: this.chat,
           context: this.useContext && this.current ? { folder: this.folder, uid: this.current.uid } : {},
           folders: this.folders.map((folder) => folder.fullName),
+          known: this.chatKnown,
           sent: this.sentFolder
         });
+        this.chatKnown = result.known || [];
         this.chat.push({ role: "assistant", content: result.reply || "" });
         this.turns.push({
           role: "assistant",

@@ -1,5 +1,5 @@
 import type { AssistFlags } from "./assistant";
-import { draftModeFor, type ChatAction } from "./assist-state";
+import { actionFacts, draftModeFor, type ChatAction } from "./assist-state";
 import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferences, type ComposeSeed, type ComposeValues } from "./compose";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
@@ -1812,6 +1812,30 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!wide()) pane("reader");
   }
 
+  /** States an action from validated data, so a mail cannot disguise it through the model's label. */
+  function actionSummary(payload: Record<string, unknown>): string {
+    const facts = actionFacts(payload);
+    const names: Record<string, string> = {
+      archive: t("AI_COPILOT.ACTION_ARCHIVE", "Archivieren"),
+      delete: t("AI_COPILOT.ACTION_DELETE", "Löschen"),
+      mark_read: t("AI_COPILOT.ACTION_MARK_READ", "Als gelesen markieren"),
+      mark_unread: t("AI_COPILOT.ACTION_MARK_UNREAD", "Als ungelesen markieren"),
+      flag: t("AI_COPILOT.ACTION_FLAG", "Markieren"),
+      unflag: t("AI_COPILOT.ACTION_UNFLAG", "Markierung entfernen"),
+      move: t("AI_COPILOT.ACTION_MOVE", "Verschieben"),
+      open: t("AI_COPILOT.ACTION_OPEN", "Öffnen"),
+      reply: t("AI_COPILOT.ACTION_REPLY", "Antworten"),
+      compose: t("AI_COPILOT.ACTION_COMPOSE", "Neue Mail"),
+      search: t("AI_COPILOT.ACTION_SEARCH", "Suchen")
+    };
+    const parts = [names[facts.type] || facts.type];
+    if (facts.count) parts.push(facts.count === 1 ? t("AI_COPILOT.ONE_MAIL", "1 Mail") : t("AI_COPILOT.MANY_MAILS", "%COUNT% Mails").replace("%COUNT%", String(facts.count)));
+    if (facts.folder) parts.push(facts.type === "move" && facts.to ? `${facts.folder} → ${facts.to}` : facts.folder);
+    if (facts.type === "compose" && facts.to) parts.push(facts.to);
+    if (facts.type === "search" && facts.search) parts.push(facts.search);
+    return parts.join(" · ");
+  }
+
   /** Every opened composer starts the assistant from its own context, not the previous one. */
   function presetDraftTools(seed: ComposeSeed): void {
     const tools = shell?.querySelector(".draft-tools");
@@ -2600,8 +2624,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           const card = document.createElement("div");
           card.className = "action";
           const label = document.createElement("p");
-          label.textContent = action.label;
+          label.textContent = actionSummary(action.payload);
           card.append(label);
+          if (action.label && action.label !== String(action.payload.type || "")) {
+            const note = document.createElement("p");
+            note.className = "quiet";
+            note.textContent = action.label;
+            card.append(note);
+          }
           if (!action.state) {
             const run = document.createElement("button");
             run.type = "button";

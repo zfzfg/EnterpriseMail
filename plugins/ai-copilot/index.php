@@ -45,11 +45,6 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 
 	const FEATURES = ['summarize', 'draft', 'quick_replies', 'search', 'triage', 'triage_llm', 'chat', 'alerts'];
 
-	const CACHE_TTL = [
-		'summary' => 30 * 86400,
-		'quick' => 86400
-	];
-
 	public function Init(): void
 	{
 		$this->UseLangs(true);
@@ -238,18 +233,14 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		$sDefault = (string) $this->conf('profile_default', 'mistral') ?: 'mistral';
 		$sOverride = \in_array($sFeature, ['triage', 'search', 'chat'], true) ? (string) $this->conf('profile_' . $sFeature, '') : '';
-		$sProfile = $sOverride ?: $sDefault;
-		// llmster ohne Modell -> Standard
-		if ('llmster' === $sProfile && !$this->conf('llmster_model', '')) {
-			$sProfile = 'mistral';
-		}
-		return $sProfile;
+		// Never fall back to another profile: a local setup must not silently reach a cloud provider.
+		return $sOverride ?: $sDefault;
 	}
 
 	private function llm(string $sFeature): LlmClient
 	{
 		// Central defense for every current and future provider-dispatching action.
-		$this->requireConsent();
+		$this->requireConsent($sFeature);
 		$sProfile = $this->profileFor($sFeature);
 		$a = $this->profileConfig($sProfile);
 		if ('mistral' === $sProfile && !$a['api_key']) {
@@ -280,7 +271,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				'name' => $a['name'],
 				'model' => $a['model'],
 				'local' => 'llmster' === $sProfile,
-				'ready' => 'llmster' === $sProfile || '' !== $a['api_key']
+				'ready' => '' !== $a['model'] && ('llmster' === $sProfile || '' !== $a['api_key'])
 			];
 		}
 		$aConfig['features'] = $aFeatures;
@@ -316,8 +307,34 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			'name' => (string) ($a['name'] ?? ''),
 			'style' => (string) ($a['style'] ?? ''),
 			'addresses' => (string) ($a['addresses'] ?? ''),
-			'notice_ack' => !empty($a['notice_ack'])
+			'notice_ack' => !empty($a['notice_ack']),
+			'notice_profiles' => \array_values(\array_filter((array) ($a['notice_profiles'] ?? []), 'is_string'))
 		];
+	}
+
+	/** Every profile the current routing can send mail content to. */
+	private function routedProfiles(): array
+	{
+		$aProfiles = [];
+		foreach (['default', 'triage', 'search', 'chat'] as $sFeature) {
+			$aProfiles[] = $this->profileFor($sFeature);
+		}
+		return \array_values(\array_unique($aProfiles));
+	}
+
+	private function consentCovers(array $aProfiles): bool
+	{
+		$aUser = $this->userSettings();
+		return !empty($aUser['notice_ack']) && !\array_diff($aProfiles, $aUser['notice_profiles']);
+	}
+
+	/** Browser view: a changed provider routing reads as missing consent, so the notice is shown again. */
+	private function publicSettings(): array
+	{
+		$a = $this->userSettings();
+		$a['notice_ack'] = $this->consentCovers($this->routedProfiles());
+		unset($a['notice_profiles']);
+		return $a;
 	}
 
 	private function account(): \RainLoop\Model\Account
@@ -386,36 +403,6 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return new Triage($this->ownAddresses(), (int) $this->conf('needs_reply_days', 14));
 	}
 
-	private function cacheGet(string $sKind, string $sKey): ?array
-	{
-		try {
-			$oCacher = $this->Manager()->Actions()->Cacher($this->account());
-			$s = $oCacher->Get($this->cacheKey($sKind, $sKey));
-			if ($s) {
-				$a = \json_decode($s, true);
-				if (\is_array($a) && ($a['ts'] ?? 0) > \time() - (static::CACHE_TTL[$sKind] ?? 86400)) {
-					return $a['data'];
-				}
-			}
-		} catch (\Throwable $e) {
-		}
-		return null;
-	}
-
-	private function cacheSet(string $sKind, string $sKey, array $aData): void
-	{
-		try {
-			$oCacher = $this->Manager()->Actions()->Cacher($this->account());
-			$oCacher->Set($this->cacheKey($sKind, $sKey), \json_encode(['ts' => \time(), 'data' => $aData], JSON_UNESCAPED_UNICODE));
-		} catch (\Throwable $e) {
-		}
-	}
-
-	private function cacheKey(string $sKind, string $sKey): string
-	{
-		return 'AiCopilot/' . $sKind . '/' . \sha1($this->account()->Hash() . '|' . $sKey . '|' . Prompts::VERSION);
-	}
-
 	/**
 	 * Fuehrt eine Aktion aus und wandelt Fehler in eine lesbare Antwort um.
 	 */
@@ -440,9 +427,9 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		}
 	}
 
-	private function requireConsent(): void
+	private function requireConsent(string $sFeature): void
 	{
-		if (empty($this->userSettings()['notice_ack'])) {
+		if (!$this->consentCovers([$this->profileFor($sFeature)])) {
 			throw new LlmException('Bitte bestätigen Sie zuerst den Hinweis zur Übermittlung an den KI-Anbieter in den Einstellungen.', 403, 'consent_required');
 		}
 	}
@@ -502,7 +489,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		return $this->respond(__FUNCTION__, function () {
 			$this->account();
-			return ['settings' => $this->userSettings(), 'tones' => \array_keys(Prompts::TONES)];
+			return ['settings' => $this->publicSettings(), 'tones' => \array_keys(Prompts::TONES)];
 		});
 	}
 
@@ -536,8 +523,11 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			}
 			if (isset($a['notice_ack'])) {
 				$aClean['notice_ack'] = !empty($a['notice_ack']);
+				$aClean['notice_profiles'] = $aClean['notice_ack']
+					? \array_values(\array_unique(\array_merge($this->userSettings()['notice_profiles'], $this->routedProfiles())))
+					: [];
 			}
-			return ['saved' => $this->saveUserSettings($aClean), 'settings' => $this->userSettings()];
+			return ['saved' => $this->saveUserSettings($aClean), 'settings' => $this->publicSettings()];
 		});
 	}
 
@@ -551,17 +541,8 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$this->requireFeature('summarize');
 			$sFolder = (string) $this->jsonParam('folder', '');
 			$aUids = $this->paramUids();
-			$bForce = !empty($this->jsonParam('force', false));
-			$bCacheOnly = !empty($this->jsonParam('cacheOnly', false));
 			\sort($aUids);
-			$sKey = $sFolder . '|' . \implode(',', $aUids) . '|' . $this->profileFor('summarize') . '|' . $this->userSettings()['language'];
-			if (!$bForce && ($aCached = $this->cacheGet('summary', $sKey))) {
-				return ['summary' => $aCached, 'cached' => true];
-			}
-			if ($bCacheOnly) {
-				return ['summary' => null];
-			}
-			$this->requireConsent();
+			$this->requireConsent('summarize');
 			$oContext = new MailContext($this->mailClient());
 			$aThread = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) $this->conf('context_budget', 12000));
 			$oLlm = $this->llm('summarize');
@@ -586,8 +567,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 					$aSummary['actions'][] = ['who' => '', 'what' => \mb_substr($act, 0, 300), 'due' => ''];
 				}
 			}
-			$this->cacheSet('summary', $sKey, $aSummary);
-			return ['summary' => $aSummary, 'cached' => false];
+			return ['summary' => $aSummary];
 		});
 	}
 
@@ -622,7 +602,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		$a = DraftRequest::validate($aInput);
 		$this->account();
 		$this->requireFeature('draft');
-		$this->requireConsent();
+		$this->requireConsent('draft');
 
 		$sMode = $a['mode'];
 		$aUser = $this->promptUser();
@@ -867,14 +847,9 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$this->requireFeature('quick_replies');
 			$sFolder = (string) $this->jsonParam('folder', '');
 			$aUids = $this->paramUids();
-			$bForce = !empty($this->jsonParam('force', false));
 			$aUser = $this->promptUser();
 			\sort($aUids);
-			$sKey = $sFolder . '|' . \implode(',', $aUids) . '|' . $aUser['tone'] . '|' . $this->profileFor('quick_replies');
-			if (!$bForce && ($aCached = $this->cacheGet('quick', $sKey))) {
-				return ['replies' => $aCached, 'cached' => true];
-			}
-			$this->requireConsent();
+			$this->requireConsent('quick_replies');
 			$oContext = new MailContext($this->mailClient());
 			$aThread = $oContext->threadWithSent($sFolder, $aUids, (string) $this->jsonParam('sent', ''), (int) \min(8000, $this->conf('context_budget', 12000)));
 			$a = $this->llm('quick_replies')->chatJson(Prompts::quickReplies($aUser, $aThread['text'], $aUser['tone']), ['temperature' => 0.5, 'max_tokens' => 1800]);
@@ -891,8 +866,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!$aReplies) {
 				throw new LlmException('Keine Vorschläge erhalten.', 502);
 			}
-			$this->cacheSet('quick', $sKey, $aReplies);
-			return ['replies' => $aReplies, 'cached' => false];
+			return ['replies' => $aReplies];
 		});
 	}
 
@@ -909,7 +883,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!\strlen($sQuery)) {
 				throw new LlmException('Leere Anfrage.', 400);
 			}
-			$this->requireConsent();
+			$this->requireConsent('search');
 			$aFolders = $this->paramFolders();
 			$sCurrent = (string) $this->jsonParam('currentFolder', 'INBOX');
 			$sToday = \gmdate('Y-m-d (l)');
@@ -964,7 +938,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return $this->respond(__FUNCTION__, function () {
 			$this->requireFeature('triage');
 			$this->requireFeature('triage_llm');
-			$this->requireConsent();
+			$this->requireConsent('triage');
 			$sFolder = (string) $this->jsonParam('folder', 'INBOX');
 			// Kopfdaten der sichtbaren Liste kommen vom Browser (eigene Mails des Benutzers)
 			$aItems = [];
@@ -1021,7 +995,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			if (!$aHistory) {
 				throw new LlmException('Leere Nachricht.', 400);
 			}
-			$this->requireConsent();
+			$this->requireConsent('chat');
 			$aFolders = $this->paramFolders();
 			if (!\in_array('INBOX', $aFolders, true)) {
 				$aFolders[] = 'INBOX';
@@ -1031,6 +1005,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$oMailbox = new Mailbox($oMailClient, $oTriage);
 			$oContext = new MailContext($oMailClient);
 			$sContext = '';
+			$aKnown = \array_map('strval', \array_slice((array) $this->jsonParam('known', []), -Chat::MAX_KNOWN));
 			$aCtx = (array) $this->jsonParam('context', []);
 			if (!empty($aCtx['folder']) && !empty($aCtx['uid'])) {
 				try {
@@ -1038,6 +1013,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 					$sContext = "folder: {$m['folder']}, uid: {$m['uid']}\nVon: {$m['from']}\nAn: {$m['to']}\nDatum: "
 						. ($m['date'] ? \gmdate('Y-m-d H:i', $m['date']) : '') . "\nBetreff: {$m['subject']}\n\n"
 						. \mb_substr($m['body'], 0, 4000);
+					$aKnown[] = $m['folder'] . '|' . $m['uid'];
 				} catch (\Throwable $e) {
 				}
 			}
@@ -1046,8 +1022,8 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 				$bTag ? function (string $sFolder) use ($oMailbox) {
 					$oMailbox->tagByRules($sFolder, 300, (string) $this->jsonParam('sent', ''));
 				} : null);
-			$aSystem = Prompts::chat($this->promptUser(), $sContext, \gmdate('Y-m-d (l)'), $aFolders);
-			return $oChat->run($aSystem, $aHistory);
+			$aSystem = Prompts::chat($this->promptUser(), $sContext, \gmdate('Y-m-d (l)'), $aFolders, $aKnown);
+			return $oChat->run($aSystem, $aHistory, $aKnown);
 		});
 	}
 
@@ -1070,7 +1046,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		return $this->respond(__FUNCTION__, function () {
 			$this->requireFeature('alerts');
-			$this->requireConsent();
+			$this->requireConsent('alerts');
 			$aItems = \array_slice((array) $this->jsonParam('items', []), 0, 8);
 			$oContext = new MailContext($this->mailClient());
 			$aParts = [];

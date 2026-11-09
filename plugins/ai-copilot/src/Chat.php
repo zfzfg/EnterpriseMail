@@ -11,6 +11,7 @@ class Chat
 {
 	public const MAX_ROUNDS = 4;
 	public const MAX_HISTORY = 12;
+	public const MAX_KNOWN = 500;
 
 	public const ACTION_TYPES = ['archive', 'delete', 'mark_read', 'mark_unread', 'flag', 'unflag', 'move', 'open', 'reply', 'compose', 'search'];
 
@@ -51,13 +52,19 @@ class Chat
 	}
 
 	/**
-	 * @return array{reply:string, actions:array, trace:array}
+	 * @param array $aKnown "folder|uid" entries from earlier turns and the open mail
+	 * @return array{reply:string, actions:array, trace:array, known:array}
 	 */
-	public function run(array $aSystem, array $aHistory): array
+	public function run(array $aSystem, array $aHistory, array $aKnown = []): array
 	{
 		$aConversation = \array_merge([$aSystem], $aHistory);
 		$aTrace = [];
 		$aSeen = []; // folder|uid aus Werkzeug-Ergebnissen und Kontext
+		foreach ($aKnown as $sKnown) {
+			if (\preg_match('/^(.+)\|[1-9]\d*$/s', (string) $sKnown, $m) && $this->folderOk($m[1])) {
+				$aSeen[(string) $sKnown] = true;
+			}
+		}
 		$aData = [];
 		for ($i = 0; $i < static::MAX_ROUNDS; ++$i) {
 			$aData = $this->requestTurn($aConversation);
@@ -71,18 +78,18 @@ class Chat
 			$aTrace[] = ['tool' => $sName, 'summary' => $sSummary];
 			$aConversation[] = ['role' => 'assistant', 'content' => \json_encode($aData, JSON_UNESCAPED_UNICODE)];
 			$aConversation[] = ['role' => 'user', 'content' => "Werkzeug-Ergebnis ({$sName}):\n"
-				. \json_encode($mResult, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+				. Prompts::mailData((string) \json_encode($mResult, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE))
 				. ($i === static::MAX_ROUNDS - 2
 					? "\nDies war das letzte Werkzeug. Gib jetzt deine endgültige Antwort im JSON-Format mit tool = null."
 					: "\nAntworte jetzt erneut im JSON-Format.")];
 		}
 
 		$sReply = \trim((string) ($aData['reply'] ?? ''));
-		$aActions = $this->validateActions(\is_array($aData['actions'] ?? null) ? $aData['actions'] : []);
+		$aActions = $this->validateActions(\is_array($aData['actions'] ?? null) ? $aData['actions'] : [], $aSeen);
 		if (!\strlen($sReply)) {
 			$sReply = $aActions ? 'Vorschläge:' : 'Keine Antwort erhalten.';
 		}
-		return ['reply' => $sReply, 'actions' => $aActions, 'trace' => $aTrace];
+		return ['reply' => $sReply, 'actions' => $aActions, 'trace' => $aTrace, 'known' => \array_slice(\array_keys($aSeen), -static::MAX_KNOWN)];
 	}
 
 	/**
@@ -164,7 +171,11 @@ class Chat
 		return ['Unbekanntes Werkzeug', ['error' => 'Unbekanntes Werkzeug.']];
 	}
 
-	public function validateActions(array $aActions): array
+	/**
+	 * Actions may only touch mails the model actually received, so an instruction
+	 * hidden in a mail cannot aim them at arbitrary UIDs.
+	 */
+	public function validateActions(array $aActions, array $aSeen): array
 	{
 		$aResult = [];
 		foreach (\array_slice($aActions, 0, 8) as $a) {
@@ -191,7 +202,7 @@ class Chat
 					if (!$this->folderOk($sFolder)) {
 						continue 2;
 					}
-					$aUids = \array_values(\array_unique(\array_filter(\array_map('intval', (array) ($a['uids'] ?? [])), fn($u) => $u > 0)));
+					$aUids = \array_values(\array_unique(\array_filter(\array_map('intval', (array) ($a['uids'] ?? [])), fn($u) => $u > 0 && isset($aSeen[$sFolder . '|' . $u]))));
 					if (!$aUids) {
 						continue 2;
 					}
@@ -208,7 +219,7 @@ class Chat
 				case 'open':
 				case 'reply':
 					$iUid = (int) ($a['uid'] ?? 0);
-					if (!$this->folderOk($sFolder) || $iUid < 1) {
+					if (!$this->folderOk($sFolder) || $iUid < 1 || !isset($aSeen[$sFolder . '|' . $iUid])) {
 						continue 2;
 					}
 					$aClean['folder'] = $sFolder;
