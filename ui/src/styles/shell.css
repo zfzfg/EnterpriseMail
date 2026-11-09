@@ -2497,7 +2497,10 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .sheet-form { flex: 0 0 auto; align-items: flex-end; background: var(--card); }
 .sheet-form .ink-btn { min-height: 44px; flex: 0 0 auto; }
 .sheet-error { flex: 0 0 auto; padding: 0 12px 12px; }
-.context-chip { flex: 0 0 auto; max-width: calc(100% - 24px); margin: 0 12px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-chip { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 12px; max-width: calc(100% - 24px); margin: 0 12px 8px; overflow: hidden; white-space: nowrap; }
+.context-chip[hidden] { display: none; }
+.context-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.context-chip-drop { flex: none; }
 .assistant, .bubble { animation: fade-in var(--duration-fast) var(--ease-out); }
 .thinking { display: flex; align-items: center; gap: 8px; margin: 0; }
 .thinking::before { content: ""; width: 6px; height: 6px; flex: 0 0 auto; background: var(--foreground); animation: thinking-pulse 900ms var(--ease-standard) infinite alternate; }

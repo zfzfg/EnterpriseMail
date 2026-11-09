@@ -1603,7 +1603,7 @@ class Session implements AssistHost {
       inReplyTo: message.messageId,
       references: [message.references, message.messageId].filter(Boolean).join(" "),
       draftInfo: [this.replyKind, message.uid, message.folder],
-      body: `${options.text || ""}\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
+      body: `${options.text || ""}\n\n${t("COMPOSE.REPLY_MESSAGE_TITLE", "Am %DATETIME% schrieb %EMAIL%").replace("%DATETIME%", whenFull(message.date)).replace("%EMAIL%", author ? label(author) : "")}:\n${quote(body)}`
     });
   }
 

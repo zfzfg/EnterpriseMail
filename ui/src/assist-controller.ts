@@ -1,6 +1,6 @@
 import { ApiError, call, explain, plugin, streamEvents } from "./api";
 import { readAssist, type AssistFlags } from "./assistant";
-import { assistKey, AssistScopes, chatActionAt, summaryActionText, type AssistScope } from "./assist-state";
+import { assistKey, AssistScopes, chatActionAt, fillTemplate, summaryActionText, type AssistScope } from "./assist-state";
 import type { Msg, Person } from "./mail";
 import type { BulkAssistState, BulkReplyItem, BulkSummaryState } from "./reader";
 import type { FolderInfo } from "./folders";
@@ -36,6 +36,17 @@ interface DueItem {
   uid: number;
   title: string;
   due: string;
+}
+
+interface ChatTrace {
+  summary?: string;
+  code?: string;
+  params?: Record<string, unknown>;
+}
+
+function traceText(item: ChatTrace): string {
+  if (!item.code) return item.summary || "";
+  return fillTemplate(t(`AI_COPILOT.TRACE_${item.code.toUpperCase()}`, item.summary || ""), item.params || {});
 }
 
 interface AssistReply {
@@ -628,7 +639,7 @@ export class AssistController {
       const controller = new AbortController();
       this.chatAbort = controller;
       try {
-        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[]; known?: string[] }>("AiChat", {
+        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: ChatTrace[]; known?: string[] }>("AiChat", {
           messages: this.chat,
           context: this.useContext && this.host.current ? { folder: this.host.folder, uid: this.host.current.uid } : {},
           folders: this.host.folders.map((folder) => folder.fullName),
@@ -641,7 +652,7 @@ export class AssistController {
         this.turns.push({
           role: "assistant",
           text: result.reply || "",
-          trace: (result.trace || []).map((item) => item.summary || "").filter(Boolean),
+          trace: (result.trace || []).map(traceText).filter(Boolean),
           actions: (result.actions || []).map((payload) => ({ label: String(payload.label || payload.type || ""), state: "", payload }))
         });
         this.host.view.setChat(this.turns, "", this.contextLabel());

@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface AssistFlags {
   summarize: boolean;
   draft: boolean;
@@ -61,7 +63,7 @@ export async function readAssist(app: Record<string, unknown>, load: () => Promi
     noticeAck: Boolean(settings.notice_ack)
   };
   const label = providers.default;
-  flags.provider = label ? `${label.local ? "LOKAL" : String(label.name || "").toUpperCase()}${label.model ? " · " + label.model : ""}` : "";
+  flags.provider = label ? `${label.local ? t("AI_COPILOT.LOCAL", "LOKAL") : String(label.name || "").toUpperCase()}${label.model ? " · " + label.model : ""}` : "";
   const active = flags.summarize || flags.draft || flags.replies || flags.search || flags.triage || flags.triageLlm || flags.chat || flags.alerts;
   if (!active) return null;
   return flags;

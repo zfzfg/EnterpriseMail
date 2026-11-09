@@ -2623,12 +2623,19 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const chip = shell?.querySelector("#context-chip") as HTMLButtonElement | null;
       const error = shell?.querySelector("#chat-error") as HTMLElement | null;
       const busy = Boolean(thinking) && !thinking.startsWith("!");
-      shell?.querySelectorAll<HTMLButtonElement>(".sheet-form button, .sheet [data-action='prompt']").forEach((button) => { button.disabled = busy; });
+      shell?.querySelectorAll<HTMLButtonElement>(".sheet-form button:not([data-action='stop-chat']), .sheet [data-action='prompt']").forEach((button) => { button.disabled = busy; });
       const area = shell?.querySelector("#ask") as HTMLTextAreaElement | null;
       if (area) area.setAttribute("aria-busy", String(busy));
       if (chip) {
         chip.hidden = !context;
-        chip.textContent = context ? `${t("AI_COPILOT.CONTEXT", "Bezug")}: ${context} · ${t("AI_COPILOT.DROP_CONTEXT", "Bezug entfernen")}` : "";
+        const name = document.createElement("span");
+        name.className = "context-chip-name";
+        name.textContent = `${t("AI_COPILOT.CONTEXT", "Bezug")}: ${context}`;
+        const drop = document.createElement("span");
+        drop.className = "context-chip-drop";
+        drop.textContent = t("AI_COPILOT.DROP_CONTEXT", "Bezug entfernen");
+        chip.replaceChildren(...(context ? [name, drop] : []));
+        chip.title = context;
       }
       if (error) {
         error.hidden = !thinking.startsWith("!");

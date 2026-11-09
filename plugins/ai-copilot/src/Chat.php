@@ -83,8 +83,8 @@ class Chat
 			}
 			$sName = (string) $aTool['name'];
 			$aArgs = \is_array($aTool['args'] ?? null) ? $aTool['args'] : [];
-			[$sSummary, $mResult] = $this->tool($sName, $aArgs, $aSeen);
-			$aTrace[] = ['tool' => $sName, 'summary' => $sSummary];
+			[$sSummary, $mResult, $sCode, $aParams] = $this->tool($sName, $aArgs, $aSeen);
+			$aTrace[] = ['tool' => $sName, 'summary' => $sSummary, 'code' => $sCode, 'params' => $aParams];
 			$aConversation[] = ['role' => 'assistant', 'content' => \json_encode($aData, JSON_UNESCAPED_UNICODE)];
 			$aConversation[] = ['role' => 'user', 'content' => "Werkzeug-Ergebnis ({$sName}):\n"
 				. Prompts::mailData((string) \json_encode($mResult, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE))
@@ -154,13 +154,14 @@ class Chat
 							'category' => $b['category']
 						];
 					}
-					return [\count($aItems) . ' Treffer in ' . $sFolder . ($sSearch ? " für „{$sSearch}“" : ''), ['folder' => $sFolder, 'search' => $sSearch, 'results' => $aItems]];
+					return [\count($aItems) . ' Treffer in ' . $sFolder . ($sSearch ? " für „{$sSearch}“" : ''), ['folder' => $sFolder, 'search' => $sSearch, 'results' => $aItems],
+						$sSearch ? 'search_query' : 'search', ['count' => \count($aItems), 'folder' => $sFolder, 'query' => $sSearch]];
 
 				case 'read_mail':
 					$sFolder = (string) ($aArgs['folder'] ?? 'INBOX');
 					$iUid = (int) ($aArgs['uid'] ?? 0);
 					if (!$this->folderOk($sFolder)) {
-						return ['Ordner unbekannt', ['error' => 'Ordner unbekannt']];
+						return ['Ordner unbekannt', ['error' => 'Ordner unbekannt'], 'folder_unknown', []];
 					}
 					$m = $this->oContext->message($sFolder, $iUid);
 					$aSeen[$sFolder . '|' . $iUid] = true;
@@ -172,12 +173,12 @@ class Chat
 						'date' => $m['date'] ? \gmdate('Y-m-d H:i', $m['date']) : '',
 						'subject' => $m['subject'],
 						'body' => \mb_substr($m['body'], 0, 4000)
-					]];
+					], 'read', ['subject' => $m['subject']]];
 			}
 		} catch (\Throwable $e) {
-			return ['Werkzeugfehler', ['error' => 'Werkzeug fehlgeschlagen.']];
+			return ['Werkzeugfehler', ['error' => 'Werkzeug fehlgeschlagen.'], 'failed', []];
 		}
-		return ['Unbekanntes Werkzeug', ['error' => 'Unbekanntes Werkzeug.']];
+		return ['Unbekanntes Werkzeug', ['error' => 'Unbekanntes Werkzeug.'], 'unknown_tool', []];
 	}
 
 	/**

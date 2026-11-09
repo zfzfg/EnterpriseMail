@@ -1011,7 +1011,7 @@ try {
       await page.click("#strip .assist-replies .prompt");
       await page.waitForSelector(".composer:not([hidden])", { visible: true });
       const body = await composerBody();
-      assert.ok(body.includes("Mock-Antwort") && body.includes("schrieb"), body);
+      assert.ok(body.includes("Mock-Antwort") && /schrieb|wrote/.test(body), body);
       assert.equal(await page.$eval(".draft-tools [data-mode][aria-pressed='true']", (node) => node.dataset.mode), "reply");
       await page.click("[data-compose='save']");
       await page.waitForFunction(() => /Gespeichert|Saved at/i.test(document.querySelector("#compose-status")?.textContent || ""), { timeout: 60_000 });
@@ -1023,7 +1023,7 @@ try {
       await page.waitForFunction(() => /eingefügt|inserted/i.test(document.querySelector("#draft-status")?.textContent || ""), { timeout: 30_000 });
       const body = await composerBody();
       assert.ok(body.includes("Mock-Entwurf"), body);
-      assert.ok(body.includes("schrieb"), `Quote was lost: ${body}`);
+      assert.ok(/schrieb|wrote/.test(body), `Quote was lost: ${body}`);
       assert.ok(!body.includes("Mock-Antwort"), `Old own text was kept: ${body}`);
       assert.ok(!/interne Überlegung/.test(body), body);
       // The audit forbids streaming elsewhere; here exactly this one request is expected.

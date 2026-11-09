@@ -35,6 +35,11 @@ export function actionFacts(payload: Record<string, unknown>): ActionFacts {
   };
 }
 
+/** Fills %KEY% placeholders; values come from mail data, so they are never read as patterns. */
+export function fillTemplate(template: string, values: Record<string, unknown>): string {
+  return Object.entries(values).reduce((text, [key, value]) => text.split(`%${key.toUpperCase()}%`).join(String(value)), template);
+}
+
 /** One line for an extracted task: who, what, and until when. */
 export function summaryActionText(action: { who?: string; what?: string; due?: string }): string {
   return `${action.who ? `${action.who}: ` : ""}${action.what || ""}${action.due ? ` (${action.due})` : ""}`;

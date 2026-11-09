@@ -791,6 +791,11 @@ $aMessages = \AiCopilot\Prompts::summarize(['language' => 'de'], 'Inhalt');
 check(\str_contains($aMessages[1]['content'], "<mail_inhalt>\nInhalt\n</mail_inhalt>"), 'Summary context is not fenced.');
 check(\str_contains($aMessages[0]['content'], 'mail_inhalt'), 'The model is not told about the data block.');
 
+/* The trace carries a code and values, so the browser can show it in the user's language. */
+$aResult = runChat([$sToolTurn, \json_encode(['reply' => 'Fertig', 'tool' => null, 'actions' => []])]);
+same('search_query', $aResult['trace'][0]['code'], 'Trace code is missing.');
+same(['count' => 1, 'folder' => 'INBOX', 'query' => 'is:unseen'], $aResult['trace'][0]['params'], 'Trace values are missing.');
+
 /* The time budget ends tool use with one final answer instead of more rounds. */
 $iNow = 1000;
 $aPayloads = [];

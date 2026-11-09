@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasDraftPlaceholder, actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
+import { fillTemplate, hasDraftPlaceholder, actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
 
 const action = (label) => ({ label, state: "", payload: { type: label } });
 
@@ -50,6 +50,18 @@ test("draft placeholders are recognised without flagging ordinary brackets", () 
   assert.equal(hasDraftPlaceholder("Preis: [?]"), true);
   assert.equal(hasDraftPlaceholder("Siehe [1] und [Anlage]."), false);
   assert.equal(hasDraftPlaceholder("Wirklich? [ja]"), false);
+});
+
+test("templates insert values literally", () => {
+  assert.equal(fillTemplate("%COUNT% results in %FOLDER%", { count: 3, folder: "INBOX" }), "3 results in INBOX");
+  assert.equal(fillTemplate("for %QUERY%", { query: "$& %COUNT%" }), "for $& %COUNT%");
+  assert.equal(fillTemplate("Summary only", {}), "Summary only");
+});
+
+test("the English reply introduction is preserved like the German one", () => {
+  const parts = splitPlainDraft("\n\nOn Monday, November 9, 2026 at 01:09 PM, Max Muster wrote:\n> Hallo");
+  assert.equal(parts.own, "");
+  assert.match(parts.tail, /^On Monday/);
 });
 
 test("an empty key is never live", () => {
