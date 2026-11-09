@@ -1,4 +1,5 @@
 import { readAssist, type AssistFlags } from "./assistant";
+import { AssistScopes, chatActionAt, type AssistScope } from "./assist-state";
 import {
   ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, syncContacts, watchSession
 } from "./api";
@@ -120,6 +121,8 @@ interface Prefs {
 }
 
 const PAGE_FALLBACK = 20;
+/** Matches DraftRequest's limit for the `current` field. */
+const DRAFT_TEXT_LIMIT = 8000;
 const SYSTEM_FLAGS = /^(\\|\$ai_|\$forwarded$|\$mdnsent$|\$junk$|\$notjunk$|\$label|nonjunk$|junk$|\$phishing$|\$submitpending$|\$submitted$|\$hasattachment$|\$hasnoattachment$|\$important$|\$muted$|\$followed$)/i;
 
 function people(value: unknown): Person[] {
@@ -242,8 +245,8 @@ class Session {
   private useContext = true;
   private chat: { role: "user" | "assistant"; content: string }[] = [];
   private turns: ChatTurn[] = [];
-  private chatActions: Record<string, unknown>[] = [];
   private chatBusy = false;
+  private assistScopes = new AssistScopes();
   private replies: { label: string; body: string }[] = [];
   private bulkSummary: BulkSummaryState | null = null;
   private bulkSummaryLoading = "";
@@ -401,12 +404,8 @@ class Session {
     this.alertItems = [];
     this.chat = [];
     this.turns = [];
-    this.chatActions = [];
-    this.replies = [];
+    this.clearMessageAssist();
     this.clearBulkState();
-    this.tldr = "";
-    this.summaryCached = false;
-    this.summaryModel = "";
     this.current = null;
     this.selected = 0;
     this.messages = [];
@@ -654,6 +653,7 @@ class Session {
           return result.settings;
         });
         this.view.setAssist(this.assistFlags);
+        this.noticeAck = Boolean(this.assistFlags?.noticeAck);
       }
       if (next === "session") {
         await this.enter(await loadApp());
@@ -1346,6 +1346,7 @@ class Session {
     const folder = this.folder;
     this.selected = uid;
     this.checked.clear();
+    this.clearMessageAssist();
     this.paintList();
     this.view.setReader(null, "Brief wird geladen …", "");
     try {
@@ -1609,15 +1610,16 @@ class Session {
     return this.identities.find((identity) => recipients.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id || this.identities[0]?.id || "";
   }
 
-  private openNew(): void {
+  private openNew(preset: Partial<ComposeSeed> = {}): void {
     this.replyKind = "";
     this.draftRef = null;
     this.isExistingDraft = false;
-    this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new" });
+    this.view.openCompose({ title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"), to: "", cc: "", subject: "", body: "", mode: "new", ...preset });
   }
 
-  private openReply(all: boolean): void {
-    const message = this.current;
+  /** The one way to start a reply; assistant suggestions and chat actions reuse it for threading and identity. */
+  private openReply(all: boolean, options: { message?: Msg; text?: string; title?: string; instruction?: string } = {}): void {
+    const message = options.message || this.current;
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
     this.draftRef = null;
@@ -1627,12 +1629,13 @@ class Session {
     const body = message.plain || plainFromHtml(message.html);
     const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
     this.view.openCompose({
-      title: all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten"), mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      title: options.title || (all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten")), mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
+      instruction: options.instruction,
       to: author ? address(author) : "", cc: all ? others.map(address).join(", ") : "", subject,
       inReplyTo: message.messageId,
       references: [message.references, message.messageId].filter(Boolean).join(" "),
       draftInfo: [this.replyKind, message.uid, message.folder],
-      body: `\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
+      body: `${options.text || ""}\n\nAm ${when(message.date)} schrieb ${author ? label(author) : ""}:\n${quote(body)}`
     });
   }
 
@@ -1687,7 +1690,8 @@ class Session {
     if (values.inReplyTo) params.inReplyTo = values.inReplyTo;
     if (values.references) params.references = values.references;
     if (values.draftInfo) params.draftInfo = values.draftInfo;
-    if (message && this.replyKind) {
+    // The seed already names the replied-to mail; the open message may have changed since.
+    if (message && this.replyKind && !values.draftInfo) {
       params.inReplyTo = message.messageId;
       params.references = [message.references, message.messageId].filter(Boolean).join(" ");
       params.draftInfo = [this.replyKind === "forward" ? "forward" : "reply", message.uid, message.folder];
@@ -2700,21 +2704,39 @@ class Session {
     this.view.setStrip(this.current ? this.strip() : null);
   }
 
+  private clearMessageAssist(): void {
+    this.assistScopes.reset();
+    this.replies = [];
+    this.tldr = "";
+    this.summaryCached = false;
+    this.summaryModel = "";
+  }
+
+  /** Scope for a provider request about the open message; stale once another message is shown. */
+  private messageScope(): AssistScope {
+    const generation = this.accountGeneration;
+    return this.assistScopes.begin(() =>
+      this.current && generation === this.accountGeneration ? `${this.folder}\n${this.current.uid}` : ""
+    );
+  }
+
   private async loadCachedSummary(): Promise<void> {
     if (!this.assistFlags?.summarize || !this.current) return;
+    const scope = this.messageScope();
     try {
       const result = await plugin<{ summary: { tldr?: string; model?: string } | null; cached?: boolean }>("AiSummarize", {
         folder: this.folder,
         uids: [this.current.uid],
         cacheOnly: true,
         sent: this.sentFolder
-      });
+      }, scope.signal);
+      if (!scope.live()) return;
       this.tldr = result.summary?.tldr || "";
       this.summaryCached = Boolean(result.cached);
       this.summaryModel = result.summary?.model || "";
       this.paintStrip();
     } catch {
-      this.paintStrip();
+      if (scope.live()) this.paintStrip();
     }
   }
 
@@ -2772,6 +2794,13 @@ class Session {
         if (sent) await this.selectFolder(sent);
         return;
       }
+      if (!this.assistFlags?.tabs) {
+        const item = this.alertItems.find((entry) => entry.type === (data.kind === "invoice" ? "invoice" : "reply"));
+        if (!item) return;
+        if (item.folder !== this.folder) await this.selectFolder(item.folder);
+        await this.selectMessage(item.uid);
+        return;
+      }
       await this.assist("cat", { cat: data.kind === "invoice" ? "invoice" : "needs_reply" });
       this.view.pressCategory(data.kind === "invoice" ? "invoice" : "needs_reply");
       return;
@@ -2816,6 +2845,7 @@ class Session {
       return;
     }
     if (name === "summarize" && this.current) {
+      const scope = this.messageScope();
       this.view.setStrip({ ...this.strip(), loading: "Verlauf wird zusammengefasst …", tldr: "" });
       try {
         const result = await plugin<{ summary: { tldr?: string; model?: string }; cached?: boolean }>("AiSummarize", {
@@ -2823,44 +2853,38 @@ class Session {
           uids: [this.current.uid],
           force: data.force === "1",
           sent: this.sentFolder
-        });
+        }, scope.signal);
+        if (!scope.live()) return;
         this.tldr = result.summary?.tldr || "";
         this.summaryCached = Boolean(result.cached);
         this.summaryModel = result.summary?.model || this.assistFlags?.provider || "";
         this.paintStrip();
       } catch (error) {
-        this.view.setStrip({ ...this.strip(), error: explain(error) });
+        if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
       }
       return;
     }
     if (name === "replies" && this.current) {
+      const scope = this.messageScope();
       this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschläge werden erstellt …") });
       try {
         const result = await plugin<{ replies: { label: string; body: string }[] }>("AiQuickReplies", {
           folder: this.folder,
           uids: [this.current.uid],
           sent: this.sentFolder
-        });
+        }, scope.signal);
+        if (!scope.live()) return;
         this.replies = (result.replies || []).slice(0, 3);
         this.paintStrip();
       } catch (error) {
-        this.view.setStrip({ ...this.strip(), error: explain(error) });
+        if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
       }
       return;
     }
     if (name === "use-reply") {
       const reply = this.replies[Number(data.index || 0)];
       if (!reply || !this.current) return;
-      this.replyKind = "reply";
-      const author = this.current.replyTo[0] || this.current.from[0];
-      this.view.openCompose({
-        title: reply.label || "Antworten",
-        mode: "reply",
-        to: author ? address(author) : "",
-        cc: "",
-        subject: /^re:/i.test(this.current.subject) ? this.current.subject : `Re: ${this.current.subject}`,
-        body: reply.body
-      });
+      this.openReply(false, { text: reply.body, title: reply.label });
       return;
     }
     if (name === "bulk-summarize") {
@@ -2942,17 +2966,14 @@ class Session {
       const item = this.bulkRepliesList.find((r) => r.uid === uid);
       const reply = item?.replies[index];
       if (!reply) return;
-      const msg = this.messages.find((m) => m.uid === uid);
-      const author = msg?.replyTo[0] || msg?.from[0];
-      const subject = msg?.subject ? (/^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}`) : "Re:";
-      this.view.openCompose({
-        title: reply.label || "Antworten",
-        mode: "reply",
-        to: author ? address(author) : "",
-        cc: "",
-        subject,
-        body: reply.body
-      });
+      const generation = this.accountGeneration;
+      try {
+        // List rows carry no body, so the quote needs the full message.
+        const message = this.parseMessage(await call<Record<string, unknown>>("Message", { folder: this.folder, uid }), true);
+        if (generation === this.accountGeneration) this.openReply(false, { message, text: reply.body, title: reply.label });
+      } catch (error) {
+        this.view.notice(explain(error));
+      }
       return;
     }
     if (name === "triage") {
@@ -3013,12 +3034,11 @@ class Session {
           sent: this.sentFolder
         });
         this.chat.push({ role: "assistant", content: result.reply || "" });
-        this.chatActions = result.actions || [];
         this.turns.push({
           role: "assistant",
           text: result.reply || "",
           trace: (result.trace || []).map((item) => item.summary || "").filter(Boolean),
-          actions: this.chatActions.map((action) => ({ label: String(action.label || action.type || ""), state: "" }))
+          actions: (result.actions || []).map((payload) => ({ label: String(payload.label || payload.type || ""), state: "", payload }))
         });
         this.view.setChat(this.turns, "", this.contextLabel());
       } catch (error) {
@@ -3034,14 +3054,13 @@ class Session {
       return;
     }
     if (name === "dismiss-action") {
-      const index = Number(data.index || 0);
-      const turn = [...this.turns].reverse().find((item) => item.role === "assistant");
-      if (turn?.actions[index]) turn.actions[index].state = "Verworfen";
+      const action = chatActionAt(this.turns, Number(data.turn), Number(data.index));
+      if (action && !action.state) action.state = "Verworfen";
       this.view.setChat(this.turns, "", this.contextLabel());
       return;
     }
     if (name === "run-action") {
-      await this.runChatAction(Number(data.index || 0));
+      await this.runChatAction(Number(data.turn), Number(data.index));
       return;
     }
     if (name === "generate") await this.generate();
@@ -3062,6 +3081,14 @@ class Session {
 
   private async generate(): Promise<void> {
     const options = this.view.draftOptions();
+    if (options.body.length > DRAFT_TEXT_LIMIT) {
+      this.view.setDraftBusy(false, t("AI_COPILOT.DRAFT_TOO_LONG", "Der Text ist für die KI zu lang (höchstens %MAX% Zeichen).").replace("%MAX%", String(DRAFT_TEXT_LIMIT)));
+      return;
+    }
+    // Only an actual reply carries a message; a new mail must not leak whatever is open.
+    const context = options.mode === "reply"
+      ? options.context || (this.current ? { folder: this.current.folder, uid: this.current.uid } : null)
+      : null;
     this.draftBackup = options.body;
     this.draftAbort = new AbortController();
     this.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben …"));
@@ -3073,8 +3100,8 @@ class Session {
         instruction: options.instruction,
         current: options.body,
         wantSubject: options.mode === "new" || options.mode === "reply",
-        folder: this.folder,
-        uids: this.current ? [this.current.uid] : [],
+        folder: context?.folder || "",
+        uids: context ? [context.uid] : [],
         sent: this.sentFolder
       }, (event, payload) => {
         if (event === "delta") {
@@ -3098,10 +3125,10 @@ class Session {
     }
   }
 
-  private async runChatAction(index: number): Promise<void> {
-    const action = this.chatActions[index];
-    const turn = [...this.turns].reverse().find((item) => item.role === "assistant");
-    if (!action || !turn?.actions[index] || turn.actions[index].state) return;
+  private async runChatAction(turnIndex: number, index: number): Promise<void> {
+    const entry = chatActionAt(this.turns, turnIndex, index);
+    if (!entry || entry.state) return;
+    const action = entry.payload;
     const type = String(action.type || "");
     const folder = String(action.folder || this.folder);
     const uids = Array.isArray(action.uids) ? action.uids.map(String).join(",") : "";
@@ -3121,27 +3148,20 @@ class Session {
       } else if (type === "open" || type === "reply") {
         await this.selectFolder(folder);
         await this.selectMessage(Number(action.uid || 0));
-        if (type === "reply") this.openReply(false);
+        if (type === "reply") this.openReply(false, { instruction: String(action.instruction || "") });
         this.view.closeSheet();
       } else if (type === "compose") {
-        this.openNew();
-        this.view.openCompose({
-          title: t("COMPOSE.TITLE_NEW_MESSAGE", "Neue Nachricht"),
-          mode: "new",
-          to: String(action.to || ""),
-          cc: "",
-          subject: String(action.subject || ""),
-          body: ""
-        });
+        this.openNew({ to: String(action.to || ""), subject: String(action.subject || ""), instruction: String(action.instruction || "") });
+        this.view.closeSheet();
       } else if (type === "search") {
         if (folder) await this.selectFolder(folder);
         await this.setSearch(String(action.search || ""));
       }
-      turn.actions[index].state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
+      entry.state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
       this.view.setChat(this.turns, "", this.contextLabel());
       if (uids) await this.loadList(false);
     } catch (error) {
-      turn.actions[index].state = explain(error);
+      entry.state = explain(error);
       this.view.setChat(this.turns, "", this.contextLabel());
     }
   }

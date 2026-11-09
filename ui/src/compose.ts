@@ -1,5 +1,6 @@
 import { ApiError, call, explain, upload, type UploadTask } from "./api";
 import { keysFor, loadGnuKeys, rememberedPass, rememberPass, type GnuKey } from "./crypto";
+import { joinPlainDraft, ownNodeRange, splitPlainDraft } from "./assist-state";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import type { IdentityRow } from "./settings";
@@ -58,6 +59,8 @@ export interface ComposeSeed {
   files?: ComposeFile[];
   /** Tastaturstart: ohne Einfahrbewegung, Fokus sofort. */
   instant?: boolean;
+  /** Vorbelegung des KI-Anweisungsfelds; generiert wird erst nach Klick. */
+  instruction?: string;
 }
 
 export interface ComposeValues extends ComposeSeed {
@@ -85,6 +88,11 @@ export interface ComposeValues extends ComposeSeed {
   inReplyTo?: string;
   references?: string;
   draftInfo?: [string, number, string];
+}
+
+interface DraftRegion {
+  own: string;
+  write(text: string): void;
 }
 
 interface ComposeCallbacks {
@@ -241,6 +249,7 @@ export class Composer {
   private missingKeys: string[] = [];
   private fields = new Map<string, RecipientField>();
   private seed: ComposeSeed | null = null;
+  private draftRegion: DraftRegion | null = null;
   private mode: "html" | "plain" = "plain";
   private draftRef: { folder: string; uid: number } | null = null;
   private baseline = "";
@@ -442,6 +451,7 @@ export class Composer {
     const instant = Boolean(seed.instant || this.instantNext);
     this.instantNext = false;
     this.seed = seed;
+    this.draftRegion = null;
     this.draftRef = seed.draftRef || null;
     this.files = [];
     (this.root.querySelector("#compose-title") as HTMLElement).textContent = seed.title;
@@ -557,6 +567,7 @@ export class Composer {
     if (mode === "html") this.editor.innerHTML = this.prefs.markdown ? markdownToHtml(this.plain.value) : plainToHtml(this.plain.value, true);
     else this.plain.value = htmlToPlain(this.editor.innerHTML);
     this.mode = mode;
+    this.draftRegion = null;
     this.paintMode();
     this.changed();
   }
@@ -1005,13 +1016,51 @@ export class Composer {
 
   private setStatus(text: string): void { (this.root.querySelector("#compose-status") as HTMLElement).textContent = text; }
 
-  setBody(text: string): void {
-    if (this.mode === "html") this.editor.innerHTML = plainToHtml(text);
-    else this.plain.value = text;
+  /** Splits off quote and signature once, so streamed text can never move that boundary. */
+  private captureDraftRegion(): DraftRegion {
+    if (this.mode !== "html") {
+      const parts = splitPlainDraft(this.plain.value);
+      return { own: parts.own, write: (text) => { this.plain.value = joinPlainDraft(parts, text); } };
+    }
+    const nodes = [...this.editor.childNodes];
+    const { start, end } = ownNodeRange(nodes.map((node) => ({
+      tag: node.nodeName,
+      signature: node instanceof HTMLElement && node.classList.contains("compose-signature"),
+      text: node.textContent || ""
+    })));
+    const head = nodes.slice(0, start);
+    const tail = nodes.slice(end);
+    const holder = document.createElement("div");
+    holder.append(...nodes.slice(start, end).map((node) => node.cloneNode(true)));
+    return {
+      own: htmlToPlain(holder.innerHTML),
+      write: (text) => {
+        const fragment = document.createElement("template");
+        fragment.innerHTML = `${head.length && text ? "<br><br>" : ""}${plainToHtml(text)}${tail.length && text ? "<br><br>" : ""}`;
+        this.editor.replaceChildren(...head, ...fragment.content.childNodes, ...tail);
+      }
+    };
+  }
+
+  /** The user's own text, without the quoted mail and signature. */
+  draftText(): string {
+    this.draftRegion = this.captureDraftRegion();
+    return this.draftRegion.own;
+  }
+
+  /** Replaces only the user's own text; the quoted mail and signature stay as they are. */
+  setDraftText(text: string): void {
+    this.draftRegion = this.draftRegion || this.captureDraftRegion();
+    this.draftRegion.write(text);
     this.changed();
   }
 
-  body(): string { return this.mode === "html" ? htmlToPlain(this.editor.innerHTML) : this.plain.value; }
+  /** The mail this composer answers, independent of what the reader shows now. */
+  replyContext(): { folder: string; uid: number } | null {
+    const info = this.seed?.draftInfo;
+    return info && /^reply/i.test(info[0]) && info[1] > 0 && info[2] ? { folder: info[2], uid: info[1] } : null;
+  }
+
   subject(): string { return (this.form.elements.namedItem("subject") as HTMLInputElement).value; }
   isOpen(): boolean { return !this.root.hidden; }
 }

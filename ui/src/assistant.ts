@@ -5,6 +5,9 @@ export interface AssistFlags {
   search: boolean;
   triage: boolean;
   triageLlm: boolean;
+  /** Category tabs filter on stored IMAP keywords, so they need keyword storage. */
+  tabs: boolean;
+  tone: string;
   chat: boolean;
   alerts: boolean;
   provider: string;
@@ -48,6 +51,8 @@ export async function readAssist(app: Record<string, unknown>, load: () => Promi
     search: on(admin, settings, providers, "search", "search"),
     triage: on(admin, settings, providers, "triage"),
     triageLlm: Boolean(admin.triage) && settings.features?.triage !== false && on(admin, settings, providers, "triage_llm", "triage"),
+    tabs: section.storeKeywords !== false,
+    tone: String(settings.tone || "professional"),
     chat: on(admin, settings, providers, "chat", "chat"),
     alerts: on(admin, settings, providers, "alerts"),
     provider: "",

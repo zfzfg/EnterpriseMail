@@ -631,7 +631,8 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 		$sCurrent = \trim($a['current']);
 		$bWantSubject = $a['wantSubject'] && \in_array($sMode, ['new', 'reply'], true);
 		$sContext = '';
-		if ($a['folder'] && $a['uids'] && \in_array($sMode, ['reply', 'new'], true)) {
+		// Only a reply is about a mail; a new message must not carry whatever is open.
+		if ($a['folder'] && $a['uids'] && 'reply' === $sMode) {
 			$oContext = new MailContext($this->mailClient());
 			$sContext = $oContext->threadWithSent($a['folder'], $a['uids'], $a['sent'], (int) $this->conf('context_budget', 12000))['text'];
 		}

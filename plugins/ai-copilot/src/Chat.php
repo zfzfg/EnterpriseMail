@@ -60,7 +60,7 @@ class Chat
 		$aSeen = []; // folder|uid aus Werkzeug-Ergebnissen und Kontext
 		$aData = [];
 		for ($i = 0; $i < static::MAX_ROUNDS; ++$i) {
-			$aData = $this->oLlm->chatJson($aConversation, ['temperature' => 0.2, 'max_tokens' => 1500]);
+			$aData = $this->requestTurn($aConversation);
 			$aTool = $aData['tool'] ?? null;
 			if (!\is_array($aTool) || empty($aTool['name']) || $i === static::MAX_ROUNDS - 1) {
 				break;
@@ -72,7 +72,9 @@ class Chat
 			$aConversation[] = ['role' => 'assistant', 'content' => \json_encode($aData, JSON_UNESCAPED_UNICODE)];
 			$aConversation[] = ['role' => 'user', 'content' => "Werkzeug-Ergebnis ({$sName}):\n"
 				. \json_encode($mResult, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
-				. "\nAntworte jetzt erneut im JSON-Format."];
+				. ($i === static::MAX_ROUNDS - 2
+					? "\nDies war das letzte Werkzeug. Gib jetzt deine endgültige Antwort im JSON-Format mit tool = null."
+					: "\nAntworte jetzt erneut im JSON-Format.")];
 		}
 
 		$sReply = \trim((string) ($aData['reply'] ?? ''));
@@ -81,6 +83,23 @@ class Chat
 			$sReply = $aActions ? 'Vorschläge:' : 'Keine Antwort erhalten.';
 		}
 		return ['reply' => $sReply, 'actions' => $aActions, 'trace' => $aTrace];
+	}
+
+	/**
+	 * Plain prose from a model that ignored the JSON format is still an answer.
+	 * Truncated JSON is not, and raw JSON must never reach the user.
+	 */
+	private function requestTurn(array $aConversation): array
+	{
+		$sText = $this->oLlm->chat($aConversation, ['json' => true, 'temperature' => 0.2, 'max_tokens' => 1500]);
+		$aData = LlmClient::extractJson($sText);
+		if (null !== $aData) {
+			return $aData;
+		}
+		if (\str_starts_with(\ltrim($sText), '{')) {
+			throw new LlmException('Das Modell hat kein gültiges JSON geliefert.', 502, 'upstream_malformed_json');
+		}
+		return ['reply' => $sText, 'tool' => null, 'actions' => []];
 	}
 
 	private function folderOk(string $sFolder): bool

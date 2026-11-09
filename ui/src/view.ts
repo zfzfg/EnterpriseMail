@@ -1,4 +1,5 @@
 import type { AssistFlags } from "./assistant";
+import { draftModeFor, type ChatAction } from "./assist-state";
 import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferences, type ComposeSeed, type ComposeValues } from "./compose";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
@@ -93,7 +94,7 @@ export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   trace: string[];
-  actions: { label: string; state: string }[];
+  actions: ChatAction[];
 }
 
 export interface DraftOptions {
@@ -102,6 +103,7 @@ export interface DraftOptions {
   instruction: string;
   body: string;
   subject: string;
+  context: { folder: string; uid: number } | null;
 }
 
 export interface MailActions {
@@ -242,6 +244,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   let edit: DeskEdit | null = null;
   let snap: SettingsSnapshot | null = null;
   let composer: Composer | null = null;
+  let assistTone = "professional";
   let book: Book | null = null;
   let composePrefs: ComposePreferences = {
     editor: "Plain", markdown: false, spellcheck: false, autosave: true, draftsFolder: "", sentFolder: "",
@@ -1809,7 +1812,25 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!wide()) pane("reader");
   }
 
+  /** Every opened composer starts the assistant from its own context, not the previous one. */
+  function presetDraftTools(seed: ComposeSeed): void {
+    const tools = shell?.querySelector(".draft-tools");
+    if (!tools) return;
+    const press = (name: "mode" | "tone", value: string) => {
+      const buttons = [...tools.querySelectorAll<HTMLButtonElement>(`[data-${name}]`)];
+      const wanted = buttons.find((button) => button.dataset[name] === value) || buttons[0];
+      buttons.forEach((button) => button.setAttribute("aria-pressed", button === wanted ? "true" : "false"));
+    };
+    press("mode", draftModeFor(seed));
+    press("tone", assistTone);
+    (tools.querySelector("#instruction") as HTMLInputElement).value = seed.instruction || "";
+    (tools.querySelector("#subject-hint") as HTMLElement).hidden = true;
+    (tools.querySelector("[data-action='revert-draft']") as HTMLElement).hidden = true;
+    (tools.querySelector("#draft-status") as HTMLElement).textContent = "";
+  }
+
   function installAssist(flags: AssistFlags): void {
+    assistTone = flags.tone;
     shell?.querySelectorAll("[data-assist-node]").forEach((node) => node.remove());
     if (!shell) return;
     if (flags.alerts) {
@@ -1826,7 +1847,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       shell.querySelector(".account")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
-    if (flags.triage && searchForm) {
+    if (flags.triage && flags.tabs && searchForm) {
       const filters = document.createElement("div");
       filters.className = "filters";
       filters.setAttribute("role", "toolbar");
@@ -2382,7 +2403,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       composeIdentities = identities;
       composer?.configure(prefs, identities);
     },
-    openCompose(seed) { composer?.open(seed); },
+    openCompose(seed) { composer?.open(seed); presetDraftTools(seed); },
     closeCompose() { composer?.sent(); },
     attachCompose(items) { return composer?.attachFrom(items) || Promise.resolve(); },
     setSendState(busy, error) { if (!busy || error) composer?.setError(error); },
@@ -2563,7 +2584,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         });
         log.append(p, prompts);
       }
-      turns.forEach((turn) => {
+      turns.forEach((turn, turnIndex) => {
         const item = document.createElement("article");
         item.className = turn.role === "user" ? "bubble" : "assistant";
         if (turn.trace.length) {
@@ -2586,12 +2607,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
             run.type = "button";
             run.className = "ink-btn";
             run.dataset.action = "run-action";
+            run.dataset.turn = String(turnIndex);
             run.dataset.index = String(index);
             run.textContent = t("AI_COPILOT.RUN", "Ausführen");
             const dismiss = document.createElement("button");
             dismiss.type = "button";
             dismiss.className = "text-btn";
             dismiss.dataset.action = "dismiss-action";
+            dismiss.dataset.turn = String(turnIndex);
             dismiss.dataset.index = String(index);
             dismiss.textContent = t("AI_COPILOT.DISMISS", "Verwerfen");
             card.append(run, dismiss);
@@ -2631,11 +2654,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         mode: pressed("[data-mode]")?.mode || "new",
         tone: pressed("[data-tone]")?.tone || "professional",
         instruction: (shell?.querySelector("#instruction") as HTMLInputElement | null)?.value || "",
-        body: composer?.body() || "",
-        subject: composer?.subject() || ""
+        body: composer?.draftText() || "",
+        subject: composer?.subject() || "",
+        context: composer?.replyContext() || null
       };
     },
-    setDraftBody(text) { composer?.setBody(text); },
+    setDraftBody(text) { composer?.setDraftText(text); },
     setDraftBusy(busy, status) {
       const generate = shell?.querySelector("[data-action='generate']") as HTMLButtonElement | null;
       const stop = shell?.querySelector("[data-action='stop-generate']") as HTMLButtonElement | null;

@@ -667,4 +667,66 @@ $oPlugin->FilterAppDataPluginSection(false, true, $aConfig);
 check(!isset($aConfig['rustStream']), 'Ineligible provider was advertised in AppData.');
 \putenv('SNAPPY_AI_PROXY_ENABLED=false');
 
+/* A new mail never carries the mail that happens to be open. */
+$oPlugin = new StreamTestPlugin(['folder' => 'INBOX', 'uids' => [5], 'sent' => ''] + draftParams('new'), true);
+$aResult = $oPlugin->DoDraft();
+check(!isset($aResult['error']), 'New draft with a stray UID tried to load that mail.');
+check(!\str_contains($oPlugin->payloads[0]['messages'][1]['content'], 'Mailverlauf'), 'New draft received mail context.');
+
+/* Chat rounds and output handling, with doubles instead of an IMAP session. */
+class ChatFakeMailbox extends \AiCopilot\Mailbox
+{
+	public function __construct()
+	{
+	}
+
+	public function list(string $sFolder, string $sSearch = '', int $iLimit = 50, int $iOffset = 0): array
+	{
+		return [['uid' => 7]];
+	}
+
+	public function brief(array $m): array
+	{
+		return ['uid' => 7, 'from' => 'a@example.com', 'subject' => 'Betreff', 'date' => 0, 'unseen' => false, 'answered' => false, 'category' => ''];
+	}
+}
+
+class ChatFakeContext extends \AiCopilot\MailContext
+{
+	public function __construct()
+	{
+	}
+
+	public function message(string $sFolder, int $iUid): array
+	{
+		return ['subject' => 'Betreff', 'from' => 'a@example.com', 'to' => 'b@example.com', 'date' => 0, 'body' => 'Text'];
+	}
+}
+
+function runChat(array $aAnswers, array &$aPayloads = []): array
+{
+	$oClient = mockClient(function (array $aPayload) use (&$aAnswers, &$aPayloads): array {
+		$aPayloads[] = $aPayload;
+		return [200, \json_encode(['choices' => [['message' => ['content' => \array_shift($aAnswers)]]]], JSON_UNESCAPED_UNICODE)];
+	});
+	$oChat = new \AiCopilot\Chat($oClient, new ChatFakeMailbox(), new ChatFakeContext(), ['INBOX']);
+	return $oChat->run(['role' => 'system', 'content' => 'test'], [['role' => 'user', 'content' => 'Hallo']]);
+}
+
+$sToolTurn = \json_encode(['reply' => 'Ich suche …', 'tool' => ['name' => 'search_mail', 'args' => ['search' => 'is:unseen']], 'actions' => []], JSON_UNESCAPED_UNICODE);
+$aPayloads = [];
+$aResult = runChat([$sToolTurn, $sToolTurn, $sToolTurn, \json_encode(['reply' => 'Fertig', 'tool' => null, 'actions' => []])], $aPayloads);
+same('Fertig', $aResult['reply'], 'The final chat round did not produce the final answer.');
+same(\AiCopilot\Chat::MAX_ROUNDS, \count($aPayloads), 'Chat exceeded or missed its round budget.');
+$aLast = \end($aPayloads)['messages'];
+check(\str_contains(\end($aLast)['content'], 'endgültige Antwort'), 'The last round did not forbid further tools.');
+check(!\str_contains($aPayloads[1]['messages'][\count($aPayloads[1]['messages']) - 1]['content'], 'endgültige Antwort'), 'An early round forbade tools.');
+
+$aPayloads = [];
+$aResult = runChat(['Das ist eine normale Antwort.'], $aPayloads);
+same('Das ist eine normale Antwort.', $aResult['reply'], 'Plain prose was rejected.');
+same(1, \count($aPayloads), 'Plain prose triggered another provider request.');
+same([], $aResult['actions'], 'Plain prose produced actions.');
+expectLlm('upstream_malformed_json', fn() => runChat(['{"reply": "abgeschnitt']));
+
 print 'OK: ' . $iAssertions . " assertions; deterministic mock only, no live provider.\n";
