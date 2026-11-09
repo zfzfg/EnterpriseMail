@@ -1,32 +1,33 @@
 # Agent Guidelines: EnterpriseMail
 
-EnterpriseMail (repository `zfzfg/EnterpriseMail`) is a modern, high-performance webmail suite based on SnappyMail. It replaces the legacy Knockout.js interface with a responsive, modern TypeScript and Tailwind CSS v4 frontend, backed by hardened PHP 8.5/8.2 with OPcache JIT and an optional Rust streaming sidecar for Zero Data Retention (ZDR) AI assistance.
+EnterpriseMail (repository `zfzfg/EnterpriseMail`) is a modern, high-performance webmail suite based on SnappyMail. It replaces the legacy Knockout.js interface with a responsive, modern TypeScript and Tailwind CSS v4 frontend, backed by PHP 8.2+ (the production image runs PHP 8.5) with OPcache (64 MB shared memory, no JIT configured) and an optional Rust streaming sidecar for Zero Data Retention (ZDR) AI assistance.
 
-For performance benchmarks, architectural background, and sizing guidelines, refer to [PLAN-performance-and-rust-expanded.md](file:///c:/Users/zfzfg/Documents/HammerMegaProjekte/SnappyMail-Tailwind-Mistral/snappymail/PLAN-performance-and-rust-expanded.md) and [benchmark/fpm-sizing.md](file:///c:/Users/zfzfg/Documents/HammerMegaProjekte/SnappyMail-Tailwind-Mistral/snappymail/benchmark/fpm-sizing.md).
+For performance benchmarks, architectural background, and sizing guidelines, refer to [PLAN-performance-and-rust-expanded.md](PLAN-performance-and-rust-expanded.md) and [benchmark/fpm-sizing.md](benchmark/fpm-sizing.md).
 
 ---
 
 ## 1. Repository Layout & Core Paths
 
-* **`ui/` (Frontend):** Pure TypeScript and Tailwind CSS v4 SPA. Zero Knockout.js dependencies.
-  * `ui/src/main.ts`: Main webmail client application entrypoint.
+* **`ui/` (Frontend):** Pure TypeScript and Tailwind CSS v4 SPA. Knockout.js has been removed from the UI; there are no framework dependencies.
+  * `ui/src/main.ts`: Main webmail client application entrypoint (`boot()` plus the deferred `AppDelayStart` maintenance call).
   * `ui/src/admin.ts`: Independent administration console entrypoint.
-  * `ui/src/api.ts`: **Single HTTP client** for the entire frontend. `call` interacts with `/?/Json/`, `adminCall` with `/?/{adminKey}/Json/`, `plugin` namespaces plugin endpoints, and `streamEvents` handles SSE from `/?/AiStream/` or the Rust proxy. Do not create parallel HTTP wrappers.
-  * `ui/src/mail.ts`: Session state and mail actions (`act`).
+  * `ui/src/api.ts`: **Single HTTP client** for the entire frontend. It exposes `call` (`/?/Json/`), `adminCall` (`/?/{adminKey}/Json/`), `plugin` (`Plugin*` JSON actions), `upload` (XHR to `/?/Upload/` for progress and abort), `uploadContacts`, `syncContacts`, `rawPath`, and `streamEvents` (SSE from `/?/AiStream/` or the Rust proxy). Do not create parallel HTTP wrappers.
+  * `ui/src/mail.ts`: Session state, `boot()`, and mail actions (`act`).
   * `ui/src/view.ts`: Mailbox layout and view rendering.
   * `ui/src/reader.ts`: Message viewer and thread conversation view.
   * `ui/src/compose.ts`: Mail composer (HTML/Plain, attachment staging, recipient validation, auto-drafting).
-  * `ui/src/clean.ts` & `ui/src/letter.ts`: Email sanitization and secure sandboxed `srcdoc` rendering with strict CSP, print view, ICS invitations, and List-Unsubscribe handling.
+  * `ui/src/clean.ts` & `ui/src/letter.ts`: Email sanitization and sandboxed `srcdoc` rendering with strict CSP, print window, ICS invitations, and RFC 2369/8058 List-Unsubscribe handling.
   * `ui/src/contacts.ts` & `ui/src/jcard.ts`: Address book, vCard/jCard parser, import/export.
-  * `ui/src/settings.ts`: Accounts, identities, filters, encryption keys, and CardDAV synchronization.
+  * `ui/src/settings.ts`, `ui/src/sieve/form.ts`, `ui/src/sieve/script.ts`: Accounts, identities, Sieve filters and vacation rules, encryption keys/certificates, and CardDAV synchronization.
   * `ui/src/folders.ts`: Folder tree model, sidebar navigation, folder management, and IMAP ACL sharing.
   * `ui/src/crypto.ts`: Server-assisted OpenPGP, GnuPG, and S/MIME encryption and signing without bulky client OpenPGP.js bundles.
-  * `ui/src/icons/`: Pixel-aligned icon source in `icons.txt` (9×9 grid). Compiled to `ui/src/icons.ts` via `ui/scripts/icons.mjs`. Use only `icon(name)`. Every icon button requires an `aria-label`.
-  * `ui/src/styles/`: Design tokens live strictly in `app-tokens.css`. Global Tailwind utility layer in `app.css`, layout shell in `shell.css`.
-* **Static Assets:** Build outputs reside under `snappymail/v/0.0.0/static/` (`static/css/`, `static/js/`, `static/fonts/`). `Service.php` loads `app.*` for users and `admin.*` for administrators.
-* **`crates/snappy-ai-proxy` (Rust Sidecar):** Axum + Tokio streaming proxy implementing the *Prepare in PHP, Stream in Rust* pattern for Mistral ZDR. Handles high-concurrency SSE streaming without keeping PHP-FPM worker pools occupied.
-* **`plugins/`:** Curated enterprise plugins only (2FA, OAuth2, LDAP, Redis, and `ai-copilot`). All legacy and shared-hosting plugins (cPanel, Froxlor, avatars/Gravatar, snow) have been removed.
-* **`plugins/ai-copilot/dev/`:** Dedicated local development and integration environment (`docker compose up -d` on `http://localhost:8888`) with integrated Dovecot/Postfix mailserver, Step-CA TLS authority, and headless test harness.
+  * `ui/src/search.ts`, `ui/src/assistant.ts`, `ui/src/theme.ts`, `ui/src/i18n.ts`, `ui/src/runtime.ts`: Search UI, AI assistant chrome, appearance handling, translation lookup, and shared runtime primitives (SSE parser, concurrency limiter, bounded cache, backoff).
+  * `ui/src/icons/`: Pixel-aligned icon source in `icons.txt` (9×9 raster). Compiled to `ui/src/icons.ts` via `ui/scripts/icons.mjs`. Use only `icon(name)`. Every icon button requires an `aria-label`.
+  * `ui/src/styles/`: Design tokens live strictly in `app-tokens.css`. `app.css` is the Tailwind entry point and imports tokens, fonts, and `shell.css`. Do not introduce raw color values outside the token layer.
+* **Static Assets:** Build outputs reside under `snappymail/v/0.0.0/static/` (`static/css/`, `static/js/`, `static/fonts/`). `snappymail/v/0.0.0/app/libraries/RainLoop/Service.php` selects `css/{app|admin}.css` and `js/{app|admin}.js`. Generated files are committed; rebuild them when sources change.
+* **`crates/snappy-ai-proxy` (Rust Sidecar):** Axum + Tokio streaming proxy implementing the *Prepare in PHP, Stream in Rust* pattern for Mistral ZDR. Handles high-concurrency SSE streaming without keeping PHP-FPM worker pools occupied. The PHP streaming path remains a supported fallback.
+* **`plugins/`:** 38 tracked plugins, inherited from upstream SnappyMail (LDAP, OAuth2/O365, 2FA, Redis/APCu/Memcache, Nextcloud, etc.). Legacy hosting-specific plugins (cPanel, Froxlor, avatars/Gravatar, snow, example plugins) have been removed. `ai-copilot` is the actively developed plugin; do not add new shared-hosting integrations.
+* **`plugins/ai-copilot/dev/`:** Dedicated local development and integration environment (`docker compose up -d` on `http://localhost:8888`) with an integrated Dovecot/Postfix mailserver and Step-CA TLS authority. Tooling: `seed.py` (accounts, mail fixtures), `apitest.py` (JSON/SSE calls), `mock_llm.py` (offline OpenAI-compatible provider), `browser-test.mjs` (headless Chrome acceptance and soak). Screenshots and reports in `shots/` are gitignored local evidence.
 
 ---
 
@@ -38,7 +39,7 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
   * **Primary Actions:** Solid ink styling (background: `var(--foreground)`, text: `var(--background)`).
   * **Accent Color:** Orange (`--primary`) is reserved for notifications, the 6px "Response Required" indicator square, the 2px focus ring, and text selection (`::selection`).
   * **Secondary Text:** Uses `color-mix(in srgb, var(--foreground) 68%, transparent)` for balanced legibility in both light and dark themes.
-  * **Sandbox Security:** The email body must always remain inside an isolated, sandboxed `<iframe>`.
+  * **Sandbox Security:** The email body must always remain inside a sandboxed `<iframe>` (`srcdoc`, CSP `default-src 'none'`). Sanitize with `clean.ts` before rendering. Never add `allow-scripts` or relax the CSP/sandbox without a security review.
   * **Scroll & Focus Control:** Do not trigger layout shifts or body scrolling on focus: use `focus({ preventScroll: true })`. `html`, `body`, `.shell`, and message reader panels must retain `overflow: hidden`.
 
 ---
@@ -48,9 +49,10 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
 * **Explicit User Intent:** AI operations are strictly opt-in and triggered only by explicit user click. Passive background checks (such as keyword categorization or unread badge counts) must be read-only without sending email payloads externally.
 * **Graceful Degradation:** When the plugin is disabled or unconfigured, the UI presents zero AI chrome or fake "disconnected" banners; the mailbox behaves identically to standard email.
 * **Zero Data Retention (ZDR) Compliance:**
-  * Mistral ZDR guarantees contractual enterprise privacy.
+  * Provider-side ZDR is a contractual property of the provider account and **cannot be enforced by PHP or Rust**. Local code guarantees only local behavior; do not claim more in docs or UI.
   * Local services (PHP backend and Rust sidecar) must strictly ensure local compliance: **Never write prompts, email subjects/bodies, model completions, or API keys into persistent logs or temp files on disk.**
   * All AI streams are ephemerally processed in-memory.
+  * Never automatically replay a failed provider request through another backend; a retry is an explicit user action.
 
 ---
 
@@ -64,30 +66,46 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
 
 ## 5. Verification & Testing Standards
 
-Always test changes before committing:
+Always test changes before committing. The commands below match CI; note that `ui/package.json` has **no `test` script**, so use Node's built-in runner directly.
 
-1. **Frontend Verification:**
+1. **Frontend Verification (run in this order):**
    ```bash
+   npm ci --prefix ui
    npm run typecheck --prefix ui
-   npm run test --prefix ui
-   npm run bundle:check --prefix ui
+   node --test "ui/test/*.test.mjs"
    npm run build --prefix ui
+   npm run bundle:check --prefix ui
    ```
+   * `bundle:check` reads the esbuild metafiles written by `build:js`, so `npm run build` must run first.
+   * `bundle:baseline` updates `ui/scripts/bundle-baseline.json`; use it only for intentional size changes.
+   * CI also rejects drift in generated files: `ui/src/icons.ts` and `snappymail/v/0.0.0/static/`.
+
 2. **PHP Backend & Syntax Verification:**
    ```bash
-   bash scripts/ci/php.sh
+   bash scripts/ci/php.sh                  # php -l on all tracked PHP files + 11 offline tests
+   php plugins/ai-copilot/tests/run.php    # plugin unit tests (mock provider only, no network)
    ```
+
 3. **Rust Proxy Verification:**
    ```bash
    cd crates/snappy-ai-proxy
    cargo fmt --all -- --check
    cargo clippy --locked --all-targets -- -D warnings
    cargo test --locked
-   bash ../../scripts/ci/rust-supply-chain.sh
+   cd ../..
+   bash scripts/ci/rust-supply-chain.sh
    ```
+   * `rust-supply-chain.sh` requires Linux x86_64. On Windows, macOS, or ARM use `bash scripts/ci/rust-supply-chain-docker.sh`.
+
 4. **Browser Verification (Chrome Headless):**
-   * Visual and end-to-end verifications are conducted using Chrome Headless against the local development environment (`plugins/ai-copilot/dev/`).
-   * Visual verification screenshots belong in `plugins/ai-copilot/dev/shots/`.
+   * Visual and end-to-end verifications run against the local development environment (`plugins/ai-copilot/dev/`).
+   ```bash
+   cd plugins/ai-copilot/dev
+   npm ci
+   TEST_PASSWORD=test1234 ADMIN_PASSWORD="$(docker compose exec snappymail cat /var/lib/snappymail/_data_/_default_/admin_password.txt)" node browser-test.mjs
+   ```
+   * Use bash/WSL or Git Bash for the environment variables. The default run includes a 30-minute soak; do not shorten it for acceptance.
+   * Visual verification screenshots and `browser-results.json` belong in `plugins/ai-copilot/dev/shots/` (gitignored).
 
 ---
 
@@ -103,6 +121,19 @@ Always test changes before committing:
 * **Frequency:** Commit regularly and incrementally after each logically complete and verified step. Avoid uncommitted work accumulation.
 * **Clean Staging:**
   * Stage only files directly relevant to the feature or fix.
-  * Keep `ui/node_modules/`, lockfiles in repo root, local `data/`, secret files, and temporary test logs uncommitted.
-  * Rebuilt static bundles under `snappymail/v/0.0.0/static/` must be included when frontend changes alter generated assets.
-* **Remote:** The official upstream remote for this fork is `origin` at `git@github.com:zfzfg/EnterpriseMail.git`. Force-push only when explicitly requested by the user.
+  * Keep `ui/node_modules/`, root-level lockfiles, local `data/`, secret files, temporary test logs, and `plugins/ai-copilot/dev/shots/` uncommitted.
+  * Rebuilt static bundles under `snappymail/v/0.0.0/static/` and `ui/src/icons.ts` must be included when frontend changes alter generated assets.
+  * `docs/features-and-roadmap.md`, `docs/deployment-hybrid-headscale.md`, and `ui/icons.html` are intentionally local-only (gitignored).
+* **Remotes & Upstream:**
+  * `origin` is the fork: `git@github.com:zfzfg/EnterpriseMail.git`.
+  * `upstream` is SnappyMail: `git@github.com:the-djmaze/snappymail.git`; `rainloop` is the legacy RainLoop remote.
+  * This fork is heavily diverged. Do not merge `upstream/master` blindly; cherry-pick security-relevant fixes and document skipped patches.
+  * Force-push only when explicitly requested by the user.
+
+---
+
+## 7. Known Constraints
+
+* `ui/src/mail.ts` and `ui/src/view.ts` are large, monolithic state/render modules. Prefer extracting feature modules instead of growing them; do not add a second rendering approach.
+* `ui/test/` covers runtime primitives and `api.ts`. The HTML sanitizer (`clean.ts`), composer, reader, and mail-state transitions still need stronger regression coverage; add tests with any change in those areas.
+* The Rust sidecar is optional; changes must keep the PHP-only deployment path working.
