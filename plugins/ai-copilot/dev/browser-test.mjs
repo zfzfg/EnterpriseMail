@@ -957,6 +957,103 @@ try {
     }
   });
 
+  // Only against mock_llm.py: this scenario makes real assistant requests.
+  if (process.env.BROWSER_AI_MOCK === "1") await scenario("desktop-assistant-flows", desktop, async ({ page, result, step, shot }) => {
+    const first = "Funktionstest: Sie haben gewonnen";
+    const second = "Funktionstest: HTML, Bilder, Tracking, Abmelden";
+    const sent = [];
+    page.on("request", (request) => {
+      const match = /"Action":"(\w+)"/.exec(request.postData() || "");
+      if (match) sent.push({ action: match[1], body: request.postData() });
+    });
+    const count = (action) => sent.filter((entry) => entry.action === action).length;
+    const acceptConsent = async () => {
+      const dialog = await page.waitForSelector("#consent[open]", { timeout: 4_000 }).catch(() => null);
+      if (dialog) await page.click("#consent button[value='ok']");
+    };
+    const composerBody = () => page.evaluate(() => document.querySelector(".composer .compose-html:not([hidden])")?.innerText
+      || document.querySelector(".composer .compose-plain")?.value || "");
+    const closeComposer = async () => {
+      await page.click("[data-compose='close']");
+      const dialog = await page.waitForSelector("#compose-close[open]", { timeout: 2_000 }).catch(() => null);
+      if (dialog) await page.$eval("#compose-close button[value='discard']", (button) => button.click());
+      await page.waitForSelector(".composer", { hidden: true });
+    };
+
+    await step("A summary shows every generated field", async () => {
+      await authenticate(page);
+      await openMessage(page, first);
+      await page.click("#strip [data-action='summarize']");
+      await acceptConsent();
+      await page.waitForSelector("#strip .assist-result", { visible: true, timeout: 30_000 });
+      const text = await page.$eval("#strip .assist-result", (node) => node.textContent || "");
+      for (const part of ["Mock-Kurzfassung", "Mock-Punkt", "Mock-Entscheidung", "Anna: Mock-Aufgabe (2026-12-01)", "Mock-Schritt"]) assert.ok(text.includes(part), `${part} missing: ${text}`);
+      await shot("assistant-summary");
+    });
+    await step("Reopening a mail reuses the session result without a request", async () => {
+      const before = count("PluginAiSummarize");
+      await openMessage(page, second);
+      await openMessage(page, first);
+      await page.waitForSelector("#strip .assist-result", { visible: true, timeout: 10_000 });
+      assert.equal(count("PluginAiSummarize"), before, "Reopening asked the provider again");
+    });
+    await step("A late reply suggestion never lands on another mail", async () => {
+      await openMessage(page, second);
+      await page.click("#strip [data-action='replies']");
+      await openMessage(page, first);
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      assert.equal(await page.$("#strip .assist-replies"), null, "Suggestions for another mail were painted");
+    });
+    await step("A suggestion opens a real reply with quote and threading", async () => {
+      await openMessage(page, second);
+      await page.click("#strip [data-action='replies']").catch(() => undefined);
+      await page.waitForSelector("#strip .assist-replies .prompt", { visible: true, timeout: 30_000 });
+      await page.click("#strip .assist-replies .prompt");
+      await page.waitForSelector(".composer:not([hidden])", { visible: true });
+      const body = await composerBody();
+      assert.ok(body.includes("Mock-Antwort") && body.includes("schrieb"), body);
+      assert.equal(await page.$eval(".draft-tools [data-mode][aria-pressed='true']", (node) => node.dataset.mode), "reply");
+      await page.click("[data-compose='save']");
+      await page.waitForFunction(() => /Gespeichert|Saved at/i.test(document.querySelector("#compose-status")?.textContent || ""), { timeout: 60_000 });
+      const saved = sent.filter((entry) => entry.action === "SaveMessage").pop();
+      assert.ok(saved && /"inReplyTo":"[^"]+"/.test(saved.body) && /"draftInfo":\["reply/.test(saved.body), "Reply lost its threading");
+    });
+    await step("A generated draft replaces only the own text", async () => {
+      await page.click(".draft-tools [data-action='generate']");
+      await page.waitForFunction(() => /eingefügt|inserted/i.test(document.querySelector("#draft-status")?.textContent || ""), { timeout: 30_000 });
+      const body = await composerBody();
+      assert.ok(body.includes("Mock-Entwurf"), body);
+      assert.ok(body.includes("schrieb"), `Quote was lost: ${body}`);
+      assert.ok(!body.includes("Mock-Antwort"), `Old own text was kept: ${body}`);
+      assert.ok(!/interne Überlegung/.test(body), body);
+      // The audit forbids streaming elsewhere; here exactly this one request is expected.
+      assert.equal(result.aiStreamRequests.length, 1, "Draft generation did not stream exactly once");
+      result.aiStreamRequests.length = 0;
+      await shot("assistant-draft");
+      await closeComposer();
+    });
+    await step("An action from an older chat turn stays bound to that turn", async () => {
+      await page.click("[data-action='open-sheet']");
+      await page.waitForSelector("#ask", { visible: true });
+      const ask = async (text, cards) => {
+        await page.type("#ask", text);
+        await page.click(".sheet-form button[type='submit']");
+        await page.waitForFunction((wanted) => document.querySelectorAll("#chat-log .action").length === wanted, { timeout: 30_000 }, cards);
+      };
+      await ask("markiere die erste Mail", 1);
+      await ask("lese die erste Mail", 2);
+      const cards = await page.$$eval("#chat-log .action", (nodes) => nodes.map((node) => node.textContent || ""));
+      assert.ok(/Markieren|Flag/.test(cards[0]) && /1 mail/i.test(cards[0]) && cards[0].includes("INBOX"), cards[0]);
+      assert.ok(/Als gelesen|Mark as read/.test(cards[1]), cards[1]);
+      await shot("assistant-chat-actions");
+      await page.click("#chat-log [data-action='run-action'][data-turn='1']");
+      await page.waitForFunction(() => /Erledigt|Done/.test(document.querySelector("#chat-log .action")?.textContent || ""), { timeout: 30_000 });
+      assert.equal(count("MessageSetFlagged"), 1, "The older turn's action did not run");
+      assert.ok(await page.$("#chat-log [data-action='run-action'][data-turn='3']"), "The newer action was consumed");
+      await page.click("[data-action='close-sheet']");
+    });
+  });
+
   await scenario("admin-login-logout", desktop, async ({ page, step, shot }) => {
     if (!ADMIN_PASSWORD) {
       report.unverified.push({ scenario: "admin-login-logout", reason: "ADMIN_PASSWORD was not supplied" });

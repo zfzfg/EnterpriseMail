@@ -37,6 +37,14 @@ npm ci
 TEST_PASSWORD=test1234 ADMIN_PASSWORD="$(docker compose exec snappymail cat /var/lib/snappymail/_data_/_default_/admin_password.txt)" node browser-test.mjs
 ```
 
+Die KI-Abläufe laufen nur gegen den lokalen Mock und nur mit `BROWSER_AI_MOCK=1`, damit nie Testmails an einen echten Anbieter gehen:
+
+```sh
+python seed.py --mock-llm     # setzt das Profil llmster auf host.docker.internal:18234
+python mock_llm.py 18234 &
+BROWSER_AI_MOCK=1 BROWSER_SCENARIOS=desktop-assistant-flows TEST_PASSWORD=test1234 node browser-test.mjs
+```
+
 Der Lauf enthält standardmäßig einen 30-minütigen Soak mit Navigation, manueller Aktualisierung, Garbage Collection und wiederholter An-/Abmeldung. `SOAK_DURATION_MS` (maximal 3.600.000) und `SOAK_INTERVAL_MS` erlauben kürzere ausdrücklich diagnostische Läufe; die 30 Minuten sind keine optionale Abkürzung für die Abnahme. `BROWSER_SCENARIOS` wählt kommagetrennt einzelne Szenarien aus. `CHROME_PATH` kann den lokalen Chrome-Pfad setzen.
 
 Der Bericht `shots/browser-results.json` enthält LCP, CLS, Long Tasks, Event-Timing-Latenz als Kurzlauf-INP-Näherung, Chrome-Parse-/Compile-/Evaluate-Traces, übertragene Bytes, DOM- und Speicherwerte. Fehlende Fähigkeiten werden als unbestätigt ausgewiesen. Beim Download verhindert eine lokale Kontrolle, dass eine Chrome-Umgebungsstörung als bestandener Datei-Download ausgegeben wird. Screenshots, Downloads und Berichte sind lokale Prüfnachweise und keine zu versionierenden Fixtures.

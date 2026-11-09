@@ -21,7 +21,8 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
   * `ui/src/settings.ts`, `ui/src/sieve/form.ts`, `ui/src/sieve/script.ts`: Accounts, identities, Sieve filters and vacation rules, encryption keys/certificates, and CardDAV synchronization.
   * `ui/src/folders.ts`: Folder tree model, sidebar navigation, folder management, and IMAP ACL sharing.
   * `ui/src/crypto.ts`: Server-assisted OpenPGP, GnuPG, and S/MIME encryption and signing without bulky client OpenPGP.js bundles.
-  * `ui/src/search.ts`, `ui/src/assistant.ts`, `ui/src/theme.ts`, `ui/src/i18n.ts`, `ui/src/runtime.ts`: Search UI, AI assistant chrome, appearance handling, translation lookup, and shared runtime primitives (SSE parser, concurrency limiter, bounded cache, backoff).
+  * `ui/src/search.ts`, `ui/src/assistant.ts`, `ui/src/theme.ts`, `ui/src/i18n.ts`, `ui/src/runtime.ts`: Search UI, AI assistant feature flags, appearance handling, translation lookup, and shared runtime primitives (SSE parser, concurrency limiter, bounded cache, backoff).
+  * `ui/src/assist-controller.ts` & `ui/src/assist-state.ts`: AI assistant behaviour (state, provider requests, results) behind the `AssistHost` interface, and its DOM-free, unit-tested rules.
   * `ui/src/icons/`: Pixel-aligned icon source in `icons.txt` (9×9 raster). Compiled to `ui/src/icons.ts` via `ui/scripts/icons.mjs`. Use only `icon(name)`. Every icon button requires an `aria-label`.
   * `ui/src/styles/`: Design tokens live strictly in `app-tokens.css`. `app.css` is the Tailwind entry point and imports tokens, fonts, and `shell.css`. Do not introduce raw color values outside the token layer.
 * **Static Assets:** Build outputs reside under `snappymail/v/0.0.0/static/` (`static/css/`, `static/js/`, `static/fonts/`). `snappymail/v/0.0.0/app/libraries/RainLoop/Service.php` selects `css/{app|admin}.css` and `js/{app|admin}.js`. Generated files are committed; rebuild them when sources change.
@@ -51,7 +52,7 @@ For performance benchmarks, architectural background, and sizing guidelines, ref
 * **Zero Data Retention (ZDR) Compliance:**
   * Provider-side ZDR is a contractual property of the provider account and **cannot be enforced by PHP or Rust**. Local code guarantees only local behavior; do not claim more in docs or UI.
   * Local services (PHP backend and Rust sidecar) must strictly ensure local compliance: **Never write prompts, email subjects/bodies, model completions, or API keys into persistent logs or temp files on disk.**
-  * All AI streams are ephemerally processed in-memory.
+  * All AI streams are ephemerally processed in-memory. AI results are cached only in the browser session, never on the server.
   * Never automatically replay a failed provider request through another backend; a retry is an explicit user action.
 
 ---

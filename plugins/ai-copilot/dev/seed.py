@@ -65,6 +65,24 @@ def snappymail_config():
     print(out.strip())
 
 
+PHP_MOCK_LLM = r'''
+$file = '/var/lib/snappymail/_data_/_default_/configs/plugin-ai-copilot.json';
+$c = is_file($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+$c['plugin'] = array_merge($c['plugin'] ?? [], [
+    'profile_default' => 'llmster',
+    'llmster_base_url' => 'http://host.docker.internal:18234/v1',
+    'llmster_model' => 'mock-model',
+    'llmster_json_mode' => 'none',
+]);
+file_put_contents($file, json_encode($c, JSON_PRETTY_PRINT));
+echo "KI-Profil auf den lokalen Mock gesetzt\n";
+'''
+
+
+def mock_llm_config():
+    print(dc('exec', '-T', '-u', 'www-data', 'snappymail', 'php', '-r', PHP_MOCK_LLM).strip())
+
+
 def eml(frm, to, subject, body, days_ago=0, hours_ago=0, cc=None, headers=None, msgid=None, in_reply_to=None, references=None):
     date = NOW - timedelta(days=days_ago, hours=hours_ago)
     msg = EmailMessage(policy=SMTP)
@@ -332,6 +350,9 @@ if __name__ == '__main__':
         sys.exit()
     if '--feature-mails' in sys.argv:
         feature_mails()
+        sys.exit()
+    if '--mock-llm' in sys.argv:
+        mock_llm_config()
         sys.exit()
     if '--mails' not in sys.argv:
         accounts()

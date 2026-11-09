@@ -8,6 +8,7 @@ Lauscht nur auf 0.0.0.0:<port> fuer den Zugriff aus dem Container
 (host.docker.internal). Nicht dauerhaft laufen lassen.
 """
 import json
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +16,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 1234
 
 
+def chat_answer(messages):
+    last = messages[-1]['content']
+    question = next(m['content'] for m in reversed(messages) if m['role'] == 'user' and not m['content'].startswith('Werkzeug-Ergebnis'))
+    if not last.startswith('Werkzeug-Ergebnis'):
+        return json.dumps({'reply': 'Ich suche.', 'tool': {'name': 'search_mail', 'args': {'search': '', 'folder': 'INBOX'}}, 'actions': []})
+    uid = int(re.search(r'"uid":(\d+)', last).group(1))
+    kind = 'flag' if 'markiere' in question else 'mark_read'
+    return json.dumps({'reply': 'Vorschlag:', 'tool': None, 'actions': [
+        {'type': kind, 'folder': 'INBOX', 'uids': [uid], 'label': 'Mock-Aktion'}
+    ]})
+
+
 def answer(payload):
-    system = payload['messages'][0]['content'] if payload.get('messages') else ''
+    messages = payload.get('messages') or []
+    system = messages[0]['content'] if messages else ''
+    if 'Fasse den Mailverlauf' in system or 'Fasse die ausgewählten' in system:
+        return json.dumps({'tldr': 'Mock-Kurzfassung', 'points': ['Mock-Punkt'], 'decisions': ['Mock-Entscheidung'],
+                           'actions': [{'who': 'Anna', 'what': 'Mock-Aufgabe', 'due': '2026-12-01'}], 'next': 'Mock-Schritt'})
+    if 'Schlage genau drei' in system:
+        time.sleep(1.5)  # long enough for a browser test to switch mails meanwhile
+        return json.dumps({'replies': [{'label': 'Zusage', 'body': 'Mock-Antwort: gerne.'}, {'label': 'Rückfrage', 'body': 'Mock-Antwort: wann?'},
+                                       {'label': 'Absage', 'body': 'Mock-Antwort: leider nein.'}]})
+    if 'Copilot eines Webmailers' in system:
+        return chat_answer(messages)
     if 'Suchsyntax' in system:
         return json.dumps({'search': 'subject:Rechnung', 'folder': '', 'explanation': 'Mock: Rechnungen'})
     if 'Kategorien' in system and 'items' in system:
