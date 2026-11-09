@@ -1389,6 +1389,7 @@
         "CLOSE": "Close",
         "THIS_LIST": "This list",
         "MOVE_TO": "Move to",
+        "WRITE": "Write",
         "WRITE_MAIL": "Write mail",
         "COPY_ADDRESS": "Copy address",
         "MAILS_FROM_THIS_ADDRESS": "Mails from this address",

@@ -372,6 +372,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <button type="button" class="menu-item" role="menuitem" data-action="logout">${icon("logout")}<span>${esc(t("GLOBAL.LOGOUT", "Abmelden"))}</span></button>
             </div>
           </div>
+          <button type="button" class="text-btn write-btn" data-action="compose">${withIcon("compose", t("APP_TEXT.WRITE", "Schreiben"))}</button>
           <p class="group-label mono">${esc(t("FOLDERS_UI.FOLDERS", "Ordner"))}</p>
           <div class="folder-filter" hidden>
             <label class="sr" for="folder-q">${esc(t("FOLDERS_UI.FILTER", "Ordner suchen"))}</label>
@@ -1237,7 +1238,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const data: Record<string, string> = {};
         Object.entries(target.dataset).forEach(([key, value]) => { if (value != null) data[key] = value; });
         void book?.onAction(data.op || "", target, event);
-      } else if (action === "compose") actions.compose();
+      } else if (action === "compose") {
+        if (!docked()) setSidebar(false);
+        actions.compose();
+      }
       else if (action === "reply") actions.reply(false);
       else if (action === "reply-all") actions.reply(true);
       else if (action === "forward") actions.forward();
@@ -1879,7 +1883,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>${esc(t("AI_COPILOT.ALERT_INVOICE", "Rechnungen"))}</span><span class="count" data-count="invoice">0</span></button>
         <div class="dues" id="dues"></div>
         <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
-      shell.querySelector(".account")?.after(block);
+      shell.querySelector(".write-btn")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
     if (flags.triage && flags.tabs && searchForm) {

@@ -2533,6 +2533,7 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 
 /* Einträge, Hover-Felder und Linien laufen über die volle Sidebar-Breite. */
 .sidebar > .account,
+.sidebar > .write-btn,
 .sidebar .count-row,
 .sidebar > div > .text-btn[data-action="deadlines"] {
   width: calc(100% + 24px);
@@ -2541,9 +2542,23 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
   border-radius: 0;
 }
 .sidebar > .account .account-btn,
+.sidebar > .write-btn,
 .sidebar .count-row,
 .sidebar > div > .text-btn[data-action="deadlines"] {
   padding-inline: 20px;
+}
+.sidebar > .write-btn {
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 56px;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+/* 30 px: Blockkanten liegen mit dem halben Pixel Versatz wieder auf ganzen Pixeln. */
+.sidebar > .write-btn .icon {
+  width: 30px;
+  height: 30px;
+  transform: translate(0.5px, 0.5px);
 }
 .sidebar > div > .text-btn[data-action="deadlines"] { justify-content: flex-start; }
 .sidebar > .book-entry {
