@@ -43,7 +43,6 @@
 /build/docker
 /dist
 /ui/build
-/.docker/dev/.cache
 **/.cache
 **/.npm
 **/.pnpm-store
