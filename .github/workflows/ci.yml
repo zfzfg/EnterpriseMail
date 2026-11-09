@@ -93,6 +93,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Cache supply chain scanner tools
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: build/tmp/rust-supply-chain-tools
+          key: rust-supply-chain-${{ runner.os }}-${{ hashFiles('scripts/ci/rust-supply-chain.sh') }}
       - name: Report locked Rust toolchain
         run: |
           rustup show active-toolchain
@@ -106,6 +111,8 @@ jobs:
         run: cargo test --locked
       - name: Verify Rust dependency supply chain
         id: supply_chain
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash ../../scripts/ci/rust-supply-chain.sh
       - name: Record locked dependency metadata
         run: |

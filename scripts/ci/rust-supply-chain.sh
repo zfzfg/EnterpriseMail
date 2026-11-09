@@ -18,8 +18,14 @@ done
 
 audit_version='0.22.2'
 deny_version='0.20.2'
-audit_url="https://github.com/rustsec/rustsec/releases/download/cargo-audit/v${audit_version}/cargo-audit-x86_64-unknown-linux-musl-v${audit_version}.tgz"
-deny_url="https://github.com/EmbarkStudios/cargo-deny/releases/download/${deny_version}/cargo-deny-${deny_version}-x86_64-unknown-linux-musl.tar.gz"
+audit_repo='rustsec/rustsec'
+deny_repo='EmbarkStudios/cargo-deny'
+audit_tag="cargo-audit/v${audit_version}"
+deny_tag="${deny_version}"
+audit_file="cargo-audit-x86_64-unknown-linux-musl-v${audit_version}.tgz"
+deny_file="cargo-deny-${deny_version}-x86_64-unknown-linux-musl.tar.gz"
+audit_url="https://github.com/${audit_repo}/releases/download/${audit_tag}/${audit_file}"
+deny_url="https://github.com/${deny_repo}/releases/download/${deny_tag}/${deny_file}"
 audit_sha256='7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428'
 deny_sha256='9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f'
 
@@ -31,14 +37,27 @@ mkdir -p "$out"
 
 fetch_tool() {
 	local name="$1"
-	local url="$2"
-	local expected="$3"
+	local repo="$2"
+	local tag="$3"
+	local file="$4"
+	local url="$5"
+	local expected="$6"
 	local archive="$tools/$name.tar.gz"
 	local destination="$tools/$name"
 
 	if ! printf '%s  %s\n' "$expected" "$archive" | sha256sum -c - > /dev/null 2>&1; then
 		rm -f "$archive"
-		curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$archive" "$url"
+		if command -v gh > /dev/null 2>&1; then
+			gh release download "$tag" --repo "$repo" --pattern "$file" --output "$archive" --clobber > /dev/null 2>&1 || true
+		fi
+		if ! printf '%s  %s\n' "$expected" "$archive" | sha256sum -c - > /dev/null 2>&1; then
+			rm -f "$archive"
+			local retry_flag=""
+			if curl --help all 2>&1 | grep -q -- '--retry-all-errors'; then
+				retry_flag="--retry-all-errors"
+			fi
+			curl --fail --location --proto '=https' --tlsv1.2 --retry 5 --retry-delay 2 $retry_flag --output "$archive" "$url"
+		fi
 	fi
 	printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
 	rm -rf "$destination"
@@ -47,8 +66,8 @@ fetch_tool() {
 	test -x "$destination/$name"
 }
 
-fetch_tool cargo-audit "$audit_url" "$audit_sha256"
-fetch_tool cargo-deny "$deny_url" "$deny_sha256"
+fetch_tool cargo-audit "$audit_repo" "$audit_tag" "$audit_file" "$audit_url" "$audit_sha256"
+fetch_tool cargo-deny "$deny_repo" "$deny_tag" "$deny_file" "$deny_url" "$deny_sha256"
 audit="$tools/cargo-audit/cargo-audit"
 deny="$tools/cargo-deny/cargo-deny"
 
