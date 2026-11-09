@@ -14,4 +14,8 @@ compose() {
 
 compose up -d --build
 trap 'compose down' EXIT INT TERM
-python "$HERE/integration.py"
+PYTHON=python3
+if ! command -v "$PYTHON" >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
+    PYTHON=python
+fi
+"$PYTHON" "$HERE/integration.py"

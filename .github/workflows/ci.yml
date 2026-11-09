@@ -135,4 +135,4 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Test PHP and Rust HTTP integration with isolated fixtures
-        run: .docker/release/test/phase5/run.sh
+        run: bash .docker/release/test/phase5/run.sh
