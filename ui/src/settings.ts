@@ -806,6 +806,14 @@ const ASSIST_FEATURES: [string, string][] = [
   ["alerts", "Hinweise"]
 ];
 
+const ASSIST_TONES: Record<string, string> = {
+  professional: "Professionell",
+  friendly: "Freundlich",
+  casual: "Locker",
+  concise: "Knapp",
+  formal: "Förmlich"
+};
+
 export function renderAssistant(snap: SettingsSnapshot): string {
   const settings = snap.assist;
   if (!settings) return note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verfügbar."));
@@ -815,14 +823,14 @@ export function renderAssistant(snap: SettingsSnapshot): string {
   const provider = providers.default;
   const tones = (snap.assistTones.length ? snap.assistTones : ["professional"]).map((tone) => [tone, tone] as [string, string]);
   const boxes = ASSIST_FEATURES.filter(([name]) => admin[name] !== false).map(([name, label]) =>
-    prefCheck(`feature:${name}`, label, features[name] !== false)
+    prefCheck(`feature:${name}`, t(`AI_COPILOT.FEATURE_${name.toUpperCase()}`, label), features[name] !== false)
   ).join("");
   return `
     <p class="mono">${esc(t("AI_COPILOT.TITLE", "Assistent"))}</p>
     <form class="fields" data-action="settings-form" data-kind="assist-save">
       ${check("enabled", t("AI_COPILOT.ENABLED", "Assistent für dieses Konto"), settings.enabled !== false)}
       ${boxes.replace(/data-pref=/g, "name=").replace(/type="checkbox"/g, "type=\"checkbox\"")}
-      <label class="field"><span>${esc(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc(value)}</option>`).join("")}</select></label>
+      <label class="field"><span>${esc(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc(t(`AI_COPILOT.TONE_${value.toUpperCase()}`, ASSIST_TONES[value] || value))}</option>`).join("")}</select></label>
       ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace("data-pref=\"language\"", "name=\"language\"")}
       ${field(t("AI_COPILOT.NAME", "Eigener Name"), "name", String(settings.name || ""))}
       ${field(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area")}

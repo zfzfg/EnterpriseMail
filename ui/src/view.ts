@@ -223,6 +223,7 @@ export interface MailView {
   confirmConsent(text: string): Promise<boolean>;
   setAlerts(reply: number, follow: number, invoice: number, dues: { folder: string; uid: number; title: string; due: string }[]): void;
   showReaderPane(): void;
+  setAssistBusy(action: string, busy: boolean): void;
   pressCategory(id: string): void;
   setStrip(state: StripState | null): void;
   setChat(turns: ChatTurn[], thinking: string, context?: string): void;
@@ -1814,6 +1815,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (!wide()) pane("reader");
   }
 
+  function chatPrompts(): string[] {
+    return [
+      t("AI_COPILOT.PROMPT_WAITING", "Welche Mails warten auf meine Antwort?"),
+      t("AI_COPILOT.PROMPT_INVOICES", "Zeig mir Rechnungen vom letzten Monat"),
+      t("AI_COPILOT.PROMPT_SUMMARIZE", "Fasse die geöffnete Mail zusammen")
+    ];
+  }
+
   /** States an action from validated data, so a mail cannot disguise it through the model's label. */
   function actionSummary(payload: Record<string, unknown>): string {
     const facts = actionFacts(payload);
@@ -1864,10 +1873,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const deadlineLabel = t("AI_COPILOT.CHECK_DUE", "Fristen mit KI auslesen");
       const deadlineHint = t("AI_COPILOT.CHECK_DUE_HINT", "Fristen und Fälligkeiten mit KI aus den Mails lesen");
       block.innerHTML = `
-        <p class="group-label mono">Heute</p>
-        <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>Offene Antworten</span><span class="count" data-count="reply">0</span></button>
-        <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>Ohne Antwort</span><span class="count" data-count="follow">0</span></button>
-        <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>Rechnungen</span><span class="count" data-count="invoice">0</span></button>
+        <p class="group-label mono">${esc(t("AI_COPILOT.ALERTS_TODAY", "Heute"))}</p>
+        <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>${esc(t("AI_COPILOT.ALERT_REPLY", "Offene Antworten"))}</span><span class="count" data-count="reply">0</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>${esc(t("AI_COPILOT.ALERT_FOLLOW", "Ohne Antwort"))}</span><span class="count" data-count="follow">0</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>${esc(t("AI_COPILOT.ALERT_INVOICE", "Rechnungen"))}</span><span class="count" data-count="invoice">0</span></button>
         <div class="dues" id="dues"></div>
         <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
       shell.querySelector(".account")?.after(block);
@@ -1937,17 +1946,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="sheet-meta mono quiet">${esc(flags.provider)}</div>
         <div class="sheet-log" id="chat-log">
           <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
-          <div class="prompts">
-            <button type="button" class="prompt" data-action="prompt">Welche Mails warten auf meine Antwort?</button>
-            <button type="button" class="prompt" data-action="prompt">Zeig mir Rechnungen vom letzten Monat</button>
-            <button type="button" class="prompt" data-action="prompt">Fasse die geöffnete Mail zusammen</button>
-          </div>
+          <div class="prompts">${chatPrompts().map((text) => `<button type="button" class="prompt" data-action="prompt">${esc(text)}</button>`).join("")}</div>
         </div>
         <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
           <label class="sr" for="ask">${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}</label>
           <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}"></textarea>
           <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
+          <button type="button" class="text-btn" data-action="stop-chat" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
         </form>
         <p class="error sheet-error" id="chat-error" role="alert" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
@@ -1955,17 +1961,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     if (flags.draft) {
       const tools = document.createElement("div");
       tools.className = "draft-tools";
+      const modes = [["new", "Neue Mail"], ["reply", "Antwort"], ["rewrite", "Umschreiben"], ["proofread", "Korrektur"]];
       const tones = [["professional", "Professionell"], ["friendly", "Freundlich"], ["casual", "Locker"], ["concise", "Knapp"], ["formal", "Förmlich"]];
       tools.innerHTML = `
         <div class="draft-heading"><span class="mono quiet">${esc(t("AI_COPILOT.DRAFT_ASSIST", "KI-Entwurf"))}</span><span class="quiet">${esc(t("AI_COPILOT.DRAFT_EDIT_HINT", "Sie können das Ergebnis vor dem Senden bearbeiten."))}</span></div>
-        <div class="modes" role="toolbar" aria-label="Art">
-          <button type="button" class="seg" data-action="mode" data-mode="new" aria-pressed="true">Neue Mail</button>
-          <button type="button" class="seg" data-action="mode" data-mode="reply" aria-pressed="false">Antwort</button>
-          <button type="button" class="seg" data-action="mode" data-mode="rewrite" aria-pressed="false">Umschreiben</button>
-          <button type="button" class="seg" data-action="mode" data-mode="proofread" aria-pressed="false">Korrektur</button>
+        <div class="modes" role="toolbar" aria-label="${esc(t("AI_COPILOT.DRAFT_KIND", "Art"))}">
+          ${modes.map(([id, label], index) => `<button type="button" class="seg" data-action="mode" data-mode="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.MODE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
-        <label class="field"><span>Anweisung</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
-        <div class="tones" role="toolbar" aria-label="Ton">
+        <label class="field"><span>${esc(t("AI_COPILOT.INSTRUCTION", "Anweisung"))}</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <div class="tones" role="toolbar" aria-label="${esc(t("AI_COPILOT.DRAFT_TONE", "Ton"))}">
           ${tones.map(([id, label], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
         <div class="draft-actions">
@@ -1985,7 +1989,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <p id="consent-text"></p>
         <div class="dialog-actions">
           <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
-          <button type="button" class="ink-btn" value="ok">Fortfahren</button>
+          <button type="button" class="ink-btn" value="ok">${esc(t("AI_COPILOT.CONTINUE", "Fortfahren"))}</button>
         </div>
       </div>`;
     consent.addEventListener("click", (event) => {
@@ -2479,6 +2483,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     showReaderPane() {
       if (!wide()) pane("reader");
     },
+    setAssistBusy(action, busy) {
+      shell?.querySelectorAll<HTMLButtonElement>(`[data-action='${action}']`).forEach((button) => {
+        button.disabled = busy;
+        button.setAttribute("aria-busy", String(busy));
+      });
+    },
     setStrip(state) {
       const strip = shell?.querySelector("#strip") as HTMLElement | null;
       if (!strip) return;
@@ -2624,6 +2634,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         error.hidden = !thinking.startsWith("!");
         error.textContent = thinking.startsWith("!") ? thinking.slice(1) : "";
       }
+      const stop = shell?.querySelector("[data-action='stop-chat']") as HTMLElement | null;
+      if (stop) stop.hidden = !busy;
       if (!log) return;
       log.setAttribute("aria-busy", String(busy));
       log.replaceChildren();
@@ -2633,7 +2645,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten.");
         const prompts = document.createElement("div");
         prompts.className = "prompts";
-        ["Welche Mails warten auf meine Antwort?", "Zeig mir Rechnungen vom letzten Monat", "Fasse die geöffnete Mail zusammen"].forEach((text) => {
+        chatPrompts().forEach((text) => {
           const button = document.createElement("button");
           button.type = "button";
           button.className = "prompt";

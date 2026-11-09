@@ -12,6 +12,8 @@ class Chat
 	public const MAX_ROUNDS = 4;
 	public const MAX_HISTORY = 12;
 	public const MAX_KNOWN = 500;
+	/** Seconds after which no further tool round starts, to free the PHP worker. */
+	public const TIME_BUDGET = 120;
 
 	public const ACTION_TYPES = ['archive', 'delete', 'mark_read', 'mark_unread', 'flag', 'unflag', 'move', 'open', 'reply', 'compose', 'search'];
 
@@ -20,9 +22,11 @@ class Chat
 	private MailContext $oContext;
 	private array $aFolders;
 	private ?\Closure $fTagFolder;
+	private \Closure $fClock;
 
-	public function __construct(LlmClient $oLlm, Mailbox $oMailbox, MailContext $oContext, array $aFolders, ?\Closure $fTagFolder = null)
+	public function __construct(LlmClient $oLlm, Mailbox $oMailbox, MailContext $oContext, array $aFolders, ?\Closure $fTagFolder = null, ?\Closure $fClock = null)
 	{
+		$this->fClock = $fClock ?? fn(): int => \time();
 		$this->oLlm = $oLlm;
 		$this->oMailbox = $oMailbox;
 		$this->oContext = $oContext;
@@ -66,11 +70,16 @@ class Chat
 			}
 		}
 		$aData = [];
-		for ($i = 0; $i < static::MAX_ROUNDS; ++$i) {
+		$iDeadline = ($this->fClock)() + static::TIME_BUDGET;
+		$iLastRound = static::MAX_ROUNDS - 1;
+		for ($i = 0; $i <= $iLastRound; ++$i) {
 			$aData = $this->requestTurn($aConversation);
 			$aTool = $aData['tool'] ?? null;
-			if (!\is_array($aTool) || empty($aTool['name']) || $i === static::MAX_ROUNDS - 1) {
+			if (!\is_array($aTool) || empty($aTool['name']) || $i === $iLastRound) {
 				break;
+			}
+			if (($this->fClock)() >= $iDeadline) {
+				$iLastRound = $i + 1;
 			}
 			$sName = (string) $aTool['name'];
 			$aArgs = \is_array($aTool['args'] ?? null) ? $aTool['args'] : [];
@@ -79,7 +88,7 @@ class Chat
 			$aConversation[] = ['role' => 'assistant', 'content' => \json_encode($aData, JSON_UNESCAPED_UNICODE)];
 			$aConversation[] = ['role' => 'user', 'content' => "Werkzeug-Ergebnis ({$sName}):\n"
 				. Prompts::mailData((string) \json_encode($mResult, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE))
-				. ($i === static::MAX_ROUNDS - 2
+				. ($i === $iLastRound - 1
 					? "\nDies war das letzte Werkzeug. Gib jetzt deine endgültige Antwort im JSON-Format mit tool = null."
 					: "\nAntworte jetzt erneut im JSON-Format.")];
 		}

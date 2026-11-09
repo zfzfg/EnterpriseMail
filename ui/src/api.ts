@@ -10,11 +10,14 @@ export interface ApiFailure {
 export class ApiError extends Error {
   code: number;
   detail: string;
+  /** Machine-readable cause from the AI plugin, e.g. consent_required. */
+  reason: string;
 
-  constructor(code: number, message: string, detail = "") {
+  constructor(code: number, message: string, detail = "", reason = "") {
     super(message);
     this.code = code;
     this.detail = detail;
+    this.reason = reason;
   }
 }
 
@@ -232,9 +235,9 @@ export function rawPath(action: string): string {
 }
 
 export async function plugin<T>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
-  const result = await call<T & { error?: string; status?: number }>("Plugin" + action, params, signal);
+  const result = await call<T & { error?: string; status?: number; code?: string }>("Plugin" + action, params, signal);
   if (result && typeof result === "object" && "error" in result && result.error) {
-    throw new ApiError(Number(result.status) || 999, String(result.error));
+    throw new ApiError(Number(result.status) || 999, String(result.error), "", String(result.code || ""));
   }
   return result;
 }

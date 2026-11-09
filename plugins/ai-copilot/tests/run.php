@@ -791,6 +791,23 @@ $aMessages = \AiCopilot\Prompts::summarize(['language' => 'de'], 'Inhalt');
 check(\str_contains($aMessages[1]['content'], "<mail_inhalt>\nInhalt\n</mail_inhalt>"), 'Summary context is not fenced.');
 check(\str_contains($aMessages[0]['content'], 'mail_inhalt'), 'The model is not told about the data block.');
 
+/* The time budget ends tool use with one final answer instead of more rounds. */
+$iNow = 1000;
+$aPayloads = [];
+$aTurns = [$sToolTurn, \json_encode(['reply' => 'Schluss', 'tool' => null, 'actions' => []])];
+$oClient = mockClient(function (array $aPayload) use (&$aTurns, &$aPayloads, &$iNow): array {
+	$aPayloads[] = $aPayload;
+	$iNow += \AiCopilot\Chat::TIME_BUDGET;
+	return [200, \json_encode(['choices' => [['message' => ['content' => \array_shift($aTurns)]]]], JSON_UNESCAPED_UNICODE)];
+});
+$aResult = (new \AiCopilot\Chat($oClient, new ChatFakeMailbox(), new ChatFakeContext(), ['INBOX'], null, function () use (&$iNow): int {
+	return $iNow;
+}))->run(['role' => 'system', 'content' => 't'], [['role' => 'user', 'content' => 'Hi']]);
+same('Schluss', $aResult['reply'], 'The time budget did not produce a final answer.');
+same(2, \count($aPayloads), 'The time budget allowed further rounds.');
+$aLast = \end($aPayloads)['messages'];
+check(\str_contains(\end($aLast)['content'], 'endgültige Antwort'), 'The budget-ending round allowed more tools.');
+
 /* Referenced mails come from a targeted search in the folder and in Sent. */
 function mailFixture(string $sId, string $sReferences, int $iDate, string $sBody): array
 {

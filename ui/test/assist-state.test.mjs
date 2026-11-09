@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
+import { hasDraftPlaceholder, actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
 
 const action = (label) => ({ label, state: "", payload: { type: label } });
 
@@ -43,6 +43,13 @@ test("assist cache keys ignore selection order and separate folders", () => {
 test("summary tasks read as one line", () => {
   assert.equal(summaryActionText({ who: "Max", what: "Bericht senden", due: "2026-11-12" }), "Max: Bericht senden (2026-11-12)");
   assert.equal(summaryActionText({ what: "Bericht senden" }), "Bericht senden");
+});
+
+test("draft placeholders are recognised without flagging ordinary brackets", () => {
+  assert.equal(hasDraftPlaceholder("Termin am [Datum?] passt."), true);
+  assert.equal(hasDraftPlaceholder("Preis: [?]"), true);
+  assert.equal(hasDraftPlaceholder("Siehe [1] und [Anlage]."), false);
+  assert.equal(hasDraftPlaceholder("Wirklich? [ja]"), false);
 });
 
 test("an empty key is never live", () => {

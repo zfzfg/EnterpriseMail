@@ -41,6 +41,22 @@ function streamed(chunks, headers = {}) {
   };
 }
 
+test("plugin errors keep their machine-readable cause", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    Result: { error: "Bitte bestätigen", status: 403, code: "consent_required" }
+  }), { headers: { "Content-Type": "application/json" } });
+  try {
+    await assert.rejects(api.plugin("AiChat"), (error) => {
+      assert.equal(error.reason, "consent_required");
+      assert.equal(error.code, 403);
+      assert.equal(error.message, "Bitte bestätigen");
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamEvents accepts arbitrary bytes and a final unterminated done block", async () => {
   const bytes = new TextEncoder().encode("event: delta\r\ndata: {\"text\":\"Grüße\"}\r\n\r\nevent: done\r\ndata: {\"body\":\"fertig\"}");
   const source = streamed(Array.from(bytes, (byte) => new Uint8Array([byte])));

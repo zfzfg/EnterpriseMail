@@ -127,6 +127,11 @@ export function ownNodeRange(nodes: DraftNode[]): { start: number; end: number }
   return { start, end };
 }
 
+/** The prompts ask the model to mark missing facts as [?] or [Datum?]. */
+export function hasDraftPlaceholder(text: string): boolean {
+  return /\[[^\]\n]*\?\]/u.test(text);
+}
+
 /** Which assistant mode fits a composer that was just opened. */
 export function draftModeFor(seed: { mode?: string; draftInfo?: [string, number, string] }): "new" | "reply" {
   if (seed.mode === "reply") return "reply";

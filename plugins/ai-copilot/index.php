@@ -748,7 +748,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 	{
 		return $this->respond(__FUNCTION__, function () {
 			$aPrepared = $this->prepareDraft($this->draftParams());
-			$sText = $aPrepared['client']->chat($aPrepared['messages'], ['temperature' => 0.4, 'max_tokens' => 1500]);
+			$sText = $aPrepared['client']->chat($aPrepared['messages'], LlmClient::DRAFT_OPTIONS);
 			return static::splitSubject($sText, $aPrepared['wantSubject']) + ['model' => $aPrepared['model']];
 		});
 	}
@@ -830,7 +830,7 @@ class AiCopilotPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$send('start', ['model' => $aPrepared['model']]);
 			$sText = $aPrepared['client']->stream($aPrepared['messages'], function (string $sDelta) use ($send): void {
 				$send('delta', ['text' => $sDelta]);
-			}, ['temperature' => 0.4, 'max_tokens' => 1500]);
+			}, LlmClient::DRAFT_OPTIONS);
 			$send('done', static::splitSubject($sText, $aPrepared['wantSubject']) + ['model' => $aPrepared['model']]);
 		} catch (LlmException $e) {
 			if (499 === $e->getCode() || \connection_aborted()) {

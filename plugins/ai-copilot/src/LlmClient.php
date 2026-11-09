@@ -16,6 +16,8 @@ class LlmClient
 	public const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 	public const MAX_STREAM_BYTES = 4 * 1024 * 1024;
 	public const MAX_TEXT_BYTES = 1024 * 1024;
+	/** Shared by the JSON, PHP streaming and Rust streaming paths of a draft. */
+	public const DRAFT_OPTIONS = ['temperature' => 0.4, 'max_tokens' => 1500];
 
 	private string $baseUrl;
 	private string $model;
@@ -55,7 +57,7 @@ class LlmClient
 	/** Internal transient preparation data; the caller must never log or cache the result. */
 	public function rustPreparation(bool $bAllowLocalProvider): array
 	{
-		$aOptions = ['temperature' => 0.4, 'max_tokens' => 1500];
+		$aOptions = static::DRAFT_OPTIONS;
 		if (\str_starts_with($this->model, 'zai-')) {
 			$aOptions['reasoning_effort'] = 'low';
 		}

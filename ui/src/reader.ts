@@ -364,7 +364,7 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung der ausgewählten Mails"))}">
       <div class="bulk-ai-head">
         <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}</span>
-        <span class="quiet">(${data.assist.summary.shown && data.assist.summary.shown < data.count ? `${data.assist.summary.shown} / ${data.count}` : data.count} Mails)</span>
+        <span class="quiet">(${data.assist.summary.shown && data.assist.summary.shown < data.count ? `${data.assist.summary.shown} / ${data.count}` : data.count} ${esc(t("AI_COPILOT.MAILS", "Mails"))})</span>
       </div>
       <p class="bulk-summary-tldr">${esc(data.assist.summary.tldr)}</p>
       ${data.assist.summary.points && data.assist.summary.points.length ? `
@@ -395,13 +395,13 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
           <div class="bulk-reply-row">
             <div class="bulk-reply-mail-head">
               <span class="bulk-reply-icon">${icon("reply")}</span>
-              <strong class="bulk-reply-title">${esc(item.subject || "(ohne Betreff)")}</strong>
+              <strong class="bulk-reply-title">${esc(item.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"))}</strong>
               <span class="bulk-reply-sender quiet">${esc(item.who)}</span>
             </div>
             <div class="prompts reply-prompts">
               ${item.replies.length ? item.replies.map((reply, rIndex) => `
                 <button type="button" class="prompt reply-chip" data-action="m-use-bulk-reply" data-uid="${item.uid}" data-index="${rIndex}" title="${esc(reply.body)}">
-                  ${esc(reply.label || "Antwort")}
+                  ${esc(reply.label || t("AI_COPILOT.ACTION_REPLY", "Antworten"))}
                 </button>
               `).join("") : `<span class="quiet">${esc(t("AI_COPILOT.NO_REPLIES_FOR_MAIL", "Keine Vorschläge für diese Mail."))}`}
             </div>

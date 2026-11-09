@@ -17,7 +17,7 @@ import {
   pgpVerify, rememberedPass, rememberPass, smimeDecrypt, smimeVerify, downloadText, type CryptoParts
 } from "./crypto";
 import { t } from "./i18n";
-import { BoundedCache, pollBackoff } from "./runtime";
+import { BoundedCache, ConcurrencyLimiter, pollBackoff } from "./runtime";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
   createView, type ChatTurn, type ComposeSeed, type ListMode, type MailView, type MessageRow,
@@ -128,6 +128,10 @@ const AI_CACHE_BYTES = 2 * 1024 * 1024;
 const TAG_MAX_AGE_MS = 5 * 60 * 1000;
 const ALERT_MIN_INTERVAL_MS = 60 * 1000;
 const BULK_REPLY_LIMIT = 10;
+/** Every suggestion occupies a PHP worker while the provider answers. */
+const bulkReplySlots = new ConcurrencyLimiter(3);
+/** Actions that must not run twice at once: each extra click would be another provider request. */
+const SINGLE_RUN_ACTIONS = new Set(["lang-search", "triage", "deadlines", "bulk-summarize", "bulk-replies"]);
 const timezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 interface AssistSummary {
@@ -274,6 +278,9 @@ class Session {
   private chat: { role: "user" | "assistant"; content: string }[] = [];
   private turns: ChatTurn[] = [];
   private chatBusy = false;
+  private chatAbort: AbortController | null = null;
+  private assistRunning = new Set<string>();
+  private translatedFolder = "";
   private chatKnown: string[] = [];
   private assistScopes = new AssistScopes();
   /** AI output stays in this tab's memory; the server keeps none of it. */
@@ -1362,7 +1369,7 @@ class Session {
   private paintList(): void {
     const empty = this.visible().length
       ? ""
-      : this.category !== "all" ? "Keine Mails für diesen Filter."
+      : this.category !== "all" ? t("AI_COPILOT.NO_FILTER_MATCH", "Keine Mails für diesen Filter.")
       : this.search ? t("FOLDERS_UI.NO_MATCH", "Keine Treffer. Suche anpassen oder Filter entfernen.") : t("FOLDERS_UI.EMPTY_FOLDER", "Dieser Ordner ist leer.");
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
@@ -1409,6 +1416,8 @@ class Session {
       if (this.current !== message || generation !== this.accountGeneration) return;
       this.restoreMessageAssist();
       this.paintStrip();
+      this.useContext = true;
+      if (this.assistFlags?.chat && !this.chatBusy) this.view.setChat(this.turns, "", this.contextLabel());
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       if (this.selected === uid && this.folder === folder && generation === this.accountGeneration) {
@@ -1665,7 +1674,7 @@ class Session {
   }
 
   /** The one way to start a reply; assistant suggestions and chat actions reuse it for threading and identity. */
-  private openReply(all: boolean, options: { message?: Msg; text?: string; title?: string; instruction?: string } = {}): void {
+  private openReply(all: boolean, options: { message?: Msg; text?: string; title?: string; instruction?: string; assisted?: boolean } = {}): void {
     const message = options.message || this.current;
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
@@ -1678,6 +1687,7 @@ class Session {
     this.view.openCompose({
       title: options.title || (all ? t("COMPOSE.TITLE_REPLY_ALL", "Allen antworten") : t("COMPOSE.TITLE_REPLY", "Antworten")), mode: "reply", identityId: this.replyIdentity(message), sourceFolder: message.folder,
       instruction: options.instruction,
+      assisted: options.assisted,
       to: author ? address(author) : "", cc: all ? others.map(address).join(", ") : "", subject,
       inReplyTo: message.messageId,
       references: [message.references, message.messageId].filter(Boolean).join(" "),
@@ -2809,10 +2819,11 @@ class Session {
 
   private async consent(kind: "mail" | "query" = "mail"): Promise<boolean> {
     if (this.noticeAck) return true;
-    const name = this.assistFlags?.providerName || "den Anbieter";
-    const text = kind === "query"
-      ? `Ihre Suchanfrage geht an ${name}, die Mails bleiben dabei auf dem Server. Diese Einwilligung gilt auch für spätere KI-Aktionen, die nach einem Klick Mailinhalte an ${name} senden. Fortfahren?`
-      : `Diese KI-Funktion sendet den Inhalt der betroffenen Mails an ${name}. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?`;
+    const name = this.assistFlags?.providerName || t("AI_COPILOT.THE_PROVIDER", "den Anbieter");
+    const text = (kind === "query"
+      ? t("AI_COPILOT.CONSENT_QUERY", "Ihre Suchanfrage geht an %PROVIDER%, die Mails bleiben dabei auf dem Server. Diese Einwilligung gilt auch für spätere KI-Aktionen, die nach einem Klick Mailinhalte an %PROVIDER% senden. Fortfahren?")
+      : t("AI_COPILOT.CONSENT_MAIL", "Diese KI-Funktion sendet den Inhalt der betroffenen Mails an %PROVIDER%. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?")
+    ).replace(/%PROVIDER%/g, name);
     const ok = await this.view.confirmConsent(text);
     if (!ok) return false;
     try {
@@ -2860,7 +2871,33 @@ class Session {
     }
   }
 
+  /** Text for an assistant failure. Missing consent reopens the notice instead of a dead end. */
+  private assistError(error: unknown, retry?: () => void): string {
+    if (error instanceof ApiError && error.reason === "consent_required") {
+      this.noticeAck = false;
+      if (retry) void this.consent().then((granted) => { if (granted) retry(); });
+      return t("AI_COPILOT.ERROR_CONSENT_REQUIRED", "Bitte bestätigen Sie zuerst den Hinweis zur Übermittlung an den KI-Anbieter.");
+    }
+    return error instanceof ApiError && error.reason ? t(`AI_COPILOT.ERROR_${error.reason.toUpperCase()}`, explain(error)) : explain(error);
+  }
+
   private async assist(name: string, data: Record<string, string | undefined>): Promise<void> {
+    if (!SINGLE_RUN_ACTIONS.has(name)) {
+      await this.runAssist(name, data);
+      return;
+    }
+    if (this.assistRunning.has(name)) return;
+    this.assistRunning.add(name);
+    this.view.setAssistBusy(name, true);
+    try {
+      await this.runAssist(name, data);
+    } finally {
+      this.assistRunning.delete(name);
+      this.view.setAssistBusy(name, false);
+    }
+  }
+
+  private async runAssist(name: string, data: Record<string, string | undefined>): Promise<void> {
     if (name === "cat") {
       this.category = data.cat || "all";
       try {
@@ -2906,6 +2943,7 @@ class Session {
       const input = document.querySelector("#search") as HTMLInputElement | null;
       const text = query || input?.value.trim() || "";
       if (!text) return;
+      this.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
       try {
         const result = await plugin<{ search: string; explanation?: string; folder?: string }>("AiSearch", {
           query: text,
@@ -2914,18 +2952,23 @@ class Session {
           sent: this.sentFolder,
           timezone: timezone()
         });
-        if (result.folder && result.folder !== this.folder) await this.selectFolder(result.folder);
-        this.view.showTranslation(result.search, result.explanation || "");
+        // Nothing changes until the user accepts the suggestion with "Suchen".
+        this.translatedFolder = result.folder || "";
+        this.view.notice("");
+        this.view.showTranslation(result.search, [result.explanation, result.folder].filter(Boolean).join(" · "));
       } catch (error) {
-        this.view.notice(explain(error));
+        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
       }
       return;
     }
     if (name === "run-search") {
       const field = document.querySelector("#translate-q") as HTMLInputElement | null;
+      const query = field?.value.trim() || "";
       this.category = "all";
       this.view.pressCategory("all");
-      await this.setSearch(field?.value.trim() || "");
+      if (this.translatedFolder && this.translatedFolder !== this.folder) await this.selectFolder(this.translatedFolder);
+      this.translatedFolder = "";
+      await this.setSearch(query);
       return;
     }
     if (name === "summarize" && this.current) {
@@ -2938,7 +2981,7 @@ class Session {
         this.paintStrip();
         return;
       }
-      this.view.setStrip({ ...this.strip(), loading: "Verlauf wird zusammengefasst …", tldr: "" });
+      this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.SUMMARIZING", "Verlauf wird zusammengefasst …"), tldr: "" });
       try {
         const result = await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.folder,
@@ -2950,7 +2993,7 @@ class Session {
         this.applySummary(result.summary || {}, false);
         this.paintStrip();
       } catch (error) {
-        if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
+        if (scope.live()) this.view.setStrip({ ...this.strip(), error: this.assistError(error, () => void this.assist(name, data)) });
       }
       return;
     }
@@ -2971,14 +3014,14 @@ class Session {
         this.replies = replies;
         this.paintStrip();
       } catch (error) {
-        if (scope.live()) this.view.setStrip({ ...this.strip(), error: explain(error) });
+        if (scope.live()) this.view.setStrip({ ...this.strip(), error: this.assistError(error, () => void this.assist(name, data)) });
       }
       return;
     }
     if (name === "use-reply") {
       const reply = this.replies[Number(data.index || 0)];
       if (!reply || !this.current) return;
-      this.openReply(false, { text: reply.body, title: reply.label });
+      this.openReply(false, { text: reply.body, title: reply.label, assisted: true });
       return;
     }
     if (name === "bulk-summarize") {
@@ -3009,7 +3052,7 @@ class Session {
         this.bulkSummaryLoading = "";
       } catch (error) {
         this.bulkSummaryLoading = "";
-        this.bulkSummaryError = explain(error);
+        this.bulkSummaryError = this.assistError(error);
       }
       this.paintBulk();
       return;
@@ -3027,7 +3070,7 @@ class Session {
         .slice(0, BULK_REPLY_LIMIT);
       try {
         const results = await Promise.allSettled(
-          targetMsgs.map(async (msg) => {
+          targetMsgs.map((msg) => bulkReplySlots.run(async () => {
             const key = assistKey(this.folder, [msg.uid]);
             const replies = this.replyCache.get(key) || ((await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
               folder: this.folder,
@@ -3037,11 +3080,11 @@ class Session {
             this.replyCache.set(key, replies);
             return {
               uid: msg.uid,
-              subject: msg.subject || "(ohne Betreff)",
+              subject: msg.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"),
               who: label(msg.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
               replies
             };
-          })
+          }))
         );
         const successful: BulkReplyItem[] = [];
         for (const r of results) {
@@ -3057,7 +3100,7 @@ class Session {
         this.bulkRepliesLoading = "";
       } catch (error) {
         this.bulkRepliesLoading = "";
-        this.bulkRepliesError = explain(error);
+        this.bulkRepliesError = this.assistError(error);
       }
       this.paintBulk();
       return;
@@ -3072,7 +3115,7 @@ class Session {
       try {
         // List rows carry no body, so the quote needs the full message.
         const message = this.parseMessage(await call<Record<string, unknown>>("Message", { folder: this.folder, uid }), true);
-        if (generation === this.accountGeneration) this.openReply(false, { message, text: reply.body, title: reply.label });
+        if (generation === this.accountGeneration) this.openReply(false, { message, text: reply.body, title: reply.label, assisted: true });
       } catch (error) {
         this.view.notice(explain(error));
       }
@@ -3096,7 +3139,7 @@ class Session {
         this.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
         await this.loadList(false);
       } catch (error) {
-        this.view.notice(explain(error));
+        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
       }
       return;
     }
@@ -3106,6 +3149,7 @@ class Session {
         this.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
         return;
       }
+      this.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
       try {
         const result = await plugin<{ alerts: DueItem[] }>("AiAlertsLlm", { items, timezone: timezone() });
         this.alertDues = (result.alerts || []).filter((item) => item.due);
@@ -3115,8 +3159,9 @@ class Session {
           this.alertItems.filter((item) => item.type === "invoice").length,
           this.alertDues
         );
+        this.view.notice(this.alertDues.length ? "" : t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
       } catch (error) {
-        this.view.notice(explain(error));
+        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
       }
       return;
     }
@@ -3130,7 +3175,9 @@ class Session {
       if (area) area.value = "";
       this.chat.push({ role: "user", content: text });
       this.turns.push({ role: "user", text, trace: [], actions: [] });
-      this.view.setChat(this.turns, "Copilot arbeitet …", this.contextLabel());
+      this.view.setChat(this.turns, t("AI_COPILOT.CHAT_WORKING", "Copilot arbeitet …"), this.contextLabel());
+      const controller = new AbortController();
+      this.chatAbort = controller;
       try {
         const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[]; known?: string[] }>("AiChat", {
           messages: this.chat,
@@ -3139,7 +3186,7 @@ class Session {
           known: this.chatKnown,
           sent: this.sentFolder,
           timezone: timezone()
-        });
+        }, controller.signal);
         this.chatKnown = result.known || [];
         this.chat.push({ role: "assistant", content: result.reply || "" });
         this.turns.push({
@@ -3150,10 +3197,20 @@ class Session {
         });
         this.view.setChat(this.turns, "", this.contextLabel());
       } catch (error) {
-        this.view.setChat(this.turns, "!" + explain(error), this.contextLabel());
+        // Take the question back so sending it again is one deliberate click.
+        this.chat.pop();
+        this.turns.pop();
+        if (area) area.value = text;
+        const aborted = error instanceof Error && error.name === "AbortError";
+        this.view.setChat(this.turns, aborted ? "" : "!" + this.assistError(error, () => void this.assist(name, data)), this.contextLabel());
       } finally {
         this.chatBusy = false;
+        this.chatAbort = null;
       }
+      return;
+    }
+    if (name === "stop-chat") {
+      this.chatAbort?.abort();
       return;
     }
     if (name === "drop-context") {
@@ -3163,7 +3220,7 @@ class Session {
     }
     if (name === "dismiss-action") {
       const action = chatActionAt(this.turns, Number(data.turn), Number(data.index));
-      if (action && !action.state) action.state = "Verworfen";
+      if (action && !action.state) action.state = t("AI_COPILOT.ACTION_DISMISSED", "Verworfen");
       this.view.setChat(this.turns, "", this.contextLabel());
       return;
     }
@@ -3224,7 +3281,7 @@ class Session {
           this.view.setSubjectHint(String(payload.subject || ""));
           this.summaryModel = String(payload.model || "");
         }
-        if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")));
+        if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")), "", String(payload.code || ""));
       }, this.draftAbort.signal);
       this.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingefügt.")}${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
     } catch (error) {
@@ -3232,7 +3289,7 @@ class Session {
         this.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."));
         return;
       }
-      this.view.setDraftBusy(false, explain(error));
+      this.view.setDraftBusy(false, this.assistError(error, () => void this.generate()));
     }
   }
 
@@ -3248,7 +3305,7 @@ class Session {
         if (!await this.view.confirmDelete()) return;
         await call("MessageDelete", { folder, uids });
       } else if (type === "archive") {
-        if (!this.archiveFolder) throw new ApiError(1, "Kein Archiv-Ordner eingerichtet.");
+        if (!this.archiveFolder) throw new ApiError(1, t("AI_COPILOT.NO_ARCHIVE", "Kein Archiv-Ordner eingerichtet."));
         await call("MessageMove", { fromFolder: folder, toFolder: this.archiveFolder, uids });
       } else if (type === "move") {
         await call("MessageMove", { fromFolder: folder, toFolder: String(action.to || ""), uids });

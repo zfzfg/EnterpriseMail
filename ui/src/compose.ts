@@ -1,6 +1,6 @@
 import { ApiError, call, explain, upload, type UploadTask } from "./api";
 import { keysFor, loadGnuKeys, rememberedPass, rememberPass, type GnuKey } from "./crypto";
-import { joinPlainDraft, ownNodeRange, splitPlainDraft } from "./assist-state";
+import { hasDraftPlaceholder, joinPlainDraft, ownNodeRange, splitPlainDraft } from "./assist-state";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
 import type { IdentityRow } from "./settings";
@@ -61,6 +61,8 @@ export interface ComposeSeed {
   instant?: boolean;
   /** Vorbelegung des KI-Anweisungsfelds; generiert wird erst nach Klick. */
   instruction?: string;
+  /** Der Text stammt von der KI und kann Platzhalter enthalten. */
+  assisted?: boolean;
 }
 
 export interface ComposeValues extends ComposeSeed {
@@ -250,6 +252,8 @@ export class Composer {
   private fields = new Map<string, RecipientField>();
   private seed: ComposeSeed | null = null;
   private draftRegion: DraftRegion | null = null;
+  private assisted = false;
+  private placeholderWarned = false;
   private mode: "html" | "plain" = "plain";
   private draftRef: { folder: string; uid: number } | null = null;
   private baseline = "";
@@ -452,6 +456,8 @@ export class Composer {
     this.instantNext = false;
     this.seed = seed;
     this.draftRegion = null;
+    this.assisted = Boolean(seed.assisted);
+    this.placeholderWarned = false;
     this.draftRef = seed.draftRef || null;
     this.files = [];
     (this.root.querySelector("#compose-title") as HTMLElement).textContent = seed.title;
@@ -791,6 +797,11 @@ export class Composer {
     try {
       const values = this.values(this.saveFolder(), true);
       if (!values.to && !values.cc && !values.bcc) throw new ApiError(303, t("COMPOSE.EMPTY_TO_ERROR_DESC", "Geben Sie bitte mindestens einen Empfänger an."));
+      if (this.assisted && !this.placeholderWarned && hasDraftPlaceholder(this.captureDraftRegion().own)) {
+        // The second click sends: the text may legitimately keep such a bracket.
+        this.placeholderWarned = true;
+        throw new ApiError(0, t("AI_COPILOT.PLACEHOLDER_WARNING", "Der KI-Text enthält noch Platzhalter wie [?]. Bitte ergänzen oder erneut auf Senden klicken."));
+      }
       if (this.files.some((file) => file.state === "busy")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_UPLOAD_ERROR_DESC", "Anhänge werden noch hochgeladen."));
       if (this.files.some((file) => file.state === "error")) throw new ApiError(0, t("COMPOSE.ATTACHMENTS_ERROR_DESC", "Entfernen Sie die fehlgeschlagenen Anhänge vor dem Senden."));
       if (values.pgpEncrypt && this.missingKeys.length) {
@@ -1052,6 +1063,8 @@ export class Composer {
   setDraftText(text: string): void {
     this.draftRegion = this.draftRegion || this.captureDraftRegion();
     this.draftRegion.write(text);
+    this.assisted = true;
+    this.placeholderWarned = false;
     this.changed();
   }
 
