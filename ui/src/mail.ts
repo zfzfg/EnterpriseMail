@@ -1,11 +1,10 @@
-import { readAssist, type AssistFlags } from "./assistant";
-import { assistKey, AssistScopes, chatActionAt, summaryActionText, type AssistScope } from "./assist-state";
+import { AssistController, type AssistHost, type ReplyOptions } from "./assist-controller";
 import {
-  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, plugin, proxyUrl, rawUrl, streamEvents, syncContacts, watchSession
+  ApiError, call, explain, fetchDataUrl, fetchText, fileHash, loadApp, loadLanguage, messageHash, proxyUrl, rawUrl, syncContacts, watchSession
 } from "./api";
 import { cleanHtml, externalUrls, fillInline, originalLinks, plainToHtml, revealExternals } from "./clean";
 import { openLetterWindow, parseIcs, parseMailto, parseUnsubscribe, srcdoc, type CalendarEvent } from "./letter";
-import type { BulkAssistState, BulkMessageSummary, BulkReplyItem, BulkSummaryState, ReaderFile, ReaderPlace } from "./reader";
+import type { BulkMessageSummary, ReaderFile, ReaderPlace } from "./reader";
 import { applyDesk, loadDesk, readCaps, writeProp, type Caps, type IdentityRow, type SettingsSnapshot } from "./settings";
 import type { ComposeValues } from "./compose";
 import {
@@ -17,14 +16,14 @@ import {
   pgpVerify, rememberedPass, rememberPass, smimeDecrypt, smimeVerify, downloadText, type CryptoParts
 } from "./crypto";
 import { t } from "./i18n";
-import { BoundedCache, ConcurrencyLimiter, pollBackoff } from "./runtime";
+import { BoundedCache, pollBackoff } from "./runtime";
 import { activeQuick, encodeValue, parseSearch, toggleQuick, type QuickFlag } from "./search";
 import {
-  createView, type ChatTurn, type ComposeSeed, type ListMode, type MailView, type MessageRow,
-  type PickerFolder, type ReaderData, type StripState
+  createView, type ComposeSeed, type ListMode, type MailView, type MessageRow,
+  type PickerFolder, type ReaderData
 } from "./view";
 
-interface Person { name: string; email: string }
+export interface Person { name: string; email: string }
 type Folder = FolderInfo;
 interface MsgFile {
   name: string;
@@ -37,7 +36,7 @@ interface MsgFile {
   hash: string;
   href: string;
 }
-interface Msg {
+export interface Msg {
   uid: number;
   folder: string;
   hash: string;
@@ -121,40 +120,6 @@ interface Prefs {
 }
 
 const PAGE_FALLBACK = 20;
-/** Matches DraftRequest's limit for the `current` field. */
-const DRAFT_TEXT_LIMIT = 8000;
-const AI_CACHE_ENTRIES = 200;
-const AI_CACHE_BYTES = 2 * 1024 * 1024;
-const TAG_MAX_AGE_MS = 5 * 60 * 1000;
-const ALERT_MIN_INTERVAL_MS = 60 * 1000;
-const BULK_REPLY_LIMIT = 10;
-/** Every suggestion occupies a PHP worker while the provider answers. */
-const bulkReplySlots = new ConcurrencyLimiter(3);
-/** Actions that must not run twice at once: each extra click would be another provider request. */
-const SINGLE_RUN_ACTIONS = new Set(["lang-search", "triage", "deadlines", "bulk-summarize", "bulk-replies"]);
-const timezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-interface AssistSummary {
-  tldr?: string;
-  points?: string[];
-  decisions?: string[];
-  actions?: { who?: string; what?: string; due?: string }[];
-  next?: string;
-  model?: string;
-  count?: number;
-}
-
-interface DueItem {
-  folder: string;
-  uid: number;
-  title: string;
-  due: string;
-}
-
-interface AssistReply {
-  label: string;
-  body: string;
-}
 const SYSTEM_FLAGS = /^(\\|\$ai_|\$forwarded$|\$mdnsent$|\$junk$|\$notjunk$|\$label|nonjunk$|junk$|\$phishing$|\$submitpending$|\$submitted$|\$hasattachment$|\$hasnoattachment$|\$important$|\$muted$|\$followed$)/i;
 
 function people(value: unknown): Person[] {
@@ -255,53 +220,27 @@ export async function boot(root: HTMLElement): Promise<void> {
   }
 }
 
-class Session {
-  private view: MailView;
+class Session implements AssistHost {
+  readonly personLabel = label;
+  readonly personAddress = address;
+  private assistant = new AssistController(this);
+  view: MailView;
   private email = "";
   private accountHash = "";
-  private sentFolder = "";
-  private archiveFolder = "";
+  sentFolder = "";
+  archiveFolder = "";
   private pageSize = PAGE_FALLBACK;
-  private folders: Folder[] = [];
-  private folder = "INBOX";
-  private messages: Msg[] = [];
+  folders: Folder[] = [];
+  folder = "INBOX";
+  messages: Msg[] = [];
   private total = 0;
-  private offset = 0;
+  offset = 0;
   private search = "";
   private selected = 0;
   private hasMore = false;
-  private current: Msg | null = null;
+  current: Msg | null = null;
   private replyKind: "" | "reply" | "reply-all" | "forward" = "";
-  private assistFlags: AssistFlags | null = null;
-  private noticeAck = false;
-  private useContext = true;
-  private chat: { role: "user" | "assistant"; content: string }[] = [];
-  private turns: ChatTurn[] = [];
-  private chatBusy = false;
-  private chatAbort: AbortController | null = null;
-  private assistRunning = new Set<string>();
-  private translatedFolder = "";
-  private chatKnown: string[] = [];
-  private assistScopes = new AssistScopes();
-  /** AI output stays in this tab's memory; the server keeps none of it. */
-  private summaryCache = new BoundedCache<string, AssistSummary>(AI_CACHE_ENTRIES, AI_CACHE_BYTES, (value) => JSON.stringify(value).length);
-  private replyCache = new BoundedCache<string, AssistReply[]>(AI_CACHE_ENTRIES, AI_CACHE_BYTES, (value) => JSON.stringify(value).length);
-  private replies: { label: string; body: string }[] = [];
-  private bulkSummary: BulkSummaryState | null = null;
-  private bulkSummaryLoading = "";
-  private bulkSummaryError = "";
-  private bulkRepliesList: BulkReplyItem[] = [];
-  private bulkRepliesLoading = "";
-  private bulkRepliesError = "";
-  private draftBackup = "";
-  private draftAbort: AbortController | null = null;
-  /** When each folder was last tagged; only user actions tag, background polling never writes. */
-  private tagged = new Map<string, number>();
-  private alertItems: { folder: string; uid: number; type: string; title: string }[] = [];
-  private alertDues: DueItem[] = [];
-  private alertCursor: Record<string, number> = {};
-  private alertsLoadedAt = 0;
-  private category = "all";
+  category = "all";
   /** Laufende Nummer der Listenanfragen. */
   private listSeq = 0;
   private mainEmail = "";
@@ -326,7 +265,7 @@ class Session {
   private junkFolder = "";
   private draftsFolder = "";
   private isExistingDraft = false;
-  private checked = new Set<number>();
+  checked = new Set<number>();
   private anchor = 0;
   private readTimer = 0;
   private pollTimer = 0;
@@ -335,7 +274,7 @@ class Session {
   private pollFailures = 0;
   private pollRetryAt = 0;
   private polling = false;
-  private accountGeneration = 0;
+  accountGeneration = 0;
   private listAbort: AbortController | null = null;
   private messageAbort: AbortController | null = null;
   private letterAbort: AbortController | null = null;
@@ -381,7 +320,7 @@ class Session {
       saveCompose: (values) => this.saveDraft(values),
       closeCompose: (discard) => { void this.closeCompose(discard); },
       back: () => undefined,
-      assist: (name, data) => void this.assist(name, data),
+      assist: (name, data) => void this.assistant.assist(name, data),
       settings: (name, data) => this.settings(name, data),
       act: (name, data) => void this.act(name, data)
     });
@@ -432,7 +371,7 @@ class Session {
     this.messageAbort?.abort();
     this.letterAbort?.abort();
     this.pollAbort?.abort();
-    this.draftAbort?.abort();
+    this.assistant.abortDraft();
     this.polling = false;
     this.pollFailures = 0;
     this.pollRetryAt = 0;
@@ -443,20 +382,7 @@ class Session {
     this.calendarCache.clear();
     this.receiptSkipped.clear();
     this.aboCache = null;
-    this.tagged.clear();
-    this.alertItems = [];
-    this.alertDues = [];
-    this.alertCursor = {};
-    this.alertsLoadedAt = 0;
-    this.alertItems = [];
-    this.alertDues = [];
-    this.chat = [];
-    this.turns = [];
-    this.chatKnown = [];
-    this.summaryCache.clear();
-    this.replyCache.clear();
-    this.clearMessageAssist();
-    this.clearBulkState();
+    this.assistant.resetAccount();
     this.current = null;
     this.selected = 0;
     this.messages = [];
@@ -588,16 +514,12 @@ class Session {
     const page = Number(data.MessagesPerPage || PAGE_FALLBACK);
     this.pageSize = Math.min(100, Math.max(10, page || PAGE_FALLBACK));
     document.title = this.email || String(data.title || "Postfach");
-    const assistFlags = await readAssist(data, async () => {
-      const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
-      return result.settings;
-    });
+    const assistFlags = await this.assistant.loadFlags(data);
     if (generation !== this.accountGeneration) return;
-    this.assistFlags = assistFlags;
-    this.noticeAck = Boolean(this.assistFlags?.noticeAck);
+    this.assistant.setFlags(assistFlags);
     const cycle = String(data.hourCycle || "");
     hourCycle = cycle === "h12" || cycle === "h23" ? cycle : undefined;
-    this.view.showMail(this.email, "Posteingang", this.assistFlags);
+    this.view.showMail(this.email, "Posteingang", this.assistant.flags);
     const sync = data.ContactsSync;
     this.view.setBook(this.caps.contacts, Boolean(sync && typeof sync === "object"), Number((sync as { Mode?: unknown } | null)?.Mode || 0));
     const layoutMode = Number(data.Layout ?? 1);
@@ -624,7 +546,7 @@ class Session {
     this.view.showSettings(this.desk);
     this.view.setFolderDesk(this.folderDesk());
     this.armLogout();
-    if (this.assistFlags?.alerts) void this.loadAlerts();
+    this.assistant.refreshAlerts(true);
     await Promise.all([this.loadFolders(), this.loadComposeIdentities()]);
     if (generation !== this.accountGeneration) return;
     this.configureComposer();
@@ -699,15 +621,7 @@ class Session {
       if (!this.desk) return;
       const next = await applyDesk(name, data, this.desk);
       if (name === "assist-save") {
-        this.assistFlags = await readAssist(this.composeData, async () => {
-          const result = await plugin<{ settings: { enabled?: boolean; features?: Record<string, boolean>; notice_ack?: boolean } }>("AiGetSettings");
-          return result.settings;
-        });
-        this.view.setAssist(this.assistFlags);
-        this.noticeAck = Boolean(this.assistFlags?.noticeAck);
-        // Tone, language or provider may have changed, so earlier results no longer fit.
-        this.summaryCache.clear();
-        this.replyCache.clear();
+        await this.assistant.reloadSettings(this.composeData);
       }
       if (next === "session") {
         await this.enter(await loadApp());
@@ -1102,7 +1016,7 @@ class Session {
     }
   }
 
-  private async selectFolder(fullName: string): Promise<void> {
+  async selectFolder(fullName: string): Promise<void> {
     window.clearTimeout(this.readTimer);
     this.messageAbort?.abort();
     this.letterAbort?.abort();
@@ -1188,7 +1102,7 @@ class Session {
     return JSON.stringify([this.accountHash, this.folder, this.listQuery(), this.sort, this.threadsOn(), this.threadUid]);
   }
 
-  private async loadList(append: boolean, quiet = false): Promise<void> {
+  async loadList(append: boolean, quiet = false): Promise<void> {
     this.listAbort?.abort();
     const controller = new AbortController();
     this.listAbort = controller;
@@ -1237,7 +1151,7 @@ class Session {
     }
   }
 
-  private parseMessage(item: Record<string, unknown>, full = false): Msg {
+  parseMessage(item: Record<string, unknown>, full = false): Msg {
     const flags = Array.isArray(item.flags) ? item.flags.map((flag) => String(flag)) : [];
     const folder = String(item.folder || this.folder);
     const uid = Number(item.uid || 0);
@@ -1374,7 +1288,7 @@ class Session {
     this.view.setList(this.rows(), empty, "", this.hasMore, Boolean(this.search) || this.category !== "all");
   }
 
-  private async setSearch(query: string): Promise<void> {
+  async setSearch(query: string): Promise<void> {
     this.search = query;
     this.threadUid = 0;
     this.paintMode();
@@ -1389,7 +1303,7 @@ class Session {
     await this.loadList(false);
   }
 
-  private async selectMessage(uid: number): Promise<void> {
+  async selectMessage(uid: number): Promise<void> {
     window.clearTimeout(this.readTimer);
     this.messageAbort?.abort();
     this.letterAbort?.abort();
@@ -1400,7 +1314,7 @@ class Session {
     const folder = this.folder;
     this.selected = uid;
     this.checked.clear();
-    this.clearMessageAssist();
+    this.assistant.clearMessage();
     this.paintList();
     this.view.setReader(null, "Brief wird geladen …", "");
     try {
@@ -1414,10 +1328,7 @@ class Session {
       this.scheduleSeen(message);
       await this.paintLetter();
       if (this.current !== message || generation !== this.accountGeneration) return;
-      this.restoreMessageAssist();
-      this.paintStrip();
-      this.useContext = true;
-      if (this.assistFlags?.chat && !this.chatBusy) this.view.setChat(this.turns, "", this.contextLabel());
+      this.assistant.showMessage();
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       if (this.selected === uid && this.folder === folder && generation === this.accountGeneration) {
@@ -1666,7 +1577,7 @@ class Session {
     return this.identities.find((identity) => recipients.some((person) => person.email.toLowerCase() === identity.email.toLowerCase()))?.id || this.identities[0]?.id || "";
   }
 
-  private openNew(preset: Partial<ComposeSeed> = {}): void {
+  openNew(preset: Partial<ComposeSeed> = {}): void {
     this.replyKind = "";
     this.draftRef = null;
     this.isExistingDraft = false;
@@ -1674,7 +1585,7 @@ class Session {
   }
 
   /** The one way to start a reply; assistant suggestions and chat actions reuse it for threading and identity. */
-  private openReply(all: boolean, options: { message?: Msg; text?: string; title?: string; instruction?: string; assisted?: boolean } = {}): void {
+  openReply(all: boolean, options: ReplyOptions = {}): void {
     const message = options.message || this.current;
     if (!message) return;
     this.replyKind = all ? "reply-all" : "reply";
@@ -1758,7 +1669,7 @@ class Session {
       await call("SendMessage", params);
       this.view.closeCompose();
       this.view.notice("Gesendet.");
-      this.refreshAlerts(true);
+      this.assistant.refreshAlerts(true);
       this.replyKind = "";
       const wasDraft = Boolean(this.draftRef) || this.isExistingDraft;
       this.draftRef = null;
@@ -1990,18 +1901,9 @@ class Session {
       .map((row) => ({ fullName: row.info.fullName, name: this.folderName(row.info), depth: row.depth, role: row.role }));
   }
 
-  private clearBulkState(): void {
-    this.bulkSummary = null;
-    this.bulkSummaryLoading = "";
-    this.bulkSummaryError = "";
-    this.bulkRepliesList = [];
-    this.bulkRepliesLoading = "";
-    this.bulkRepliesError = "";
-  }
-
-  private paintBulk(): void {
+  paintBulk(): void {
     if (!this.checked.size) {
-      this.clearBulkState();
+      this.assistant.clearBulkState();
       this.view.setSelectionCount?.(0);
       if (this.current) void this.paintLetter();
       else this.view.setReader(null, "", "");
@@ -2009,9 +1911,7 @@ class Session {
     }
     this.view.setStrip(null);
     this.view.notice("");
-    if (this.bulkRepliesList.length) {
-      this.bulkRepliesList = this.bulkRepliesList.filter((r) => this.checked.has(r.uid));
-    }
+    this.assistant.keepCheckedReplies();
     const checkedUids = [...this.checked];
     const selectedMsgs = checkedUids
       .map((uid) => this.messages.find((m) => m.uid === uid))
@@ -2029,20 +1929,7 @@ class Session {
       flagged: hasFlag(m.flags, "\\flagged")
     }));
 
-    const assist: BulkAssistState | undefined = (this.assistFlags?.summarize || this.assistFlags?.replies)
-      ? {
-          summarize: Boolean(this.assistFlags?.summarize),
-          replies: Boolean(this.assistFlags?.replies),
-          loadingSummary: this.bulkSummaryLoading || undefined,
-          loadingReplies: this.bulkRepliesLoading || undefined,
-          error: this.bulkSummaryError || this.bulkRepliesError || undefined,
-          summary: this.bulkSummary,
-          repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : undefined,
-          repliesNote: this.bulkRepliesList.length && this.checked.size > BULK_REPLY_LIMIT
-            ? t("AI_COPILOT.BULK_REPLIES_LIMIT", "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.").replace("%LIMIT%", String(BULK_REPLY_LIMIT)).replace("%COUNT%", String(this.checked.size))
-            : undefined
-        }
-      : undefined;
+    const assist = this.assistant.bulkState();
 
     this.view.setSelectionCount?.(this.checked.size);
     this.view.setBulk({
@@ -2132,13 +2019,9 @@ class Session {
       this.pollRetryAt = 0;
       this.paintFolders();
       if (changed && generation === this.accountGeneration) {
-        // Polling itself never writes keywords; only a manual refresh tags again.
-        this.tagged.delete(this.folder);
-        if (manual) {
-          try { await this.ensureTagged(); } catch { /* Der Filter zeigt dann den letzten Stand. */ }
-        }
+        await this.assistant.folderChanged(manual);
         await this.loadList(false, true);
-        this.refreshAlerts(manual);
+        this.assistant.refreshAlerts(manual);
       }
     } catch (error) {
       if (generation !== this.accountGeneration || error instanceof Error && error.name === "AbortError") return;
@@ -2723,13 +2606,13 @@ class Session {
         }
         return;
       case "bulk-summarize":
-        await this.assist("bulk-summarize", data);
+        await this.assistant.assist("bulk-summarize", data);
         return;
       case "bulk-replies":
-        await this.assist("bulk-replies", data);
+        await this.assistant.assist("bulk-replies", data);
         return;
       case "use-bulk-reply":
-        await this.assist("use-bulk-reply", data);
+        await this.assistant.assist("use-bulk-reply", data);
         return;
       default:
         if (name.startsWith("f-")) await this.folderAction(name, data);
@@ -2746,594 +2629,5 @@ class Session {
     this.view.setReader(null, "", "");
     this.paintMode();
     await this.loadList(false);
-  }
-
-  private strip(): StripState {
-    return {
-      loading: "",
-      error: "",
-      tldr: this.tldr,
-      cached: this.summaryCached,
-      points: this.summaryDetail?.points || [],
-      decisions: this.summaryDetail?.decisions || [],
-      actions: (this.summaryDetail?.actions || []).map(summaryActionText),
-      next: this.summaryDetail?.next || "",
-      replies: this.replies,
-      model: this.summaryModel,
-      showSummarize: Boolean(this.assistFlags?.summarize),
-      showReplies: Boolean(this.assistFlags?.replies)
-    };
-  }
-
-  private tldr = "";
-  private summaryCached = false;
-  private summaryModel = "";
-  private summaryDetail: AssistSummary | null = null;
-
-  private paintStrip(): void {
-    if (!this.assistFlags?.summarize && !this.assistFlags?.replies) return;
-    this.view.setStrip(this.current ? this.strip() : null);
-  }
-
-  private clearMessageAssist(): void {
-    this.assistScopes.reset();
-    this.replies = [];
-    this.tldr = "";
-    this.summaryCached = false;
-    this.summaryModel = "";
-    this.summaryDetail = null;
-  }
-
-  /** The open mail's conversation; replying only considers what came before it. */
-  private conversationUids(upToCurrent = false): number[] {
-    const message = this.current;
-    if (!message) return [];
-    const row = this.messages.find((item) => item.uid === message.uid);
-    const all = [...new Set([message.uid, ...(row?.threads || []), ...message.threads])];
-    return upToCurrent ? all.filter((uid) => uid <= message.uid) : all;
-  }
-
-  /** Scope for a provider request about the open message; stale once another message is shown. */
-  private messageScope(): AssistScope {
-    const generation = this.accountGeneration;
-    return this.assistScopes.begin(() =>
-      this.current && generation === this.accountGeneration ? `${this.folder}\n${this.current.uid}` : ""
-    );
-  }
-
-  private applySummary(summary: AssistSummary, cached: boolean): void {
-    this.tldr = summary.tldr || "";
-    this.summaryCached = cached;
-    this.summaryModel = summary.model || this.assistFlags?.provider || "";
-    this.summaryDetail = summary;
-  }
-
-  /** Shows results from this session again without another provider request. */
-  private restoreMessageAssist(): void {
-    if (!this.current) return;
-    const summary = this.summaryCache.get(assistKey(this.folder, this.conversationUids()));
-    if (summary && this.assistFlags?.summarize) this.applySummary(summary, true);
-    const replies = this.replyCache.get(assistKey(this.folder, this.conversationUids(true)));
-    if (replies && this.assistFlags?.replies) this.replies = replies;
-  }
-
-  private async consent(kind: "mail" | "query" = "mail"): Promise<boolean> {
-    if (this.noticeAck) return true;
-    const name = this.assistFlags?.providerName || t("AI_COPILOT.THE_PROVIDER", "den Anbieter");
-    const text = (kind === "query"
-      ? t("AI_COPILOT.CONSENT_QUERY", "Ihre Suchanfrage geht an %PROVIDER%, die Mails bleiben dabei auf dem Server. Diese Einwilligung gilt auch für spätere KI-Aktionen, die nach einem Klick Mailinhalte an %PROVIDER% senden. Fortfahren?")
-      : t("AI_COPILOT.CONSENT_MAIL", "Diese KI-Funktion sendet den Inhalt der betroffenen Mails an %PROVIDER%. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?")
-    ).replace(/%PROVIDER%/g, name);
-    const ok = await this.view.confirmConsent(text);
-    if (!ok) return false;
-    try {
-      await plugin("AiSaveSettings", { settings: { notice_ack: true } });
-    } catch { /* the choice still stands for this session */ }
-    this.noticeAck = true;
-    return true;
-  }
-
-  /** Tags on explicit user actions only, and not more often than needed. */
-  private async ensureTagged(): Promise<void> {
-    if (this.category === "all" || !this.assistFlags?.triage || !this.assistFlags.tabs) return;
-    if (Date.now() - (this.tagged.get(this.folder) || 0) < TAG_MAX_AGE_MS) return;
-    await plugin("AiTriageTag", { folder: this.folder, sent: this.sentFolder });
-    this.tagged.set(this.folder, Date.now());
-  }
-
-  private refreshAlerts(force: boolean): void {
-    if (!this.assistFlags?.alerts) return;
-    if (force || Date.now() - this.alertsLoadedAt >= ALERT_MIN_INTERVAL_MS) void this.loadAlerts();
-  }
-
-  private async openAssistMail(folder: string, uid: number): Promise<void> {
-    if (folder !== this.folder) await this.selectFolder(folder);
-    await this.selectMessage(uid);
-    this.view.showReaderPane();
-  }
-
-  private async loadAlerts(): Promise<void> {
-    const generation = this.accountGeneration;
-    const inbox = this.folders.find((folder) => folder.role === "inbox")?.fullName || "INBOX";
-    try {
-      this.alertsLoadedAt = Date.now();
-      const result = await plugin<{ alerts: { type: string; folder: string; uid: number; title: string }[] }>("AiAlerts", {
-        inbox,
-        sent: this.sentFolder
-      });
-      if (generation !== this.accountGeneration) return;
-      this.alertItems = result.alerts || [];
-      this.alertCursor = {};
-      const count = (type: string) => this.alertItems.filter((item) => item.type === type).length;
-      this.view.setAlerts(count("reply"), count("followup"), count("invoice"), this.alertDues);
-    } catch {
-      /* Hinweise sind ergänzend */
-    }
-  }
-
-  /** Text for an assistant failure. Missing consent reopens the notice instead of a dead end. */
-  private assistError(error: unknown, retry?: () => void): string {
-    if (error instanceof ApiError && error.reason === "consent_required") {
-      this.noticeAck = false;
-      if (retry) void this.consent().then((granted) => { if (granted) retry(); });
-      return t("AI_COPILOT.ERROR_CONSENT_REQUIRED", "Bitte bestätigen Sie zuerst den Hinweis zur Übermittlung an den KI-Anbieter.");
-    }
-    return error instanceof ApiError && error.reason ? t(`AI_COPILOT.ERROR_${error.reason.toUpperCase()}`, explain(error)) : explain(error);
-  }
-
-  private async assist(name: string, data: Record<string, string | undefined>): Promise<void> {
-    if (!SINGLE_RUN_ACTIONS.has(name)) {
-      await this.runAssist(name, data);
-      return;
-    }
-    if (this.assistRunning.has(name)) return;
-    this.assistRunning.add(name);
-    this.view.setAssistBusy(name, true);
-    try {
-      await this.runAssist(name, data);
-    } finally {
-      this.assistRunning.delete(name);
-      this.view.setAssistBusy(name, false);
-    }
-  }
-
-  private async runAssist(name: string, data: Record<string, string | undefined>): Promise<void> {
-    if (name === "cat") {
-      this.category = data.cat || "all";
-      try {
-        await this.ensureTagged();
-      } catch (error) {
-        this.view.notice(explain(error));
-        return;
-      }
-      this.offset = 0;
-      await this.loadList(false);
-      return;
-    }
-    if (name === "alert") {
-      // The counter and the clicks cover exactly the same mails: each click opens the next one.
-      const type = data.kind === "follow" ? "followup" : data.kind === "invoice" ? "invoice" : "reply";
-      const items = this.alertItems.filter((item) => item.type === type);
-      if (!items.length) return;
-      const position = (this.alertCursor[type] || 0) % items.length;
-      this.alertCursor[type] = position + 1;
-      await this.openAssistMail(items[position].folder, items[position].uid);
-      return;
-    }
-    if (name === "open-due") {
-      const uid = Number(data.mailUid || 0);
-      if (uid && data.folder) await this.openAssistMail(data.folder, uid);
-      return;
-    }
-    if (name === "ask") {
-      if (this.chatBusy) return;
-      this.chatBusy = true;
-      if (!await this.consent()) {
-        this.chatBusy = false;
-        this.view.setChat(this.turns, "", this.contextLabel());
-        return;
-      }
-    }
-    if (name === "summarize" || name === "replies" || name === "generate" || name === "triage" || name === "deadlines") {
-      if (!await this.consent()) return;
-    }
-    if (name === "lang-search") {
-      if (!await this.consent("query")) return;
-      const query = data.text || "";
-      const input = document.querySelector("#search") as HTMLInputElement | null;
-      const text = query || input?.value.trim() || "";
-      if (!text) return;
-      this.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
-      try {
-        const result = await plugin<{ search: string; explanation?: string; folder?: string }>("AiSearch", {
-          query: text,
-          folders: this.folders.map((folder) => folder.fullName),
-          currentFolder: this.folder,
-          sent: this.sentFolder,
-          timezone: timezone()
-        });
-        // Nothing changes until the user accepts the suggestion with "Suchen".
-        this.translatedFolder = result.folder || "";
-        this.view.notice("");
-        this.view.showTranslation(result.search, [result.explanation, result.folder].filter(Boolean).join(" · "));
-      } catch (error) {
-        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
-      }
-      return;
-    }
-    if (name === "run-search") {
-      const field = document.querySelector("#translate-q") as HTMLInputElement | null;
-      const query = field?.value.trim() || "";
-      this.category = "all";
-      this.view.pressCategory("all");
-      if (this.translatedFolder && this.translatedFolder !== this.folder) await this.selectFolder(this.translatedFolder);
-      this.translatedFolder = "";
-      await this.setSearch(query);
-      return;
-    }
-    if (name === "summarize" && this.current) {
-      const scope = this.messageScope();
-      const uids = this.conversationUids();
-      const key = assistKey(this.folder, uids);
-      const known = data.force === "1" ? undefined : this.summaryCache.get(key);
-      if (known) {
-        this.applySummary(known, true);
-        this.paintStrip();
-        return;
-      }
-      this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.SUMMARIZING", "Verlauf wird zusammengefasst …"), tldr: "" });
-      try {
-        const result = await plugin<{ summary: AssistSummary }>("AiSummarize", {
-          folder: this.folder,
-          uids,
-          sent: this.sentFolder
-        }, scope.signal);
-        this.summaryCache.set(key, result.summary || {});
-        if (!scope.live()) return;
-        this.applySummary(result.summary || {}, false);
-        this.paintStrip();
-      } catch (error) {
-        if (scope.live()) this.view.setStrip({ ...this.strip(), error: this.assistError(error, () => void this.assist(name, data)) });
-      }
-      return;
-    }
-    if (name === "replies" && this.current) {
-      const scope = this.messageScope();
-      this.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.GENERATING_REPLIES", "Antwortvorschläge werden erstellt …") });
-      try {
-        const uids = this.conversationUids(true);
-        const key = assistKey(this.folder, uids);
-        const result = await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
-          folder: this.folder,
-          uids,
-          sent: this.sentFolder
-        }, scope.signal);
-        const replies = (result.replies || []).slice(0, 3);
-        this.replyCache.set(key, replies);
-        if (!scope.live()) return;
-        this.replies = replies;
-        this.paintStrip();
-      } catch (error) {
-        if (scope.live()) this.view.setStrip({ ...this.strip(), error: this.assistError(error, () => void this.assist(name, data)) });
-      }
-      return;
-    }
-    if (name === "use-reply") {
-      const reply = this.replies[Number(data.index || 0)];
-      if (!reply || !this.current) return;
-      this.openReply(false, { text: reply.body, title: reply.label, assisted: true });
-      return;
-    }
-    if (name === "bulk-summarize") {
-      if (!this.checked.size) return;
-      if (!await this.consent()) return;
-      this.bulkSummaryLoading = t("AI_COPILOT.BULK_SUMMARIZING", "Ausgewählte Mails werden zusammengefasst …");
-      this.bulkSummaryError = "";
-      this.paintBulk();
-      try {
-        const key = assistKey(this.folder, [...this.checked]);
-        const known = data.force === "1" ? undefined : this.summaryCache.get(key);
-        const summary = known || (await plugin<{ summary: AssistSummary }>("AiSummarize", {
-          folder: this.folder,
-          uids: [...this.checked],
-          selection: true
-        })).summary || {};
-        this.summaryCache.set(key, summary);
-        this.bulkSummary = {
-          tldr: summary.tldr || "",
-          points: Array.isArray(summary.points) ? summary.points : [],
-          decisions: Array.isArray(summary.decisions) ? summary.decisions : [],
-          actions: (Array.isArray(summary.actions) ? summary.actions : []).map(summaryActionText),
-          next: summary.next || "",
-          shown: Number(summary.count) || this.checked.size,
-          cached: Boolean(known),
-          model: summary.model || this.assistFlags?.provider || ""
-        };
-        this.bulkSummaryLoading = "";
-      } catch (error) {
-        this.bulkSummaryLoading = "";
-        this.bulkSummaryError = this.assistError(error);
-      }
-      this.paintBulk();
-      return;
-    }
-    if (name === "bulk-replies") {
-      if (!this.checked.size) return;
-      if (!await this.consent()) return;
-      this.bulkRepliesLoading = t("AI_COPILOT.GENERATING_BULK_REPLIES", "Antwortvorschläge für ausgewählte Mails werden erstellt …");
-      this.bulkRepliesError = "";
-      this.paintBulk();
-      const checkedUids = [...this.checked];
-      const targetMsgs = checkedUids
-        .map((uid) => this.messages.find((m) => m.uid === uid))
-        .filter((m): m is Msg => Boolean(m))
-        .slice(0, BULK_REPLY_LIMIT);
-      try {
-        const results = await Promise.allSettled(
-          targetMsgs.map((msg) => bulkReplySlots.run(async () => {
-            const key = assistKey(this.folder, [msg.uid]);
-            const replies = this.replyCache.get(key) || ((await plugin<{ replies: AssistReply[] }>("AiQuickReplies", {
-              folder: this.folder,
-              uids: [msg.uid],
-              sent: this.sentFolder
-            })).replies || []).slice(0, 3);
-            this.replyCache.set(key, replies);
-            return {
-              uid: msg.uid,
-              subject: msg.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)"),
-              who: label(msg.from[0] || { name: "", email: "" }) || t("GLOBAL.UNKNOWN", "(unbekannt)"),
-              replies
-            };
-          }))
-        );
-        const successful: BulkReplyItem[] = [];
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value.replies.length > 0) {
-            successful.push(r.value);
-          }
-        }
-        if (!successful.length) {
-          this.bulkRepliesError = t("AI_COPILOT.NO_REPLIES_GENERATED", "Keine Antwortvorschläge für die ausgewählten Mails erhalten.");
-        } else {
-          this.bulkRepliesList = successful;
-        }
-        this.bulkRepliesLoading = "";
-      } catch (error) {
-        this.bulkRepliesLoading = "";
-        this.bulkRepliesError = this.assistError(error);
-      }
-      this.paintBulk();
-      return;
-    }
-    if (name === "use-bulk-reply") {
-      const uid = Number(data.uid || 0);
-      const index = Number(data.index || 0);
-      const item = this.bulkRepliesList.find((r) => r.uid === uid);
-      const reply = item?.replies[index];
-      if (!reply) return;
-      const generation = this.accountGeneration;
-      try {
-        // List rows carry no body, so the quote needs the full message.
-        const message = this.parseMessage(await call<Record<string, unknown>>("Message", { folder: this.folder, uid }), true);
-        if (generation === this.accountGeneration) this.openReply(false, { message, text: reply.body, title: reply.label, assisted: true });
-      } catch (error) {
-        this.view.notice(explain(error));
-      }
-      return;
-    }
-    if (name === "triage") {
-      this.view.notice(t("AI_COPILOT.TRIAGE_DISCLOSURE", "Absender, Betreff und Vorschau dieser Seite gehen an das Modell."));
-      try {
-        const result = await plugin<{ stored?: number; warning?: string }>("AiTriageLlm", {
-          folder: this.folder,
-          items: this.messages.map((message) => ({
-            uid: message.uid,
-            from: message.from.map(label).join(", "),
-            to: message.to.map(address).join(", "),
-            cc: message.cc.map(address).join(", "),
-            subject: message.subject,
-            preview: message.preview,
-            bulk: message.category === "newsletter" || message.category === "notification"
-          }))
-        });
-        this.view.notice(result.warning || t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
-        await this.loadList(false);
-      } catch (error) {
-        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
-      }
-      return;
-    }
-    if (name === "deadlines") {
-      const items = this.alertItems.filter((item) => item.type !== "followup").slice(0, 8);
-      if (!items.length) {
-        this.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
-        return;
-      }
-      this.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
-      try {
-        const result = await plugin<{ alerts: DueItem[] }>("AiAlertsLlm", { items, timezone: timezone() });
-        this.alertDues = (result.alerts || []).filter((item) => item.due);
-        this.view.setAlerts(
-          this.alertItems.filter((item) => item.type === "reply").length,
-          this.alertItems.filter((item) => item.type === "followup").length,
-          this.alertItems.filter((item) => item.type === "invoice").length,
-          this.alertDues
-        );
-        this.view.notice(this.alertDues.length ? "" : t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
-      } catch (error) {
-        this.view.notice(this.assistError(error, () => void this.assist(name, data)));
-      }
-      return;
-    }
-    if (name === "ask") {
-      const text = (data.text || "").trim();
-      if (!text) {
-        this.chatBusy = false;
-        return;
-      }
-      const area = document.querySelector("#ask") as HTMLTextAreaElement | null;
-      if (area) area.value = "";
-      this.chat.push({ role: "user", content: text });
-      this.turns.push({ role: "user", text, trace: [], actions: [] });
-      this.view.setChat(this.turns, t("AI_COPILOT.CHAT_WORKING", "Copilot arbeitet …"), this.contextLabel());
-      const controller = new AbortController();
-      this.chatAbort = controller;
-      try {
-        const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: { summary?: string }[]; known?: string[] }>("AiChat", {
-          messages: this.chat,
-          context: this.useContext && this.current ? { folder: this.folder, uid: this.current.uid } : {},
-          folders: this.folders.map((folder) => folder.fullName),
-          known: this.chatKnown,
-          sent: this.sentFolder,
-          timezone: timezone()
-        }, controller.signal);
-        this.chatKnown = result.known || [];
-        this.chat.push({ role: "assistant", content: result.reply || "" });
-        this.turns.push({
-          role: "assistant",
-          text: result.reply || "",
-          trace: (result.trace || []).map((item) => item.summary || "").filter(Boolean),
-          actions: (result.actions || []).map((payload) => ({ label: String(payload.label || payload.type || ""), state: "", payload }))
-        });
-        this.view.setChat(this.turns, "", this.contextLabel());
-      } catch (error) {
-        // Take the question back so sending it again is one deliberate click.
-        this.chat.pop();
-        this.turns.pop();
-        if (area) area.value = text;
-        const aborted = error instanceof Error && error.name === "AbortError";
-        this.view.setChat(this.turns, aborted ? "" : "!" + this.assistError(error, () => void this.assist(name, data)), this.contextLabel());
-      } finally {
-        this.chatBusy = false;
-        this.chatAbort = null;
-      }
-      return;
-    }
-    if (name === "stop-chat") {
-      this.chatAbort?.abort();
-      return;
-    }
-    if (name === "drop-context") {
-      this.useContext = false;
-      this.view.setChat(this.turns, "", "");
-      return;
-    }
-    if (name === "dismiss-action") {
-      const action = chatActionAt(this.turns, Number(data.turn), Number(data.index));
-      if (action && !action.state) action.state = t("AI_COPILOT.ACTION_DISMISSED", "Verworfen");
-      this.view.setChat(this.turns, "", this.contextLabel());
-      return;
-    }
-    if (name === "run-action") {
-      await this.runChatAction(Number(data.turn), Number(data.index));
-      return;
-    }
-    if (name === "generate") await this.generate();
-    if (name === "stop-generate") this.draftAbort?.abort();
-    if (name === "revert-draft") this.view.setDraftBody(this.draftBackup);
-    if (name === "apply-subject") {
-      const hint = document.querySelector("#subject-hint") as HTMLElement | null;
-      const subject = hint?.dataset.subject || "";
-      const field = document.querySelector("input[name='subject']") as HTMLInputElement | null;
-      if (field && subject) field.value = subject;
-    }
-  }
-
-  private contextLabel(): string {
-    if (!this.useContext || !this.current) return "";
-    return this.current.subject || t("MESSAGE.NO_SUBJECT", "(ohne Betreff)");
-  }
-
-  private async generate(): Promise<void> {
-    const options = this.view.draftOptions();
-    if (options.body.length > DRAFT_TEXT_LIMIT) {
-      this.view.setDraftBusy(false, t("AI_COPILOT.DRAFT_TOO_LONG", "Der Text ist für die KI zu lang (höchstens %MAX% Zeichen).").replace("%MAX%", String(DRAFT_TEXT_LIMIT)));
-      return;
-    }
-    // Only an actual reply carries a message; a new mail must not leak whatever is open.
-    const context = options.mode === "reply"
-      ? options.context || (this.current ? { folder: this.current.folder, uid: this.current.uid } : null)
-      : null;
-    this.draftBackup = options.body;
-    const contextUids = context
-      ? (context.uid === this.current?.uid && context.folder === this.folder ? this.conversationUids(true) : [context.uid])
-      : [];
-    this.draftAbort = new AbortController();
-    this.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben …"));
-    let streamed = "";
-    try {
-      await streamEvents("AiStream", {
-        mode: options.mode,
-        tone: options.tone,
-        instruction: options.instruction,
-        current: options.body,
-        wantSubject: options.mode === "new" || options.mode === "reply",
-        folder: context?.folder || "",
-        uids: contextUids,
-        sent: this.sentFolder
-      }, (event, payload) => {
-        if (event === "delta") {
-          streamed += String(payload.text || "");
-          this.view.setDraftBody(streamed);
-        }
-        if (event === "done") {
-          this.view.setDraftBody(String(payload.body || streamed));
-          this.view.setSubjectHint(String(payload.subject || ""));
-          this.summaryModel = String(payload.model || "");
-        }
-        if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")), "", String(payload.code || ""));
-      }, this.draftAbort.signal);
-      this.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingefügt.")}${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        this.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."));
-        return;
-      }
-      this.view.setDraftBusy(false, this.assistError(error, () => void this.generate()));
-    }
-  }
-
-  private async runChatAction(turnIndex: number, index: number): Promise<void> {
-    const entry = chatActionAt(this.turns, turnIndex, index);
-    if (!entry || entry.state) return;
-    const action = entry.payload;
-    const type = String(action.type || "");
-    const folder = String(action.folder || this.folder);
-    const uids = Array.isArray(action.uids) ? action.uids.map(String).join(",") : "";
-    try {
-      if (type === "delete") {
-        if (!await this.view.confirmDelete()) return;
-        await call("MessageDelete", { folder, uids });
-      } else if (type === "archive") {
-        if (!this.archiveFolder) throw new ApiError(1, t("AI_COPILOT.NO_ARCHIVE", "Kein Archiv-Ordner eingerichtet."));
-        await call("MessageMove", { fromFolder: folder, toFolder: this.archiveFolder, uids });
-      } else if (type === "move") {
-        await call("MessageMove", { fromFolder: folder, toFolder: String(action.to || ""), uids });
-      } else if (type === "mark_read" || type === "mark_unread") {
-        await call("MessageSetSeen", { folder, uids, setAction: type === "mark_read" ? 1 : 0 });
-      } else if (type === "flag" || type === "unflag") {
-        await call("MessageSetFlagged", { folder, uids, setAction: type === "flag" ? 1 : 0 });
-      } else if (type === "open" || type === "reply") {
-        await this.selectFolder(folder);
-        await this.selectMessage(Number(action.uid || 0));
-        if (type === "reply") this.openReply(false, { instruction: String(action.instruction || "") });
-        this.view.closeSheet();
-      } else if (type === "compose") {
-        this.openNew({ to: String(action.to || ""), subject: String(action.subject || ""), instruction: String(action.instruction || "") });
-        this.view.closeSheet();
-      } else if (type === "search") {
-        if (folder) await this.selectFolder(folder);
-        await this.setSearch(String(action.search || ""));
-      }
-      entry.state = t("AI_COPILOT.ACTION_DONE", "Erledigt");
-      this.view.setChat(this.turns, "", this.contextLabel());
-      if (uids) {
-        await this.loadList(false);
-        this.refreshAlerts(true);
-      }
-    } catch (error) {
-      entry.state = explain(error);
-      this.view.setChat(this.turns, "", this.contextLabel());
-    }
   }
 }
