@@ -2053,8 +2053,11 @@ class Session implements AssistHost {
   }
 
   private async loadAccounts(): Promise<void> {
+    const generation = this.accountGeneration;
     try {
       const result = await call<{ Accounts?: unknown }>("AccountsAndIdentities");
+      // After a logout or account switch the old session's token is no longer valid.
+      if (generation !== this.accountGeneration) return;
       const list = (Array.isArray(result.Accounts) ? result.Accounts : Object.values((result.Accounts || {}) as object)) as { email?: string }[];
       const main = this.mainEmail || this.email;
       const emails = [main, ...list.map((item) => String(item.email || ""))].filter((email, index, all) => email && all.indexOf(email) === index);
@@ -2066,9 +2069,9 @@ class Session implements AssistHost {
           item.unread = Number(info.unreadEmails || 0);
         } catch { /* Konto gerade nicht erreichbar */ }
       }));
-      this.view.setAccounts(items);
+      if (generation === this.accountGeneration) this.view.setAccounts(items);
     } catch {
-      this.view.setAccounts([]);
+      if (generation === this.accountGeneration) this.view.setAccounts([]);
     }
   }
 
