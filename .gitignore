@@ -30,3 +30,4 @@
 /integrations/nextcloud/rainloop
 /integrations/owncloud/rainloop
 ui/icons.html
+docs/deployment-hybrid-headscale.md
