@@ -53,7 +53,6 @@ $keys = [
 
 $released = [
 	'add-x-originating-ip-header',
-	'attachments-force-open',
 	'avatars',
 	'backup',
 	'black-list',
@@ -69,10 +68,8 @@ $released = [
 	'change-password-poppassd',
 	'compact-composer',
 	'custom-login-mapping',
-	'haveibeenpwned',
 	'ics-viewer',
 	'imap-contacts-suggestions',
-	'kolab',
 	'ldap-contacts-suggestions',
 	'ldap-identities',
 	'ldap-login-mapping',
@@ -89,18 +86,14 @@ $released = [
 	'login-remote',
 	'login-virtuser',
 	'mailbox-detect',
-	'nextcloud',
 	'override-smtp-credentials',
 	'proxy-auth',
 	'proxy-mapping',
-	'search-filters',
 	'security-mxss',
-	'send-save-in',
 	'set-remote-addr',
 	'smtp-use-from-adr-account',
 	'snowfall-on-login-screen',
 	'two-factor-auth',
-	'view-ics',
 	'white-list'
 ];
 

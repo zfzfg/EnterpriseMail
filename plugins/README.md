@@ -522,7 +522,6 @@ Converts text to HTML
 Examples in
 * ./change-password/js/ChangePasswordUserSettings.js
 * ./example/js/ExampleUserSettings.js
-* ./kolab/js/settings.js
 * ./two-factor-auth/js/TwoFactorAuthSettings.js
 
 ## rl.addSettingsViewModelForAdmin(SettingsViewModelClass, template, labelName, route)​
