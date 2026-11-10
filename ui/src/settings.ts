@@ -362,6 +362,11 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
     });
     return "reload";
   }
+  if (name === "assist-revoke") {
+    // Only the consent flag: the server keeps every setting that is not sent.
+    await plugin("AiSaveSettings", { settings: { notice_ack: false } });
+    return "reload";
+  }
   if (name === "delete-account") {
     await call("AccountDelete", { emailToDelete: data.email });
     return data.email === snap.currentEmail ? "session" : "reload";
@@ -839,7 +844,7 @@ export function renderAssistant(snap: SettingsSnapshot): string {
       <p class="quiet">${esc(t("AI_COPILOT.PRIVACY", "Der Assistent sendet Brieftext erst nach einer Einwilligung an den Anbieter."))}</p>
       ${check("notice_ack", t("AI_COPILOT.NOTICE", "Einwilligung bleibt gespeichert"), Boolean(settings.notice_ack))}
       <button type="button" class="text-btn" data-action="assist-revoke">${esc(t("AI_COPILOT.REVOKE", "Einwilligung zurücknehmen"))}</button>
-      <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc(t("GLOBAL.SAVE", "Speichern"))}</span></div>
+      <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
     </form>`;
 }
 

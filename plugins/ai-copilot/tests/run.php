@@ -766,6 +766,11 @@ same(['mistral'], $oPlugin->settings['notice_profiles'], 'The browser chose the 
 $oPlugin->params = ['settings' => ['notice_ack' => false]];
 $oPlugin->DoSaveSettings();
 same([], $oPlugin->settings['notice_profiles'], 'Revocation kept provider consent.');
+$oPlugin = new StreamTestPlugin(['settings' => ['notice_ack' => false]], false);
+$oPlugin->settings = ['enabled' => true, 'tone' => 'formal', 'name' => 'Ada', 'features' => ['chat' => false], 'notice_ack' => true, 'notice_profiles' => ['mistral']];
+$aRevoked = $oPlugin->DoSaveSettings()['settings'] ?? [];
+same(false, $aRevoked['notice_ack'] ?? true, 'Revocation left consent in place.');
+same([true, 'formal', 'Ada', ['chat' => false]], [$aRevoked['enabled'] ?? null, $aRevoked['tone'] ?? null, $aRevoked['name'] ?? null, $aRevoked['features'] ?? null], 'Revocation changed other assistant settings.');
 
 /* Chat actions are limited to mails the model actually received. */
 $sMailFolders = ['INBOX', 'Archiv'];

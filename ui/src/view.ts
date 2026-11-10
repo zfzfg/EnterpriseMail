@@ -1119,9 +1119,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const audio = new Audio(`${location.pathname.replace(/\/+$/, "")}/snappymail/v/0.0.0/static/sounds/${encodeURIComponent(name)}.mp3`);
         void audio.play().catch(() => undefined);
       } else if (action === "assist-revoke") {
-        const box = shell?.querySelector<HTMLInputElement>("input[name='notice_ack']");
-        if (box) box.checked = false;
-        void actions.settings?.("assist-save", { notice_ack: "" });
+        void actions.settings?.("assist-revoke", {});
       } else if (action === "rule-add" || action === "cond-add" || action === "act-add" || action === "rule-remove" || action === "cond-remove" || action === "act-remove") {
         editFilterDom(target, action);
       } else if (action === "script-mode") {

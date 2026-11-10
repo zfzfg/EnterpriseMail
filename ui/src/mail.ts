@@ -620,7 +620,7 @@ class Session implements AssistHost {
       }
       if (!this.desk) return;
       const next = await applyDesk(name, data, this.desk);
-      if (name === "assist-save") {
+      if (name === "assist-save" || name === "assist-revoke") {
         await this.assistant.reloadSettings(this.composeData);
       }
       if (next === "session") {
