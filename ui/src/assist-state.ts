@@ -45,6 +45,16 @@ export function summaryActionText(action: { who?: string; what?: string; due?: s
   return `${action.who ? `${action.who}: ` : ""}${action.what || ""}${action.due ? ` (${action.due})` : ""}`;
 }
 
+/** A deadline the model returned as YYYY-MM-DD, written the way the UI language writes dates; anything else stays as it came. */
+export function dueLabel(due: string, locale: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(due.trim());
+  if (!match) return due;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return due;
+  return new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
+}
+
 /** Session cache key for an assistant result about these mails. */
 export function assistKey(folder: string, uids: number[]): string {
   return `${folder}\n${[...uids].sort((a, b) => a - b).join(",")}`;

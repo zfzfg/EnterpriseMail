@@ -1153,9 +1153,7 @@
         "NO_RESULTS": "Keine Treffer"
     },
     "AI_COPILOT": {
-        "NAME": "Eigener Name",
-        "NOTICE": "Einwilligung bleibt gespeichert",
-        "PRIVACY": "Der Assistent sendet Mailinhalte erst nach Ihrer Einwilligung an den Anbieter.",
+        "NAME": "Eigener Name",        "PRIVACY": "Der Assistent sendet Mailinhalte erst nach Ihrer Einwilligung an den Anbieter.",
         "REVOKE": "Einwilligung zurücknehmen",
         "TITLE": "Assistent",
         "TAG": "KI",
@@ -1175,7 +1173,7 @@
         "CAT_NEWSLETTER": "Newsletter",
         "CAT_NOTIFICATION": "Benachrichtigungen",
         "CAT_INVOICE": "Rechnungen",
-        "ENABLED": "KI-Funktionen verwenden",
+        "ENABLED": "Assistent für dieses Konto verwenden",
         "FEATURE_SUMMARIZE": "Zusammenfassungen",
         "FEATURE_DRAFT": "Entwürfe, Umschreiben, Korrekturlesen",
         "FEATURE_QUICK_REPLIES": "Antwortvorschläge",
@@ -1292,6 +1290,26 @@
         "NO_FILTER_MATCH": "Keine Mails für diesen Filter.",
         "BULK_REPLIES_LIMIT": "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.",
 
+        "GROUP_FEATURES": "Funktionen",
+
+        "GROUP_WRITING": "Schreiben",
+
+        "GROUP_PRIVACY": "Datenschutz",
+
+        "LANGUAGE": "Sprache der Antworten",
+
+        "NAME_HELP": "Unter diesem Namen kennt Sie der Assistent, etwa für den Gruß am Ende.",
+
+        "STYLE_HELP": "Hinweise für Entwürfe, zum Beispiel: kurz, per Sie, ohne Floskeln.",
+
+        "ADDRESSES_HELP": "Weitere Adressen, unter denen Sie schreiben, durch Komma getrennt. Daran erkennt der Assistent Ihre eigenen Mails.",
+
+        "PROVIDER_LINE": "Anbieter: %PROVIDER% · Modell: %MODEL%",
+
+        "CONSENT_GIVEN": "Einwilligung erteilt.",
+
+        "CONSENT_MISSING": "Noch keine Einwilligung. Sie werden bei der ersten KI-Aktion gefragt.",
+
         "DRAFT_OPEN": "Mit KI schreiben",
 
         "DRAFT_REVERTED": "Vorheriger Text wiederhergestellt.",
@@ -1339,7 +1357,7 @@
         "ACTION_SEARCH": "Suchen",
         "ONE_MAIL": "1 Mail",
         "MANY_MAILS": "%COUNT% Mails",
-        "ALERTS_TODAY": "Heute",
+        "ALERTS_TODAY": "Im Blick",
         "ALERT_REPLY": "Offene Antworten",
         "ALERT_FOLLOW": "Ohne Antwort",
         "ALERT_INVOICE": "Rechnungen",

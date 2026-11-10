@@ -12,6 +12,8 @@ export interface AssistFlags {
   tone: string;
   chat: boolean;
   alerts: boolean;
+  /** Reading deadlines needs the model; the alert counts themselves are rule-based. */
+  alertsLlm: boolean;
   provider: string;
   providerName: string;
   noticeAck: boolean;
@@ -57,6 +59,7 @@ export async function readAssist(app: Record<string, unknown>, load: () => Promi
     tone: String(settings.tone || "professional"),
     chat: on(admin, settings, providers, "chat", "chat"),
     alerts: on(admin, settings, providers, "alerts"),
+    alertsLlm: on(admin, settings, providers, "alerts") && providers.default?.ready !== false,
     provider: "",
     // Consent covers every routed provider, so the notice has to name all of them.
     providerName: [...new Set(["default", "triage", "search", "chat"].map((route) => String(providers[route]?.name || "")).filter(Boolean))].join(" / "),

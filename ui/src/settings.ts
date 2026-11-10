@@ -356,8 +356,7 @@ export async function applyDesk(name: string, data: Record<string, string>, snap
         language: data.language || "auto",
         name: data.name || "",
         style: data.style || "",
-        addresses: data.addresses || "",
-        notice_ack: data.notice_ack === "1"
+        addresses: data.addresses || ""
       }
     });
     return "reload";
@@ -819,31 +818,46 @@ const ASSIST_TONES: Record<string, string> = {
   formal: "Förmlich"
 };
 
+/** Features that only work with a model, and the provider route each one uses. */
+const ASSIST_ROUTES: Record<string, string> = { summarize: "default", draft: "default", quick_replies: "default", search: "search", triage_llm: "triage", chat: "chat" };
+
 export function renderAssistant(snap: SettingsSnapshot): string {
   const settings = snap.assist;
   if (!settings) return note(t("SETTINGS_DESK.UNAVAILABLE", "Nicht verfügbar."));
   const features = (settings.features || {}) as Record<string, boolean>;
-  const admin = (((snap.app.Plugins as Record<string, { features?: Record<string, boolean> }> | undefined)?.["ai-copilot"])?.features) || {};
-  const providers = ((snap.app.Plugins as Record<string, { providers?: Record<string, { name?: string; model?: string }> }> | undefined)?.["ai-copilot"])?.providers || {};
+  const section = (snap.app.Plugins as Record<string, { features?: Record<string, boolean>; providers?: Record<string, { name?: string; model?: string; ready?: boolean }> }> | undefined)?.["ai-copilot"];
+  const admin = section?.features || {};
+  const providers = section?.providers || {};
   const provider = providers.default;
+  const ready = (name: string) => !(name in ASSIST_ROUTES) || (providers[ASSIST_ROUTES[name]] || provider)?.ready !== false;
   const tones = (snap.assistTones.length ? snap.assistTones : ["professional"]).map((tone) => [tone, tone] as [string, string]);
-  const boxes = ASSIST_FEATURES.filter(([name]) => admin[name] !== false).map(([name, label]) =>
-    prefCheck(`feature:${name}`, t(`AI_COPILOT.FEATURE_${name.toUpperCase()}`, label), features[name] !== false)
+  const allowed = ASSIST_FEATURES.filter(([name]) => admin[name] !== false);
+  // A feature that cannot run is not offered, but its stored choice travels along unchanged.
+  const boxes = allowed.map(([name, label]) => ready(name)
+    ? check(`feature:${name}`, t(`AI_COPILOT.FEATURE_${name.toUpperCase()}`, label), features[name] !== false)
+    : `<input type="hidden" name="feature:${name}" value="${features[name] !== false ? "1" : ""}">`
   ).join("");
+  const helped = (label: string, name: string, value: string, type: string, help: string) =>
+    field(label, name, value, type, type === "area" ? "short" : "").replace("</label>", `<small class="quiet field-help">${esc(help)}</small></label>`);
+  const group = (title: string) => `<p class="mono quiet">${esc(title)}</p>`;
+  const consent = Boolean(settings.notice_ack);
   return `
     <p class="mono">${esc(t("AI_COPILOT.TITLE", "Assistent"))}</p>
     <form class="fields" data-action="settings-form" data-kind="assist-save">
-      ${check("enabled", t("AI_COPILOT.ENABLED", "KI-Funktionen verwenden"), settings.enabled !== false)}
-      ${boxes.replace(/data-pref=/g, "name=").replace(/type="checkbox"/g, "type=\"checkbox\"")}
+      ${check("enabled", t("AI_COPILOT.ENABLED", "Assistent für dieses Konto verwenden"), settings.enabled !== false)}
+      ${group(t("AI_COPILOT.GROUP_FEATURES", "Funktionen"))}
+      ${boxes}
+      ${allowed.some(([name]) => !ready(name)) ? note(t("AI_COPILOT.ERROR_PROVIDER_NOT_CONFIGURED", "Dieser KI-Anbieter ist noch nicht eingerichtet. Bitte wenden Sie sich an Ihre Administration.")) : ""}
+      ${group(t("AI_COPILOT.GROUP_WRITING", "Schreiben"))}
       <label class="field"><span>${esc(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc(t(`AI_COPILOT.TONE_${value.toUpperCase()}`, ASSIST_TONES[value] || value))}</option>`).join("")}</select></label>
-      ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace("data-pref=\"language\"", "name=\"language\"")}
-      ${field(t("AI_COPILOT.NAME", "Eigener Name"), "name", String(settings.name || ""))}
-      ${field(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area")}
-      ${field(t("AI_COPILOT.ADDRESSES", "Eigene Adressen"), "addresses", String(settings.addresses || ""), "area")}
-      <p class="quiet">${esc(provider ? `${provider.name || ""} ${provider.model || ""}`.trim() : "")}</p>
+      ${prefSelect("language", t("AI_COPILOT.LANGUAGE", "Sprache der Antworten"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace("data-pref=\"language\"", "name=\"language\"")}
+      ${helped(t("AI_COPILOT.NAME", "Eigener Name"), "name", String(settings.name || ""), "text", t("AI_COPILOT.NAME_HELP", "Unter diesem Namen kennt Sie der Assistent, etwa für den Gruß am Ende."))}
+      ${helped(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area", t("AI_COPILOT.STYLE_HELP", "Hinweise für Entwürfe, zum Beispiel: kurz, per Sie, ohne Floskeln."))}
+      ${helped(t("AI_COPILOT.ADDRESSES", "Eigene Adressen"), "addresses", String(settings.addresses || ""), "area", t("AI_COPILOT.ADDRESSES_HELP", "Weitere Adressen, unter denen Sie schreiben, durch Komma getrennt. Daran erkennt der Assistent Ihre eigenen Mails."))}
+      ${group(t("AI_COPILOT.GROUP_PRIVACY", "Datenschutz"))}
+      ${provider ? `<p class="quiet">${esc(t("AI_COPILOT.PROVIDER_LINE", "Anbieter: %PROVIDER% · Modell: %MODEL%").replace("%PROVIDER%", provider.name || "–").replace("%MODEL%", provider.model || "–"))}</p>` : ""}
       <p class="quiet">${esc(t("AI_COPILOT.PRIVACY", "Der Assistent sendet Mailinhalte erst nach Ihrer Einwilligung an den Anbieter."))}</p>
-      ${check("notice_ack", t("AI_COPILOT.NOTICE", "Einwilligung bleibt gespeichert"), Boolean(settings.notice_ack))}
-      <button type="button" class="text-btn" data-action="assist-revoke">${esc(t("AI_COPILOT.REVOKE", "Einwilligung zurücknehmen"))}</button>
+      <p class="assist-consent"><span>${esc(consent ? t("AI_COPILOT.CONSENT_GIVEN", "Einwilligung erteilt.") : t("AI_COPILOT.CONSENT_MISSING", "Noch keine Einwilligung. Sie werden bei der ersten KI-Aktion gefragt."))}</span>${consent ? `<button type="button" class="text-btn" data-action="assist-revoke">${esc(t("AI_COPILOT.REVOKE", "Einwilligung zurücknehmen"))}</button>` : ""}</p>
       <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>
     </form>`;
 }

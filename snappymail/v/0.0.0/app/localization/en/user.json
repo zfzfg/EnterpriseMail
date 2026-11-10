@@ -1179,9 +1179,7 @@
         "ERROR_UPSTREAM_INCOMPLETE": "The AI provider ended its answer early.",
         "ERROR_UPSTREAM_ERROR": "The AI provider reported an error.",
         "ERROR_UPSTREAM_HTTP": "The AI provider rejected the request (HTTP %STATUS%).",
-        "NAME": "Your name",
-        "NOTICE": "Keep consent saved",
-        "PRIVACY": "The assistant only sends email content to the provider after your consent.",
+        "NAME": "Your name",        "PRIVACY": "The assistant only sends email content to the provider after your consent.",
         "REVOKE": "Revoke consent",
         "TITLE": "Assistant",
         "TAG": "AI",
@@ -1201,7 +1199,7 @@
         "CAT_NEWSLETTER": "Newsletters",
         "CAT_NOTIFICATION": "Notifications",
         "CAT_INVOICE": "Invoices",
-        "ENABLED": "Use AI features",
+        "ENABLED": "Use the assistant for this account",
         "FEATURE_SUMMARIZE": "Summaries",
         "FEATURE_DRAFT": "Drafts, rewrite, proofreading",
         "FEATURE_QUICK_REPLIES": "Reply suggestions",
@@ -1284,6 +1282,26 @@
         "NO_FILTER_MATCH": "No email matches this filter.",
         "BULK_REPLIES_LIMIT": "Suggestions cover the first %LIMIT% of %COUNT% emails.",
 
+        "GROUP_FEATURES": "Features",
+
+        "GROUP_WRITING": "Writing",
+
+        "GROUP_PRIVACY": "Privacy",
+
+        "LANGUAGE": "Language of answers",
+
+        "NAME_HELP": "The assistant knows you by this name, for example in the sign-off.",
+
+        "STYLE_HELP": "Notes for drafts, for example: short, formal, no filler.",
+
+        "ADDRESSES_HELP": "Other addresses you write from, separated by commas. The assistant uses them to recognise your own emails.",
+
+        "PROVIDER_LINE": "Provider: %PROVIDER% · Model: %MODEL%",
+
+        "CONSENT_GIVEN": "Consent given.",
+
+        "CONSENT_MISSING": "No consent yet. You will be asked at the first AI action.",
+
         "DRAFT_OPEN": "Write with AI",
 
         "DRAFT_REVERTED": "Previous text restored.",
@@ -1331,7 +1349,7 @@
         "ACTION_SEARCH": "Search",
         "ONE_MAIL": "1 email",
         "MANY_MAILS": "%COUNT% emails",
-        "ALERTS_TODAY": "Today",
+        "ALERTS_TODAY": "Needs attention",
         "ALERT_REPLY": "Awaiting your reply",
         "ALERT_FOLLOW": "No answer yet",
         "ALERT_INVOICE": "Invoices",

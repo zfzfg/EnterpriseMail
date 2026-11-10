@@ -1,8 +1,8 @@
 import type { AssistFlags } from "./assistant";
-import { actionFacts, draftModeFor, type ChatAction } from "./assist-state";
+import { actionFacts, draftModeFor, dueLabel, type ChatAction } from "./assist-state";
 import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferences, type ComposeSeed, type ComposeValues } from "./compose";
 import { icon, type IconName } from "./icons";
-import { t } from "./i18n";
+import { t, uiLocale } from "./i18n";
 import { paintReaderDetails, paintReaderFiles, renderBulk, renderReader, withAssist, type BulkData, type ReaderData } from "./reader";
 import { mountBook, type Book } from "./contacts";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
@@ -1918,12 +1918,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const deadlineLabel = t("AI_COPILOT.CHECK_DUE", "Fristen mit KI auslesen");
       const deadlineHint = t("AI_COPILOT.CHECK_DUE_HINT", "Fristen und Fälligkeiten mit KI aus den Mails lesen");
       block.innerHTML = `
-        <p class="group-label mono">${esc(t("AI_COPILOT.ALERTS_TODAY", "Heute"))}</p>
-        <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>${esc(t("AI_COPILOT.ALERT_REPLY", "Offene Antworten"))}</span><span class="count" data-count="reply">0</span></button>
-        <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>${esc(t("AI_COPILOT.ALERT_FOLLOW", "Ohne Antwort"))}</span><span class="count" data-count="follow">0</span></button>
-        <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>${esc(t("AI_COPILOT.ALERT_INVOICE", "Rechnungen"))}</span><span class="count" data-count="invoice">0</span></button>
+        <p class="group-label mono">${esc(t("AI_COPILOT.ALERTS_TODAY", "Im Blick"))}</p>
+        <button type="button" class="count-row" data-action="alert" data-kind="reply"><span>${esc(t("AI_COPILOT.ALERT_REPLY", "Offene Antworten"))}</span><span class="count" data-count="reply">–</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>${esc(t("AI_COPILOT.ALERT_FOLLOW", "Ohne Antwort"))}</span><span class="count" data-count="follow">–</span></button>
+        <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>${esc(t("AI_COPILOT.ALERT_INVOICE", "Rechnungen"))}</span><span class="count" data-count="invoice">–</span></button>
         <div class="dues" id="dues"></div>
-        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>
+        ${flags.alertsLlm ? `<button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>` : ""}
         <p class="assist-note quiet" data-assist-note="sidebar" role="status" hidden></p>`;
       shell.querySelector(".write-btn")?.after(block);
     }
@@ -2579,7 +2579,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         button.dataset.action = "open-due";
         button.dataset.folder = item.folder;
         button.dataset.mailUid = String(item.uid);
-        button.textContent = `${item.due} ${item.title}`;
+        const due = document.createElement("span");
+        due.className = "due-date";
+        due.textContent = dueLabel(item.due, uiLocale());
+        button.append(due, document.createTextNode(item.title));
         return button;
       }));
     },

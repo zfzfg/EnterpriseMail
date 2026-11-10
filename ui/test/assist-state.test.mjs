@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fillTemplate, hasDraftPlaceholder, actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
+import { dueLabel, fillTemplate, hasDraftPlaceholder, actionFacts, assistKey, summaryActionText, AssistScopes, chatActionAt, draftModeFor, joinPlainDraft, ownNodeRange, splitPlainDraft } from "../src/assist-state.ts";
 
 const action = (label) => ({ label, state: "", payload: { type: label } });
 
@@ -109,6 +109,18 @@ test("editor node range stops at quote and signature", () => {
   assert.deepEqual(ownNodeRange([node("Hallo"), node("Sig", "DIV", true)]), { start: 0, end: 1 });
   assert.deepEqual(ownNodeRange([node("Sig", "DIV", true), node("Hallo"), node("Q", "BLOCKQUOTE")]), { start: 1, end: 2 });
   assert.deepEqual(ownNodeRange([node("", "BR"), node("Q", "BLOCKQUOTE")]), { start: 0, end: 1 });
+});
+
+test("deadlines are written as dates of the UI language, and unknown values stay untouched", () => {
+  // The exact punctuation belongs to the runtime; the parts a reader needs must be there.
+  const german = dueLabel("2026-12-01", "de-DE");
+  const english = dueLabel("2026-12-01", "en-US");
+  for (const part of ["Di", "1", "Dez", "2026"]) assert.ok(german.includes(part), `${part} missing in ${german}`);
+  for (const part of ["Tue", "Dec", "1", "2026"]) assert.ok(english.includes(part), `${part} missing in ${english}`);
+  assert.notEqual(german, english);
+  assert.equal(dueLabel(" 2026-12-01 ", "en-US"), dueLabel("2026-12-01", "en-US"));
+  assert.equal(dueLabel("2026-02-30", "de-DE"), "2026-02-30");
+  assert.equal(dueLabel("Ende der Woche", "de-DE"), "Ende der Woche");
 });
 
 test("assistant mode follows the composer that was opened", () => {
