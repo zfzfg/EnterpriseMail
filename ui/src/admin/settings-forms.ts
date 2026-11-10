@@ -35,6 +35,11 @@ export function paintBranding(ctx: Ctx, slot: HTMLElement): void {
     ${field("title", t("TAB_BRANDING.LABEL_PAGE_TITLE", "Seitentitel"), String(cell(ctx.cfg, "webmail", "title") || ""))}
     ${field("loadingDescription", t("TAB_BRANDING.LABEL_LOADING_DESCRIPTION", "Beschreibungstext für Ladevorgang"), String(cell(ctx.cfg, "webmail", "loading_description") || ""))}
     ${field("faviconUrl", t("TAB_BRANDING.LABEL_FAVICON_URL", "Favicon"), String(cell(ctx.cfg, "webmail", "favicon_url") || ""))}
+    ${select("Design", t("TAB_BRANDING.LABEL_DESIGN", "Standard-Design"), cell(ctx.cfg, "webmail", "design") === "office" ? "office" : "mistral", [
+      ["mistral", t("TAB_BRANDING.DESIGN_CLASSIC", "Klassisch")],
+      ["office", t("TAB_BRANDING.DESIGN_OFFICE", "Office")]
+    ])}
+    <p class="quiet">${esc(t("TAB_BRANDING.DESIGN_HINT", "Gilt für alle, die in ihren Einstellungen kein eigenes Design gewählt haben."))}</p>
     <button type="button" class="ink-btn" data-save>${esc(t("GLOBAL.SAVE", "Speichern"))}</button>
   </form>`;
   bind(ctx, slot);

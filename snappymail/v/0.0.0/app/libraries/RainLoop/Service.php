@@ -175,6 +175,8 @@ abstract class Service
 
 			$aTemplateParameters = array(
 				'{{BaseAppThemeName}}' => $sThemeName,
+				// Default design of the new UI; a user's own choice lives in the browser.
+				'{{BaseAppDesign}}' => 'office' === $oConfig->Get('webmail', 'design', 'mistral') ? 'office' : 'mistral',
 				'{{BaseAppFaviconPngLinkTag}}' => $sFaviconPngLink ? '<link type="image/png" rel="shortcut icon" href="'.$sFaviconPngLink.'">' : '',
 				'{{BaseAppFaviconTouchLinkTag}}' => $sAppleTouchLink ? '<link type="image/png" rel="apple-touch-icon" href="'.$sAppleTouchLink.'">' : '',
 				'{{BaseAppManifestLink}}' => Utils::WebStaticPath('manifest.json'),

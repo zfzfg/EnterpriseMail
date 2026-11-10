@@ -61,6 +61,10 @@
     },
     "TAB_BRANDING": {
         "LEGEND_BRANDING": "Branding",
+        "LABEL_DESIGN": "Default design",
+        "DESIGN_CLASSIC": "Classic",
+        "DESIGN_OFFICE": "Office",
+        "DESIGN_HINT": "Applies to everyone who has not picked a design in their own settings.",
         "LABEL_PAGE_TITLE": "Page Title",
         "LABEL_LOADING_DESCRIPTION": "Loading Description",
         "LABEL_FAVICON_URL": "Favicon"

@@ -178,6 +178,7 @@ class Application extends \RainLoop\Config\AbstractConfig
 
 				'theme'                       => array('Default', 'Theme used by default'),
 				'allow_themes'                => array(true, 'Allow theme selection on settings screen'),
+				'design'                      => array('mistral', 'Default UI design for users without their own choice: "mistral" or "office"'),
 				'allow_user_background'       => array(false),
 
 				'language'                    => array('en', 'Language used by default'),
