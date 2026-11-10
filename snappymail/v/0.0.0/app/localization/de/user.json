@@ -1294,6 +1294,16 @@
         "NO_FILTER_MATCH": "Keine Mails für diesen Filter.",
         "BULK_REPLIES_LIMIT": "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.",
 
+        "COPY": "Kopieren",
+
+        "COPIED": "Kopiert",
+
+        "COPY_FAILED": "Kopieren nicht möglich",
+
+        "REPLIES_AGAIN": "Neu vorschlagen",
+
+        "MODEL": "Modell: %MODEL%",
+
         "RETRY": "Erneut versuchen",
 
         "BULK_SUMMARY_LIMIT": "Nur die neuesten %LIMIT% von %COUNT% Mails sind berücksichtigt.",

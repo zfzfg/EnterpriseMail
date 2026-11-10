@@ -2503,6 +2503,9 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .assist-note[hidden] { display: none; }
 .assist-limit { margin: 4px 0 0; font-size: 12px; font-weight: 500; }
 .assist-replies { padding: 0 12px 12px; }
+.assist-replies .assist-meta { margin-top: 8px; }
+.assist-label { display: inline-flex; align-items: center; gap: 6px; }
+.assist-label .btn-label { display: inline; }
 .assist-replies > p { margin: 0; font-size: 12px; }
 .assist-model { margin: 0; padding: 0 12px 10px; }
 .reply-prompts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 6px; margin-top: 8px; }

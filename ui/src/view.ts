@@ -1937,7 +1937,6 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       strip.id = "strip";
       strip.className = "assist-strip";
       strip.setAttribute("aria-label", t("AI_COPILOT.PANEL_LABEL", "KI-Unterstützung für diese Mail"));
-      strip.setAttribute("aria-live", "polite");
       shell.querySelector("#reader-body")?.before(strip);
     }
     if (flags.chat) {
@@ -2535,13 +2534,36 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         return;
       }
       strip.hidden = false;
+      const busy = Boolean(state.loading);
+      const button = (action: string, label: string, hint: string, marked = true): HTMLButtonElement => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = marked ? "text-btn ai-action" : "text-btn";
+        node.dataset.action = action;
+        node.innerHTML = marked ? withAssist(label) : esc(label);
+        if (hint) {
+          node.title = hint;
+          node.setAttribute("aria-label", hint);
+        }
+        // A running request keeps what is already there readable, but takes no second order.
+        if (busy && marked) {
+          node.disabled = true;
+          node.setAttribute("aria-busy", "true");
+        }
+        return node;
+      };
+      const heading = (text: string, marked = false): HTMLElement => {
+        const node = document.createElement("span");
+        node.className = "mono quiet assist-label";
+        node.innerHTML = marked ? withAssist(text) : esc(text);
+        return node;
+      };
       if (state.loading) {
         const p = document.createElement("p");
         p.className = "assist-status quiet";
         p.setAttribute("role", "status");
         p.textContent = state.loading;
         strip.append(p);
-        return;
       }
       if (state.error) {
         const p = document.createElement("p");
@@ -2553,49 +2575,58 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const actions = document.createElement("div");
       actions.className = "assist-actions";
       if (!state.tldr && state.showSummarize) {
-        const button = document.createElement("button");
-        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen");
-        button.type = "button";
-        button.className = "text-btn assist-action ai-action";
-        button.dataset.action = "summarize";
-        button.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Zusammenfassen"));
-        button.title = hint;
-        button.setAttribute("aria-label", hint);
-        actions.append(button);
+        const summarize = button("summarize", t("AI_COPILOT.SUMMARIZE", "Zusammenfassen"), t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen"));
+        summarize.classList.add("assist-action");
+        actions.append(summarize);
       }
       if (state.showReplies && !state.replies.length) {
-        const replies = document.createElement("button");
-        const hint = t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge erzeugen");
-        replies.type = "button";
-        replies.className = "text-btn assist-action ai-action";
-        replies.dataset.action = "replies";
-        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge"));
-        replies.title = hint;
-        replies.setAttribute("aria-label", hint);
+        const replies = button("replies", t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge"), t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge erzeugen"));
+        replies.classList.add("assist-action");
         actions.append(replies);
       }
       if (actions.childElementCount) strip.append(actions);
       if (state.tldr) {
         const result = document.createElement("div");
         result.className = "assist-result";
-        const label = document.createElement("span");
-        label.className = "mono quiet";
-        label.textContent = t("AI_COPILOT.SUMMARY", "Zusammenfassung");
         const text = document.createElement("p");
         text.className = "assist-summary";
         text.textContent = state.tldr;
+        result.append(heading(t("AI_COPILOT.SUMMARY", "Zusammenfassung"), true), text);
+        const plain = [state.tldr];
+        ([
+          [t("AI_COPILOT.POINTS", "Wichtige Punkte"), state.points],
+          [t("AI_COPILOT.DECISIONS", "Entscheidungen"), state.decisions],
+          [t("AI_COPILOT.TASKS", "Aufgaben"), state.actions],
+          [t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), state.next ? [state.next] : []]
+        ] as [string, string[]][]).forEach(([title, items]) => {
+          if (!items.length) return;
+          const list = document.createElement("ul");
+          list.className = "bulk-summary-points";
+          items.forEach((entry) => {
+            const row = document.createElement("li");
+            row.textContent = entry;
+            list.append(row);
+          });
+          result.append(heading(title), list);
+          plain.push("", title + ":", ...items.map((entry) => "- " + entry));
+        });
         const meta = document.createElement("div");
         meta.className = "assist-meta";
-        const again = document.createElement("button");
-        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen");
-        again.type = "button";
-        again.className = "text-btn ai-action";
-        again.dataset.action = "summarize";
+        const again = button("summarize", t("AI_COPILOT.REGENERATE", "Neu erzeugen"), t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen"));
         again.dataset.force = "1";
-        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Neu erzeugen"));
-        again.title = hint;
-        again.setAttribute("aria-label", hint);
-        meta.append(again);
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "text-btn";
+        copy.innerHTML = withIcon("copy", t("AI_COPILOT.COPY", "Kopieren"));
+        copy.addEventListener("click", () => {
+          const done = (label: string) => {
+            copy.innerHTML = withIcon("copy", label);
+            window.setTimeout(() => { copy.innerHTML = withIcon("copy", t("AI_COPILOT.COPY", "Kopieren")); }, 2000);
+          };
+          void (navigator.clipboard?.writeText(plain.join("\n")) ?? Promise.reject(new Error("no clipboard")))
+            .then(() => done(t("AI_COPILOT.COPIED", "Kopiert")), () => done(t("AI_COPILOT.COPY_FAILED", "Kopieren nicht möglich")));
+        });
+        meta.append(again, copy, button("hide-summary", t("GLOBAL.CLOSE", "Schließen"), "", false));
         if (state.cached) {
           const note = document.createElement("span");
           note.className = "quiet";
@@ -2605,26 +2636,6 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const caveat = document.createElement("p");
         caveat.className = "quiet assist-caveat";
         caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit der Mail abgleichen: Zusammenfassungen können Angaben falsch wiedergeben.");
-        result.append(label, text);
-        ([
-          [t("AI_COPILOT.POINTS", "Wichtige Punkte"), state.points],
-          [t("AI_COPILOT.DECISIONS", "Entscheidungen"), state.decisions],
-          [t("AI_COPILOT.TASKS", "Aufgaben"), state.actions],
-          [t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), state.next ? [state.next] : []]
-        ] as [string, string[]][]).forEach(([title, items]) => {
-          if (!items.length) return;
-          const heading = document.createElement("span");
-          heading.className = "mono quiet";
-          heading.textContent = title;
-          const list = document.createElement("ul");
-          list.className = "bulk-summary-points";
-          items.forEach((entry) => {
-            const row = document.createElement("li");
-            row.textContent = entry;
-            list.append(row);
-          });
-          result.append(heading, list);
-        });
         result.append(meta, caveat);
         strip.append(result);
       }
@@ -2637,21 +2648,27 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const prompts = document.createElement("div");
         prompts.className = "prompts reply-prompts";
         state.replies.forEach((reply, index) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "prompt";
-          button.dataset.action = "use-reply";
-          button.dataset.index = String(index);
-          button.textContent = reply.label || t("AI_COPILOT.ACTION_REPLY", "Antworten");
-          prompts.append(button);
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "prompt";
+          chip.dataset.action = "use-reply";
+          chip.dataset.index = String(index);
+          chip.title = reply.body;
+          chip.textContent = reply.label || t("AI_COPILOT.ACTION_REPLY", "Antworten");
+          prompts.append(chip);
         });
-        group.append(label, prompts);
+        const meta = document.createElement("div");
+        meta.className = "assist-meta";
+        const again = button("replies", t("AI_COPILOT.REPLIES_AGAIN", "Neu vorschlagen"), t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge erzeugen"));
+        again.dataset.force = "1";
+        meta.append(again);
+        group.append(heading(t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge"), true), label, prompts, meta);
         strip.append(group);
       }
-      if (state.model) {
+      if (state.model && (state.tldr || state.replies.length)) {
         const model = document.createElement("p");
         model.className = "mono quiet assist-model";
-        model.textContent = state.model;
+        model.textContent = t("AI_COPILOT.MODEL", "Modell: %MODEL%").replace("%MODEL%", state.model);
         strip.append(model);
       }
     },

@@ -454,7 +454,7 @@ export class AssistController {
         this.paintStrip();
         return;
       }
-      this.host.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.SUMMARIZING", "Verlauf wird zusammengefasst …"), tldr: "" });
+      this.host.view.setStrip({ ...this.strip(), loading: t("AI_COPILOT.SUMMARIZING", "Verlauf wird zusammengefasst …") });
       try {
         const result = await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.host.folder,
@@ -491,10 +491,18 @@ export class AssistController {
       }
       return;
     }
+    if (name === "hide-summary") {
+      // Only the display goes; asking again answers from this tab's cache.
+      this.tldr = "";
+      this.summaryCached = false;
+      this.summaryDetail = null;
+      this.paintStrip();
+      return;
+    }
     if (name === "use-reply") {
       const reply = this.replies[Number(data.index || 0)];
       if (!reply || !this.host.current) return;
-      this.host.openReply(false, { text: reply.body, title: reply.label, assisted: true });
+      this.host.openReply(false, { text: reply.body, assisted: true });
       return;
     }
     if (name === "bulk-summarize") {
@@ -601,7 +609,7 @@ export class AssistController {
       try {
         // List rows carry no body, so the quote needs the full message.
         const message = this.host.parseMessage(await call<Record<string, unknown>>("Message", { folder: this.host.folder, uid }), true);
-        if (generation === this.host.accountGeneration) this.host.openReply(false, { message, text: reply.body, title: reply.label, assisted: true });
+        if (generation === this.host.accountGeneration) this.host.openReply(false, { message, text: reply.body, assisted: true });
       } catch (error) {
         this.host.view.notice(explain(error));
       }

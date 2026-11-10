@@ -1286,6 +1286,16 @@
         "NO_FILTER_MATCH": "No email matches this filter.",
         "BULK_REPLIES_LIMIT": "Suggestions cover the first %LIMIT% of %COUNT% emails.",
 
+        "COPY": "Copy",
+
+        "COPIED": "Copied",
+
+        "COPY_FAILED": "Could not copy",
+
+        "REPLIES_AGAIN": "Suggest again",
+
+        "MODEL": "Model: %MODEL%",
+
         "RETRY": "Try again",
 
         "BULK_SUMMARY_LIMIT": "Only the newest %LIMIT% of %COUNT% emails are included.",
