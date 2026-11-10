@@ -10,7 +10,7 @@ python seed.py                    # Konten, SnappyMail-Konfiguration, Testmails
 
 - SnappyMail: http://localhost:8888, Anmeldung `test@example.com` / `test1234`
 - Admin: http://localhost:8888/?admin, Passwort: `docker compose exec snappymail cat /var/lib/snappymail/_data_/_default_/admin_password.txt`
-- Das Plugin ist per Symlink aus diesem Ordner eingehängt. PHP- und JS-Änderungen gelten sofort (JS-Cache ist in der Dev-Konfiguration aus).
+- Das Plugin ist per Symlink aus diesem Ordner eingehängt. PHP-Änderungen gelten sofort. Die Oberfläche des Assistenten liegt nicht im Plugin, sondern in `ui/src/` (`assist-controller.ts`, `assist-state.ts`, `view.ts`); nach Änderungen dort `npm run build --prefix ui` ausführen.
 - Mistral-Key: Datei `../../../../MISTRAL-API-KEY.env` (außerhalb des Repos), anderer Pfad über `AI_KEY_FILE=...`.
 - Windows-Checkout mit CRLF: Die Compose-Datei entfernt CR aus den Konfigurationsdateien des Images beim Start.
 

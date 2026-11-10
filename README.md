@@ -48,10 +48,10 @@ Originally forked from [SnappyMail](https://github.com/the-djmaze/snappymail) (i
        (api.mistral.ai/v1)
 ```
 
-1. **Client Request:** Browser triggers an AI draft or summary request to `/api/ai/stream`.
+1. **Client Request:** Browser triggers an AI draft request to `/api/ai/stream`. Only drafts are streamed; summaries, reply suggestions, search and chat are ordinary JSON requests answered by PHP.
 2. **PHP Preparation (10ms):** Rust verifies authentication against an internal loopback-only PHP RPC. PHP validates session/CSRF, retrieves IMAP thread context, builds the prompt, and returns the payload to Rust.
 3. **Immediate Worker Release:** The PHP worker finishes immediately and is instantly free to process other emails.
-4. **Rust Async Streaming:** Rust establishes a secure TLS 1.3 connection to Mistral and streams tokens via SSE directly to the browser with backpressure, timeouts, and automatic cancellation.
+4. **Rust Async Streaming:** Rust establishes a TLS connection (TLS 1.2 or newer) to Mistral and streams tokens via SSE directly to the browser with backpressure, timeouts, and automatic cancellation.
 
 ---
 
@@ -85,7 +85,7 @@ Extensively benchmarked across **210 repeatable runs** under controlled containe
 - **Thread Summarizer:** Condensed summaries and action items from multi-message conversations.
 - **One-Click Quick Replies:** 3 contextual smart-reply suggestions generated on demand.
 - **Natural Language Search:** Find emails using natural queries (only query terms are sent to model).
-- **Flexible Profiles:** Switch models and endpoints centrally in the Admin UI (`mistral-large-latest`, `mistral-small-latest`, or local Ollama/vLLM endpoints).
+- **Flexible Profiles:** Switch models and endpoints centrally in the Admin UI. The default profile uses the Mistral-hosted model `zai-glm-5-3-flash`; any other model of the Mistral API or a local OpenAI-compatible endpoint (LM Studio, Ollama, vLLM) can be set instead.
 
 ---
 
