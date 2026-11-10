@@ -472,13 +472,6 @@ h1, .title {
 
 .prompts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 
-.prompt {
-  padding: 8px 0;
-  text-align: left;
-  color: var(--foreground);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 
 .sheet-form {
   display: flex;
@@ -676,15 +669,6 @@ dialog {
   background: var(--secondary);
 }
 .assistant { margin: 0 0 16px; }
-.action {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
 .subject-hint { display: flex; gap: 8px; align-items: center; }
 
 dialog::backdrop { background: color-mix(in srgb, var(--foreground) 32%, transparent); }
@@ -1680,7 +1664,7 @@ a.icon-btn { color: inherit; text-decoration: none; }
 
 .bulk-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
 .bulk-card--danger { border-color: color-mix(in srgb, var(--destructive) 30%, var(--border)); }
-.bulk-card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: color-mix(in srgb, var(--foreground) 60%, transparent); margin: 0; }
+.bulk-card-title { color: color-mix(in srgb, var(--foreground) 68%, transparent); margin: 0; }
 .bulk-card--danger .bulk-card-title { color: var(--destructive); }
 .bulk-btn-group { display: flex; flex-direction: column; gap: 4px; }
 .bulk-btn { justify-content: flex-start; width: 100%; padding: 6px 10px; min-height: 36px; border-radius: calc(var(--radius) - 1px); font-size: 13px; }
@@ -1705,17 +1689,10 @@ a.icon-btn { color: inherit; text-decoration: none; }
   .bulk-msg-remove:hover { opacity: 1; background: var(--accent); color: var(--destructive); }
 }
 
-.bulk-card--ai {
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-}
 .bulk-card--ai .bulk-card-title {
-  color: var(--primary);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.bulk-card--ai .ai-tag {
-  color: var(--primary);
 }
 .bulk-btn.ai-action {
   gap: 6px;
@@ -1730,7 +1707,7 @@ a.icon-btn { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 13px;
-  color: color-mix(in srgb, var(--foreground) 75%, transparent);
+  color: color-mix(in srgb, var(--foreground) 68%, transparent);
 }
 .bulk-ai-status.error {
   color: var(--destructive);
@@ -1744,7 +1721,7 @@ a.icon-btn { color: inherit; text-decoration: none; }
   gap: 12px;
   padding: 16px;
   background: var(--card);
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 .bulk-ai-head {
@@ -1755,14 +1732,9 @@ a.icon-btn { color: inherit; text-decoration: none; }
   flex-wrap: wrap;
 }
 .bulk-ai-head .mono {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--primary);
 }
 .bulk-summary-tldr {
   font-size: 14px;
@@ -1829,7 +1801,7 @@ a.icon-btn { color: inherit; text-decoration: none; }
 }
 .bulk-reply-sender {
   font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+  color: color-mix(in srgb, var(--foreground) 68%, transparent);
   flex-shrink: 0;
   max-width: 40%;
   overflow: hidden;
@@ -2512,7 +2484,7 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .assist-replies > p { margin: 0; font-size: 12px; }
 .assist-model { margin: 0; padding: 0 12px 10px; }
 .reply-prompts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 6px; margin-top: 8px; }
-.prompt { padding: 10px 12px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--background); text-decoration: none; }
+.prompt { padding: 10px 12px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--background); color: var(--foreground); text-align: left; }
 @media (hover: hover) and (pointer: fine) {
   .prompt:hover:not(:disabled) { border-color: var(--line-strong); background: var(--accent); }
 }
@@ -2532,7 +2504,7 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .thinking { display: flex; align-items: center; gap: 8px; margin: 0; }
 .thinking::before { content: ""; width: 6px; height: 6px; flex: 0 0 auto; background: var(--indicator); animation: thinking-pulse 900ms var(--ease-standard) infinite alternate; }
 @keyframes thinking-pulse { from { opacity: .3; } to { opacity: 1; } }
-.action { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
+.action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
 .action > p { flex: 1 1 100%; margin: 0; }
 .draft-tools { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .draft-tools[data-open="false"] { padding: 0; border-color: transparent; background: none; }
