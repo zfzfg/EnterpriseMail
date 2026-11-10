@@ -403,7 +403,7 @@ export class AssistController {
       const input = document.querySelector("#search") as HTMLInputElement | null;
       const text = query || input?.value.trim() || "";
       if (!text) return;
-      this.host.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
+      this.host.view.notice(t("AI_COPILOT.WORKING", "Wird erstellt …"));
       try {
         const result = await plugin<{ search: string; explanation?: string; folder?: string }>("AiSearch", {
           query: text,
@@ -609,7 +609,7 @@ export class AssistController {
         this.host.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
         return;
       }
-      this.host.view.notice(t("AI_COPILOT.WORKING", "KI arbeitet …"));
+      this.host.view.notice(t("AI_COPILOT.WORKING", "Wird erstellt …"));
       try {
         const result = await plugin<{ alerts: DueItem[] }>("AiAlertsLlm", { items, timezone: timezone() });
         this.alertDues = (result.alerts || []).filter((item) => item.due);
@@ -635,7 +635,7 @@ export class AssistController {
       if (area) area.value = "";
       this.chat.push({ role: "user", content: text });
       this.turns.push({ role: "user", text, trace: [], actions: [] });
-      this.host.view.setChat(this.turns, t("AI_COPILOT.CHAT_WORKING", "Copilot arbeitet …"), this.contextLabel());
+      this.host.view.setChat(this.turns, t("AI_COPILOT.CHAT_WORKING", "Assistent arbeitet …"), this.contextLabel());
       const controller = new AbortController();
       this.chatAbort = controller;
       try {

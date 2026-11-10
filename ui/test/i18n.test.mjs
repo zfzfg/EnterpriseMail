@@ -107,6 +107,20 @@ for (const language of ["de", "en"]) {
   });
 }
 
+test("the assistant texts exist in both languages", () => {
+  const own = (language) => Object.keys(packs[language].user).filter((key) => key.startsWith("AI_COPILOT.")).sort();
+  assert.deepEqual(own("de"), own("en"));
+});
+
+test("the assistant has one name in the interface", () => {
+  for (const language of ["de", "en"]) {
+    const named = Object.entries(packs[language].user)
+      .filter(([key, value]) => key.startsWith("AI_COPILOT.") && /copilot/i.test(String(value)))
+      .map(([key]) => key);
+    assert.deepEqual(named, [], `${language} still calls the assistant Copilot`);
+  }
+});
+
 test("every plugin error code has English text, so German server messages stay out of the English UI", () => {
   const plugin = path.join(root, "plugins/ai-copilot");
   const php = ["index.php", ...fs.readdirSync(path.join(plugin, "src")).map((name) => `src/${name}`)]

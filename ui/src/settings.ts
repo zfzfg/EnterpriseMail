@@ -833,7 +833,7 @@ export function renderAssistant(snap: SettingsSnapshot): string {
   return `
     <p class="mono">${esc(t("AI_COPILOT.TITLE", "Assistent"))}</p>
     <form class="fields" data-action="settings-form" data-kind="assist-save">
-      ${check("enabled", t("AI_COPILOT.ENABLED", "Assistent für dieses Konto"), settings.enabled !== false)}
+      ${check("enabled", t("AI_COPILOT.ENABLED", "KI-Funktionen verwenden"), settings.enabled !== false)}
       ${boxes.replace(/data-pref=/g, "name=").replace(/type="checkbox"/g, "type=\"checkbox\"")}
       <label class="field"><span>${esc(t("AI_COPILOT.TONE", "Standardton"))}</span><select name="tone">${tones.map(([value]) => `<option value="${esc(value)}"${value === String(settings.tone || "professional") ? " selected" : ""}>${esc(t(`AI_COPILOT.TONE_${value.toUpperCase()}`, ASSIST_TONES[value] || value))}</option>`).join("")}</select></label>
       ${prefSelect("language", t("GLOBAL.LANGUAGE", "Sprache"), String(settings.language || "auto"), [["auto", t("AI_COPILOT.LANG_AUTO", "Wie die Mail")], ["de", t("LANGS_NAMES.de", "Deutsch")], ["en", t("LANGS_NAMES.en", "English")]]).replace("data-pref=\"language\"", "name=\"language\"")}
@@ -841,7 +841,7 @@ export function renderAssistant(snap: SettingsSnapshot): string {
       ${field(t("AI_COPILOT.STYLE", "Schreibstil"), "style", String(settings.style || ""), "area")}
       ${field(t("AI_COPILOT.ADDRESSES", "Eigene Adressen"), "addresses", String(settings.addresses || ""), "area")}
       <p class="quiet">${esc(provider ? `${provider.name || ""} ${provider.model || ""}`.trim() : "")}</p>
-      <p class="quiet">${esc(t("AI_COPILOT.PRIVACY", "Der Assistent sendet Brieftext erst nach einer Einwilligung an den Anbieter."))}</p>
+      <p class="quiet">${esc(t("AI_COPILOT.PRIVACY", "Der Assistent sendet Mailinhalte erst nach Ihrer Einwilligung an den Anbieter."))}</p>
       ${check("notice_ack", t("AI_COPILOT.NOTICE", "Einwilligung bleibt gespeichert"), Boolean(settings.notice_ack))}
       <button type="button" class="text-btn" data-action="assist-revoke">${esc(t("AI_COPILOT.REVOKE", "Einwilligung zurücknehmen"))}</button>
       <div class="dialog-actions"><button type="submit" class="ink-btn">${icon("save")}<span class="btn-label">${esc(t("GLOBAL.SAVE", "Speichern"))}</span></button></div>

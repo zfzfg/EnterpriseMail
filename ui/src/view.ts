@@ -3,7 +3,7 @@ import { actionFacts, draftModeFor, type ChatAction } from "./assist-state";
 import { Composer, type ComposeFile, type ComposeIdentity, type ComposePreferences, type ComposeSeed, type ComposeValues } from "./compose";
 import { icon, type IconName } from "./icons";
 import { t } from "./i18n";
-import { paintReaderDetails, paintReaderFiles, renderBulk, renderReader, type BulkData, type ReaderData } from "./reader";
+import { paintReaderDetails, paintReaderFiles, renderBulk, renderReader, withAssist, type BulkData, type ReaderData } from "./reader";
 import { mountBook, type Book } from "./contacts";
 import { renderDesk, type DeskEdit, type SettingsSnapshot } from "./settings";
 import { ruleCard, syncFilterRow } from "./sieve/form";
@@ -168,11 +168,6 @@ function esc(value: string): string {
 /** Knopfinhalt: Symbol plus Text. Der Text bleibt der zugängliche Name, auch wenn er schmal ausgeblendet ist. */
 function withIcon(name: IconName, label: string): string {
   return `${icon(name)}<span class="btn-label">${esc(label)}</span>`;
-}
-
-/** Einheitliche Kennzeichnung für Knöpfe, die beim Klick ein KI-Modell aufrufen. */
-function withAssist(label: string): string {
-  return `${withIcon("assist", label)}<span class="ai-tag" aria-hidden="true">KI</span>`;
 }
 
 const ROLE_ICON: Record<string, IconName> = {
@@ -1889,9 +1884,9 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       const filters = document.createElement("div");
       filters.className = "filters";
       filters.setAttribute("role", "toolbar");
-      filters.setAttribute("aria-label", "Filter");
+      filters.setAttribute("aria-label", t("AI_COPILOT.FILTERS", "Filter"));
       const cats = [["all", "Alle"], ...Object.entries(CATEGORY)] as [string, string][];
-      const triageHint = t("AI_COPILOT.TRIAGE_LLM_HINT", "Mails dieser Seite mit KI einordnen");
+      const triageHint = t("AI_COPILOT.TRIAGE_LLM_HINT", "Mails dieser Seite mit KI einordnen (Absender, Betreff, Vorschau gehen an das Modell)");
       filters.innerHTML = cats.map(([id, label], index) =>
         `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(id === "all" ? t("AI_COPILOT.TAB_ALL", label) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label))}</button>`
       ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc(triageHint)}" title="${esc(triageHint)}">${withAssist(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
@@ -1899,7 +1894,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     }
     if (flags.search && searchForm) {
       const button = document.createElement("button");
-      const searchHint = t("AI_COPILOT.SEARCH_HINT", "Suchtext als natürliche Sprache mit KI verstehen");
+      const searchHint = t("AI_COPILOT.SEARCH_HINT", "Suchtext als natürliche Sprache verstehen (KI)");
       button.type = "button";
       button.className = "text-btn ai-action";
       button.dataset.action = "lang-search";
@@ -1927,11 +1922,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     }
     if (flags.chat) {
       const ask = document.createElement("button");
-      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Mit KI im Copilot-Chat zu dieser Mail fragen");
+      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Den Assistenten zu dieser Mail fragen");
       ask.type = "button";
       ask.className = "text-btn assist-trigger ai-action";
       ask.dataset.action = "open-sheet";
-      ask.innerHTML = withAssist(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"));
+      ask.innerHTML = withAssist(t("AI_COPILOT.ASK_COPILOT", "Assistent fragen"));
       ask.classList.add("bar-btn", "primary");
       ask.title = askHint;
       ask.setAttribute("aria-label", askHint);
@@ -1942,19 +1937,19 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       sheet.setAttribute("aria-labelledby", "copilot-title");
       sheet.innerHTML = `
         <div class="sheet-head">
-          <h2 class="title title-md" id="copilot-title">${esc(t("AI_COPILOT.ASK_COPILOT", "Copilot fragen"))}</h2>
+          <h2 class="title title-md" id="copilot-title">${esc(t("AI_COPILOT.ASK_COPILOT", "Assistent fragen"))}</h2>
           <span class="spacer"></span>
           <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-meta mono quiet">${esc(flags.provider)}</div>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten."))}</p>
+          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“."))}</p>
           <div class="prompts">${chatPrompts().map((text) => `<button type="button" class="prompt" data-action="prompt">${esc(text)}</button>`).join("")}</div>
         </div>
         <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
-          <label class="sr" for="ask">${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}</label>
-          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an Copilot …"))}"></textarea>
+          <label class="sr" for="ask">${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an den Assistenten …"))}</label>
+          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an den Assistenten …"))}"></textarea>
           <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
           <button type="button" class="text-btn" data-action="stop-chat" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
         </form>
@@ -1971,12 +1966,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="modes" role="toolbar" aria-label="${esc(t("AI_COPILOT.DRAFT_KIND", "Art"))}">
           ${modes.map(([id, label], index) => `<button type="button" class="seg" data-action="mode" data-mode="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.MODE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
-        <label class="field"><span>${esc(t("AI_COPILOT.INSTRUCTION", "Anweisung"))}</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen?"))}"></label>
+        <label class="field"><span>${esc(t("AI_COPILOT.INSTRUCTION", "Anweisung"))}</span><input id="instruction" type="text" placeholder="${esc(t("AI_COPILOT.INSTRUCTION_PLACEHOLDER", "Was soll die Mail sagen? z. B. „Termin am Donnerstag bestätigen, nach Parkmöglichkeit fragen“"))}"></label>
         <div class="tones" role="toolbar" aria-label="${esc(t("AI_COPILOT.DRAFT_TONE", "Ton"))}">
           ${tones.map(([id, label], index) => `<button type="button" class="seg" data-action="tone" data-tone="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.TONE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
         <div class="draft-actions">
-          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist(t("AI_COPILOT.GENERATE", "Entwurf mit KI erzeugen"))}</button>
+          <button type="button" class="ink-btn ai-action" data-action="generate" title="${esc(t("AI_COPILOT.DRAFT_HINT", "Entwurf mit KI erzeugen"))}">${withAssist(t("AI_COPILOT.GENERATE", "Erzeugen"))}</button>
           <button type="button" class="text-btn" data-action="stop-generate" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
           <button type="button" class="text-btn" data-action="revert-draft" hidden>${esc(t("AI_COPILOT.REVERT_DRAFT", "Vorherigen Text wiederherstellen"))}</button>
         </div>
@@ -2524,18 +2519,18 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         button.type = "button";
         button.className = "text-btn assist-action ai-action";
         button.dataset.action = "summarize";
-        button.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Mit KI zusammenfassen"));
+        button.innerHTML = withAssist(t("AI_COPILOT.SUMMARIZE", "Zusammenfassen"));
         button.title = hint;
         button.setAttribute("aria-label", hint);
         actions.append(button);
       }
       if (state.showReplies && !state.replies.length) {
         const replies = document.createElement("button");
-        const hint = t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge mit KI erzeugen");
+        const hint = t("AI_COPILOT.QUICK_REPLIES_HINT", "Drei Antwortvorschläge erzeugen");
         replies.type = "button";
         replies.className = "text-btn assist-action ai-action";
         replies.dataset.action = "replies";
-        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antworten mit KI vorschlagen"));
+        replies.innerHTML = withAssist(t("AI_COPILOT.QUICK_REPLIES", "Antwortvorschläge"));
         replies.title = hint;
         replies.setAttribute("aria-label", hint);
         actions.append(replies);
@@ -2553,12 +2548,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const meta = document.createElement("div");
         meta.className = "assist-meta";
         const again = document.createElement("button");
-        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf erneut mit KI zusammenfassen");
+        const hint = t("AI_COPILOT.SUMMARIZE_HINT", "Verlauf mit KI zusammenfassen");
         again.type = "button";
         again.className = "text-btn ai-action";
         again.dataset.action = "summarize";
         again.dataset.force = "1";
-        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"));
+        again.innerHTML = withAssist(t("AI_COPILOT.REGENERATE", "Neu erzeugen"));
         again.title = hint;
         again.setAttribute("aria-label", hint);
         meta.append(again);
@@ -2570,7 +2565,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         }
         const caveat = document.createElement("p");
         caveat.className = "quiet assist-caveat";
-        caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit dem Brief abgleichen: Zusammenfassungen können Angaben falsch interpretieren.");
+        caveat.textContent = t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit der Mail abgleichen: Zusammenfassungen können Angaben falsch wiedergeben.");
         result.append(label, text);
         ([
           [t("AI_COPILOT.POINTS", "Wichtige Punkte"), state.points],
@@ -2652,7 +2647,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!turns.length && !thinking) {
         const p = document.createElement("p");
         p.className = "quiet";
-        p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel, welche Mails auf eine Antwort warten.");
+        p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“.");
         const prompts = document.createElement("div");
         prompts.className = "prompts";
         chatPrompts().forEach((text) => {

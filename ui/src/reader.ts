@@ -327,8 +327,9 @@ export function renderReader(body: HTMLElement, data: ReaderData, expanded: bool
   body.querySelector(".read-measure")?.append(frame);
 }
 
-function withAssist(label: string): string {
-  return `${icon("assist")}<span class="btn-label">${esc(label)}</span><span class="ai-tag" aria-hidden="true">KI</span>`;
+/** Label of a control that sends content to the model: assistant icon, text, and the translated AI mark. */
+export function withAssist(label: string): string {
+  return `${icon("assist")}<span class="btn-label">${esc(label)}</span><span class="ai-tag" aria-hidden="true">${esc(t("AI_COPILOT.TAG", "KI"))}</span>`;
 }
 
 export function renderBulk(body: HTMLElement, data: BulkData): void {
@@ -344,10 +345,10 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     badges.push(`<span class="chip chip-static">${icon("folder")}<span>${esc(data.folderName)}</span></span>`);
   }
   if (data.unseenCount) {
-    badges.push(`<span class="chip chip-static">${icon("mark-unread")}<span>${data.unseenCount === 1 ? t("MESSAGE.ONE_UNREAD", "1 ungelesen") : `${data.unseenCount} ungelesen`}</span></span>`);
+    badges.push(`<span class="chip chip-static">${icon("mark-unread")}<span>${data.unseenCount === 1 ? t("MESSAGE.ONE_UNREAD", "1 ungelesen") : t("MESSAGE.MANY_UNREAD", "%COUNT% ungelesen").replace("%COUNT%", String(data.unseenCount))}</span></span>`);
   }
   if (data.flaggedCount) {
-    badges.push(`<span class="chip chip-static">${icon("flag-filled")}<span>${data.flaggedCount === 1 ? t("MESSAGE.ONE_FLAGGED", "1 markiert") : `${data.flaggedCount} markiert`}</span></span>`);
+    badges.push(`<span class="chip chip-static">${icon("flag-filled")}<span>${data.flaggedCount === 1 ? t("MESSAGE.ONE_FLAGGED", "1 markiert") : t("MESSAGE.MANY_FLAGGED", "%COUNT% markiert").replace("%COUNT%", String(data.flaggedCount))}</span></span>`);
   }
 
   const bulkList = (title: string, items?: string[]): string => items?.length ? `
@@ -361,7 +362,7 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
     </div>` : "";
 
   const aiSummary = data.assist?.summary ? `
-    <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung der ausgewählten Mails"))}">
+    <section class="bulk-ai-card bulk-ai-summary" aria-label="${esc(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}">
       <div class="bulk-ai-head">
         <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}</span>
         <span class="quiet">(${data.assist.summary.shown && data.assist.summary.shown < data.count ? `${data.assist.summary.shown} / ${data.count}` : data.count} ${esc(t("AI_COPILOT.MAILS", "Mails"))})</span>
@@ -376,11 +377,11 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
       ${bulkList(t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), data.assist.summary.next ? [data.assist.summary.next] : [])}
       <div class="bulk-summary-meta">
         <button type="button" class="text-btn ai-action text-btn-sm" data-action="m-bulk-summarize" data-force="1">
-          ${withAssist(t("AI_COPILOT.REGENERATE", "Mit KI neu erzeugen"))}
+          ${withAssist(t("AI_COPILOT.REGENERATE", "Neu erzeugen"))}
         </button>
         ${data.assist.summary.cached ? `<span class="quiet text-xs">${esc(t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher"))}</span>` : ""}
       </div>
-      <p class="quiet assist-caveat">${esc(t("AI_COPILOT.SUMMARY_CAVEAT", "Bitte mit den Mails abgleichen: Zusammenfassungen können Angaben falsch interpretieren."))}</p>
+      <p class="quiet assist-caveat">${esc(t("AI_COPILOT.SUMMARY_CAVEAT_BULK", "Bitte mit den Mails abgleichen: Zusammenfassungen können Angaben falsch wiedergeben."))}</p>
     </section>` : "";
 
   const aiReplies = (data.assist?.repliesList && data.assist.repliesList.length) ? `
