@@ -145,6 +145,8 @@ export class AssistController {
   async reloadSettings(app: Record<string, unknown>): Promise<void> {
     this.setFlags(await this.loadFlags(app));
     this.host.view.setAssist(this.assistFlags);
+    // The sidebar block was rebuilt empty; its counts are rule-based and cost no provider request.
+    this.refreshAlerts(true);
     // Tone, language or provider may have changed, so earlier results no longer fit.
     this.summaryCache.clear();
     this.replyCache.clear();

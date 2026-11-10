@@ -1280,7 +1280,7 @@
         "TRIAGE_LLM_HINT": "Mails dieser Seite mit KI einordnen (Absender, Betreff, Vorschau gehen an das Modell)",
         "CHECK_DUE": "Fristen mit KI auslesen",
         "CHECK_DUE_HINT": "Fristen und Fälligkeiten mit KI aus den Mails lesen",
-        "CHAT_EMPTY": "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“.",
+        "CHAT_EMPTY": "Fragen Sie zum Postfach oder zur geöffneten Mail, zum Beispiel:",
         "CHAT_PLACEHOLDER": "Nachricht an den Assistenten …",
         "SEND": "Senden",
         "RUN": "Ausführen",

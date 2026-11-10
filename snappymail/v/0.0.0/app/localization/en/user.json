@@ -1272,7 +1272,7 @@
         "TRIAGE_LLM_HINT": "Categorize this page with AI (sender, subject and preview are sent to the model)",
         "CHECK_DUE": "Read deadlines with AI",
         "CHECK_DUE_HINT": "Read deadlines from the emails with AI",
-        "CHAT_EMPTY": "Ask for example: \"Which emails are waiting for my reply?\", \"Show invoices from last month\" or \"Summarize the open email\".",
+        "CHAT_EMPTY": "Ask about your mailbox or the open email, for example:",
         "CHAT_PLACEHOLDER": "Message the assistant …",
         "SEND": "Send",
         "RUN": "Run",

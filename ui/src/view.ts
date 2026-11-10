@@ -2002,7 +2002,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="sheet-meta mono quiet">${esc(flags.provider)}</div>
         <p class="sr" id="chat-live" role="status"></p>
         <div class="sheet-log" id="chat-log">
-          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“."))}</p>
+          <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Postfach oder zur geöffneten Mail, zum Beispiel:"))}</p>
           <div class="prompts">${chatPrompts().map((text) => `<button type="button" class="prompt" data-action="prompt">${esc(text)}</button>`).join("")}</div>
         </div>
         <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
@@ -2773,7 +2773,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       if (!turns.length && !thinking) {
         const p = document.createElement("p");
         p.className = "quiet";
-        p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“.");
+        p.textContent = t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Postfach oder zur geöffneten Mail, zum Beispiel:");
         const prompts = document.createElement("div");
         prompts.className = "prompts";
         chatPrompts().forEach((text) => {

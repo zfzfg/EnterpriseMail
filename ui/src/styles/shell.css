@@ -2512,6 +2512,7 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .draft-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
 .draft-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; align-self: stretch; }
 .draft-panel[hidden] { display: none; }
+.draft-panel > .field { align-self: stretch; }
 .draft-hint { margin: 0; font-size: 12px; }
 .draft-tools .seg[hidden] { display: none; }
 .draft-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
