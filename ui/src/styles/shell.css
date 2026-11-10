@@ -2532,8 +2532,13 @@ dialog.closing::backdrop { animation: fade-out 120ms var(--ease-out) forwards !i
 .action { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
 .action > p { flex: 1 1 100%; margin: 0; }
 .draft-tools { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
-.draft-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.draft-heading > span:last-child { font-size: 12px; }
+.draft-tools[data-open="false"] { padding: 0; border-color: transparent; background: none; }
+.draft-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.draft-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.draft-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; align-self: stretch; }
+.draft-panel[hidden] { display: none; }
+.draft-hint { margin: 0; font-size: 12px; }
+.draft-tools .seg[hidden] { display: none; }
 .draft-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #draft-status { margin: 0; min-height: 18px; font-size: 12px; }
 .translate-copy { flex: 1 1 100%; }

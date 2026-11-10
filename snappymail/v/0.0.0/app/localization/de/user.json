@@ -1241,9 +1241,7 @@
         "REPLY_HINT": "Vorschlag auswählen und als bearbeitbaren Entwurf öffnen:",
         "SEARCH_INTERPRET": "Suchanfrage mit KI interpretieren",
         "SEARCH_SUGGESTION": "Vorgeschlagene Suche",
-        "SEARCH_RUN": "Suchen",
-        "DRAFT_ASSIST": "KI-Entwurf",
-        "DRAFT_EDIT_HINT": "Sie können das Ergebnis vor dem Senden bearbeiten.",
+        "SEARCH_RUN": "Suchen",        "DRAFT_EDIT_HINT": "Sie können das Ergebnis vor dem Senden bearbeiten.",
         "REVERT_DRAFT": "Vorherigen Text wiederherstellen",
         "CONTEXT": "Bezug",
         "TRACE_SEARCH": "%COUNT% Treffer in %FOLDER%",
@@ -1293,6 +1291,10 @@
         "PLACEHOLDER_WARNING": "Der KI-Text enthält noch Platzhalter wie [?]. Bitte ergänzen oder erneut auf Senden klicken.",
         "NO_FILTER_MATCH": "Keine Mails für diesen Filter.",
         "BULK_REPLIES_LIMIT": "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.",
+
+        "DRAFT_OPEN": "Mit KI schreiben",
+
+        "DRAFT_REVERTED": "Vorheriger Text wiederhergestellt.",
 
         "NEW_CHAT": "Neuer Chat",
 

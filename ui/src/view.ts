@@ -231,7 +231,9 @@ export interface MailView {
   closeSheet(): void;
   draftOptions(): DraftOptions;
   setDraftBody(text: string): void;
-  setDraftBusy(busy: boolean, status: string): void;
+  /** Puts the text from before the generation back, including whether it counted as AI text. */
+  revertDraft(text: string): void;
+  setDraftBusy(busy: boolean, status: string, canRevert?: boolean): void;
   setSubjectHint(subject: string): void;
   showTranslation(search: string, explanation: string): void;
   showSettings(snap: SettingsSnapshot): void;
@@ -239,6 +241,8 @@ export interface MailView {
   setBook(allowed: boolean, sync: boolean, mode: number): void;
   reloadBook(): Promise<void>;
 }
+
+const DRAFT_OPEN_KEY = "sm-assist-draft";
 
 export function createView(root: HTMLElement, actions: MailActions): MailView {
   let shell: HTMLElement | null = null;
@@ -1271,6 +1275,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           button.setAttribute("aria-pressed", button.dataset.cat === target.dataset.cat ? "true" : "false");
         });
         actions.assist?.("cat", target.dataset);
+      } else if (action === "toggle-draft") {
+        const open = target.getAttribute("aria-expanded") !== "true";
+        openDraftTools(open);
+        try { localStorage.setItem(DRAFT_OPEN_KEY, open ? "1" : "0"); } catch { /* storage is a convenience only */ }
+        if (open) (shell?.querySelector("#instruction") as HTMLElement | null)?.focus({ preventScroll: true });
       } else if (action === "mode" || action === "tone") {
         target.parentElement?.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
           button.setAttribute("aria-pressed", button === target ? "true" : "false");
@@ -1869,9 +1878,24 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   }
 
   /** Every opened composer starts the assistant from its own context, not the previous one. */
+  function openDraftTools(open: boolean): void {
+    const tools = shell?.querySelector<HTMLElement>(".draft-tools");
+    if (!tools) return;
+    tools.dataset.open = String(open);
+    (tools.querySelector("#draft-panel") as HTMLElement).hidden = !open;
+    tools.querySelector(".draft-toggle")?.setAttribute("aria-expanded", String(open));
+  }
+
   function presetDraftTools(seed: ComposeSeed): void {
     const tools = shell?.querySelector(".draft-tools");
     if (!tools) return;
+    let remembered = false;
+    try { remembered = localStorage.getItem(DRAFT_OPEN_KEY) === "1"; } catch { /* storage is a convenience only */ }
+    // An instruction handed over by the chat belongs in view.
+    openDraftTools(remembered || Boolean(seed.instruction));
+    // "Antwort" needs a mail to answer; elsewhere it would silently write a new mail.
+    const reply = tools.querySelector<HTMLElement>("[data-mode='reply']");
+    if (reply) reply.hidden = draftModeFor(seed) !== "reply";
     const press = (name: "mode" | "tone", value: string) => {
       const buttons = [...tools.querySelectorAll<HTMLButtonElement>(`[data-${name}]`)];
       const wanted = buttons.find((button) => button.dataset[name] === value) || buttons[0];
@@ -2009,8 +2033,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       tools.className = "draft-tools";
       const modes = [["new", "Neue Mail"], ["reply", "Antwort"], ["rewrite", "Umschreiben"], ["proofread", "Korrektur"]];
       const tones = [["professional", "Professionell"], ["friendly", "Freundlich"], ["casual", "Locker"], ["concise", "Knapp"], ["formal", "Förmlich"]];
+      tools.dataset.open = "false";
       tools.innerHTML = `
-        <div class="draft-heading"><span class="mono quiet">${esc(t("AI_COPILOT.DRAFT_ASSIST", "KI-Entwurf"))}</span><span class="quiet">${esc(t("AI_COPILOT.DRAFT_EDIT_HINT", "Sie können das Ergebnis vor dem Senden bearbeiten."))}</span></div>
+        <button type="button" class="text-btn ai-action draft-toggle" data-action="toggle-draft" aria-expanded="false" aria-controls="draft-panel">${withAssist(t("AI_COPILOT.DRAFT_OPEN", "Mit KI schreiben"))}${icon("chevron-down")}</button>
+        <div class="draft-panel" id="draft-panel" hidden>
+        <p class="quiet draft-hint">${esc(t("AI_COPILOT.DRAFT_EDIT_HINT", "Sie können das Ergebnis vor dem Senden bearbeiten."))}</p>
         <div class="modes" role="toolbar" aria-label="${esc(t("AI_COPILOT.DRAFT_KIND", "Art"))}">
           ${modes.map(([id, label], index) => `<button type="button" class="seg" data-action="mode" data-mode="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(t("AI_COPILOT.MODE_" + id.toUpperCase(), label))}</button>`).join("")}
         </div>
@@ -2024,7 +2051,16 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           <button type="button" class="text-btn" data-action="revert-draft" hidden>${esc(t("AI_COPILOT.REVERT_DRAFT", "Vorherigen Text wiederherstellen"))}</button>
         </div>
         <p class="subject-hint" id="subject-hint" hidden><span></span><button type="button" class="text-btn" data-action="apply-subject">${esc(t("AI_COPILOT.APPLY_SUBJECT", "Übernehmen"))}</button></p>
-        <p class="quiet" id="draft-status" role="status" aria-live="polite"></p>`;
+        <p class="quiet" id="draft-status" role="status" aria-live="polite"></p>
+        </div>`;
+      // Enter in the instruction writes the draft; it must never send the mail.
+      tools.querySelector("#instruction")?.addEventListener("keydown", (event) => {
+        const key = event as KeyboardEvent;
+        if (key.key !== "Enter" || key.isComposing) return;
+        key.preventDefault();
+        const generate = tools.querySelector<HTMLButtonElement>("[data-action='generate']");
+        if (generate && !generate.hidden) actions.assist?.("generate", {});
+      });
       shell.querySelector(".fields")?.prepend(tools);
     }
     const consent = document.createElement("dialog");
@@ -2837,14 +2873,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       };
     },
     setDraftBody(text) { composer?.setDraftText(text); },
-    setDraftBusy(busy, status) {
+    revertDraft(text) { composer?.restoreDraftText(text); },
+    setDraftBusy(busy, status, canRevert = false) {
       const generate = shell?.querySelector("[data-action='generate']") as HTMLButtonElement | null;
       const stop = shell?.querySelector("[data-action='stop-generate']") as HTMLButtonElement | null;
       const revert = shell?.querySelector("[data-action='revert-draft']") as HTMLButtonElement | null;
       const slot = shell?.querySelector("#draft-status");
       if (generate) generate.hidden = busy;
       if (stop) stop.hidden = !busy;
-      if (revert) revert.hidden = busy;
+      if (revert) revert.hidden = busy || !canRevert;
       if (slot) slot.textContent = status;
     },
     setSubjectHint(subject) {

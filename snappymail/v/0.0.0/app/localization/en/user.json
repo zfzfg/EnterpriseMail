@@ -1233,9 +1233,7 @@
         "REPLY_HINT": "Choose a suggestion to open it as an editable draft:",
         "SEARCH_INTERPRET": "Interpret search with AI",
         "SEARCH_SUGGESTION": "Suggested search",
-        "SEARCH_RUN": "Search",
-        "DRAFT_ASSIST": "AI draft",
-        "DRAFT_EDIT_HINT": "You can edit the result before sending.",
+        "SEARCH_RUN": "Search",        "DRAFT_EDIT_HINT": "You can edit the result before sending.",
         "REVERT_DRAFT": "Restore previous text",
         "CONTEXT": "Context",
         "TRACE_SEARCH": "%COUNT% results in %FOLDER%",
@@ -1285,6 +1283,10 @@
         "PLACEHOLDER_WARNING": "The AI text still contains placeholders such as [?]. Fill them in, or click Send again.",
         "NO_FILTER_MATCH": "No email matches this filter.",
         "BULK_REPLIES_LIMIT": "Suggestions cover the first %LIMIT% of %COUNT% emails.",
+
+        "DRAFT_OPEN": "Write with AI",
+
+        "DRAFT_REVERTED": "Previous text restored.",
 
         "NEW_CHAT": "New chat",
 

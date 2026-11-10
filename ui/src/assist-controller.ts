@@ -742,7 +742,10 @@ export class AssistController {
     }
     if (name === "generate") await this.generate();
     if (name === "stop-generate") this.draftAbort?.abort();
-    if (name === "revert-draft") this.host.view.setDraftBody(this.draftBackup);
+    if (name === "revert-draft") {
+      this.host.view.revertDraft(this.draftBackup);
+      this.host.view.setDraftBusy(false, t("AI_COPILOT.DRAFT_REVERTED", "Vorheriger Text wiederhergestellt."));
+    }
     if (name === "apply-subject") {
       const hint = document.querySelector("#subject-hint") as HTMLElement | null;
       const subject = hint?.dataset.subject || "";
@@ -773,6 +776,8 @@ export class AssistController {
     this.draftAbort = new AbortController();
     this.host.view.setDraftBusy(true, t("AI_COPILOT.DRAFT_WRITING", "Entwurf wird geschrieben …"));
     let streamed = "";
+    // Only a generation that wrote into the mail has something to take back.
+    let wrote = false;
     try {
       await streamEvents("AiStream", {
         mode: options.mode,
@@ -787,21 +792,23 @@ export class AssistController {
         if (event === "delta") {
           streamed += String(payload.text || "");
           this.host.view.setDraftBody(streamed);
+          wrote = true;
         }
         if (event === "done") {
           this.host.view.setDraftBody(String(payload.body || streamed));
+          wrote = true;
           this.host.view.setSubjectHint(String(payload.subject || ""));
           this.summaryModel = String(payload.model || "");
         }
         if (event === "error") throw new ApiError(1, String(payload.error || t("AI_COPILOT.ERROR_STREAM", "Verbindung unterbrochen.")), "", String(payload.code || ""));
       }, this.draftAbort.signal);
-      this.host.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingefügt.")}${this.summaryModel ? ` · ${this.summaryModel}` : ""}`);
+      this.host.view.setDraftBusy(false, `${t("AI_COPILOT.DRAFT_INSERTED", "Entwurf eingefügt.")}${this.summaryModel ? ` · ${this.summaryModel}` : ""}`, wrote);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        this.host.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."));
+        this.host.view.setDraftBusy(false, t("AI_COPILOT.ERROR_ABORT", "Abgebrochen."), wrote);
         return;
       }
-      this.host.view.setDraftBusy(false, this.assistError(error, () => void this.generate()));
+      this.host.view.setDraftBusy(false, this.assistError(error, () => void this.generate()), wrote);
     }
   }
 

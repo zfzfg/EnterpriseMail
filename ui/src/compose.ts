@@ -253,6 +253,8 @@ export class Composer {
   private seed: ComposeSeed | null = null;
   private draftRegion: DraftRegion | null = null;
   private assisted = false;
+  /** Whether the text counted as AI text when the running generation started. */
+  private assistedBefore = false;
   private placeholderWarned = false;
   private mode: "html" | "plain" = "plain";
   private draftRef: { folder: string; uid: number } | null = null;
@@ -443,7 +445,12 @@ export class Composer {
     document.addEventListener("keydown", (event) => {
       if (this.root.hidden || this.minimized || this.closeDialog.open) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.save(false); }
-      else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); this.send(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        // The assistant's instruction field handles Enter itself.
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        this.send();
+      }
       else if (event.key === "Escape" && !this.root.querySelector("dialog[open]")) { event.preventDefault(); void this.requestClose(); }
     });
   }
@@ -1056,6 +1063,8 @@ export class Composer {
   /** The user's own text, without the quoted mail and signature. */
   draftText(): string {
     this.draftRegion = this.captureDraftRegion();
+    // Read at the start of each generation, so a later revert can put this state back.
+    this.assistedBefore = this.assisted;
     return this.draftRegion.own;
   }
 
@@ -1066,6 +1075,12 @@ export class Composer {
     this.assisted = true;
     this.placeholderWarned = false;
     this.changed();
+  }
+
+  /** Undoes a generation: the earlier text returns, and the placeholder check only applies if that was AI text too. */
+  restoreDraftText(text: string): void {
+    this.setDraftText(text);
+    this.assisted = this.assistedBefore;
   }
 
   /** The mail this composer answers, independent of what the reader shows now. */

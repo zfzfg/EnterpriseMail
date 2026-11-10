@@ -1041,6 +1041,9 @@ try {
       assert.ok(saved && /"inReplyTo":"[^"]+"/.test(saved.body) && /"draftInfo":\["reply/.test(saved.body), "Reply lost its threading");
     });
     await step("A generated draft replaces only the own text", async () => {
+      // The draft panel starts collapsed to one line.
+      await page.$eval(".draft-tools [data-action='toggle-draft']", (button) => { if (button.getAttribute("aria-expanded") !== "true") button.click(); });
+      await page.waitForSelector(".draft-tools [data-action='generate']", { visible: true });
       await page.click(".draft-tools [data-action='generate']");
       await page.waitForFunction(() => /eingefügt|inserted/i.test(document.querySelector("#draft-status")?.textContent || ""), { timeout: 30_000 });
       const body = await composerBody();
@@ -1065,7 +1068,7 @@ try {
       await ask("markiere die erste Mail", 1);
       await ask("lese die erste Mail", 2);
       const cards = await page.$$eval("#chat-log .action", (nodes) => nodes.map((node) => node.textContent || ""));
-      assert.ok(/Markieren|Flag/.test(cards[0]) && /1 mail/i.test(cards[0]) && cards[0].includes("INBOX"), cards[0]);
+      assert.ok(/Markieren|Flag/.test(cards[0]) && /1 e?mail/i.test(cards[0]) && cards[0].includes("INBOX"), cards[0]);
       assert.ok(/Als gelesen|Mark as read/.test(cards[1]), cards[1]);
       await shot("assistant-chat-actions");
       await page.click("#chat-log [data-action='run-action'][data-turn='1']");
