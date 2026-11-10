@@ -28,7 +28,7 @@ If applicable, add screenshots to help explain your problem.
 - IMAP daemon: [e.g. courier, dovecot]
 - PHP version:
 - SnappyMail Version:
-- Mode: [e.g. standalone, nextcloud, cyberpanel, docker]
+- Mode: [e.g. standalone, docker]
 
 **Debug/logging information**
 [Read here how to log](https://github.com/the-djmaze/snappymail/wiki/FAQ#how-do-i-enable-logging)

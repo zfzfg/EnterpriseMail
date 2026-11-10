@@ -41,5 +41,4 @@ config="$smoke/data/_data_/_default_/configs/application.ini"
 test -s "$config"
 php -r '$c = parse_ini_file($argv[1], true, INI_SCANNER_TYPED); if (($c["repository"]["url"] ?? "missing") !== "" || ($c["admin_panel"]["allow_update"] ?? true) !== false) { fwrite(STDERR, "Unsafe updater defaults in release archive\n"); exit(1); }' "$config"
 
-git diff --exit-code -- integrations/cloudron integrations/virtualmin
 printf 'Release package and PHP-only bootstrap passed for %s\n' "$version"

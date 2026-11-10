@@ -4,7 +4,7 @@ define('ROOT_DIR', dirname(__DIR__));
 chdir(ROOT_DIR);
 require ROOT_DIR . '/snappymail/v/0.0.0/app/libraries/snappymail/tar.php';
 
-$options = getopt('', ['aur','docker','plugins','plugins-all','frontend-dist','skip-gulp','debian','nextcloud','owncloud','cpanel','sign']);
+$options = getopt('', ['aur','docker','plugins','plugins-all','frontend-dist','skip-gulp','debian','sign']);
 if (isset($options['skip-gulp'])) {
 	fwrite(STDERR, "--skip-gulp is deprecated; use --frontend-dist to package the committed TypeScript build.\n");
 	$options['frontend-dist'] = true;
@@ -19,15 +19,6 @@ $package = json_decode(file_get_contents('package.json'));
 /**
  * Update files that contain version
  */
-// cloudron
-$file = ROOT_DIR . '/integrations/cloudron/Dockerfile';
-file_put_contents($file, preg_replace('/VERSION=[0-9.]+/', "VERSION={$package->version}", file_get_contents($file)));
-$file = ROOT_DIR . '/integrations/cloudron/DESCRIPTION.md';
-file_put_contents($file, preg_replace('/<upstream>[^<]*</', "<upstream>{$package->version}<", file_get_contents($file)));
-// virtualmin
-$file = ROOT_DIR . '/integrations/virtualmin/snappymail.pl';
-file_put_contents($file, preg_replace('/return \\( "[0-9]+\\.[0-9]+\\.[0-9]+" \\)/', "return ( \"{$package->version}\" )", file_get_contents($file)));
-
 // Arch User Repository
 // https://aur.archlinux.org/packages/snappymail/
 $options['aur'] = isset($options['aur']);
@@ -175,18 +166,6 @@ if ($tar instanceof PharData) {
 
 echo "{$zip_destination} created\n{$tgz_destination} created\n";
 
-if (isset($options['nextcloud'])) {
-	require(ROOT_DIR . '/build/nextcloud.php');
-}
-
-if (isset($options['owncloud'])) {
-	require(ROOT_DIR . '/build/owncloud.php');
-}
-
-if (isset($options['cpanel'])) {
-	require(ROOT_DIR . '/build/cpanel.php');
-}
-
 rename("snappymail/v/{$package->version}", 'snappymail/v/0.0.0');
 
 file_put_contents("{$destPath}core.json", '{
@@ -267,15 +246,6 @@ if (isset($options['sign'])) {
 	$gpg_sign = $gpg . '--armor --detach-sign ';
 	passthru($gpg_sign . escapeshellarg($tgz_destination), $return_var);
 	passthru($gpg_sign . escapeshellarg($zip_destination), $return_var);
-	if (isset($options['nextcloud'])) {
-		passthru($gpg_sign . escapeshellarg("{$destPath}snappymail-{$package->version}-nextcloud.tar.gz"), $return_var);
-	}
-	if (isset($options['owncloud'])) {
-		passthru($gpg_sign . escapeshellarg("{$destPath}snappymail-{$package->version}-owncloud.tar.gz"), $return_var);
-	}
-	if (isset($options['cpanel'])) {
-		passthru($gpg_sign . escapeshellarg("{$destPath}snappymail-{$package->version}-cpanel.tar.gz"), $return_var);
-	}
 	if (isset($options['debian'])) {
 		passthru($gpg_sign
 			. escapeshellarg(ROOT_DIR . "/build/dist/releases/webmail/{$package->version}/" . basename(DEB_DEST_DIR.'.deb')), $return_var);
