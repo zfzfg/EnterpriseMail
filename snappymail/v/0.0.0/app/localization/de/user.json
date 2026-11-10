@@ -1257,7 +1257,7 @@
         "QUICK_REPLIES": "Antwortvorschläge",
         "QUICK_REPLIES_HINT": "Drei Antwortvorschläge erzeugen",
         "ASK_COPILOT": "Assistent fragen",
-        "ASK_COPILOT_HINT": "Den Assistenten zu dieser Mail fragen",
+        "ASK_COPILOT_HINT": "Den Assistenten zur geöffneten Mail oder zum Postfach fragen",
         "REGENERATE": "Neu erzeugen",
         "GENERATE": "Erzeugen",
         "WORKING": "Wird erstellt …",
@@ -1293,6 +1293,10 @@
         "PLACEHOLDER_WARNING": "Der KI-Text enthält noch Platzhalter wie [?]. Bitte ergänzen oder erneut auf Senden klicken.",
         "NO_FILTER_MATCH": "Keine Mails für diesen Filter.",
         "BULK_REPLIES_LIMIT": "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.",
+
+        "NEW_CHAT": "Neuer Chat",
+
+        "CHAT_KEYS": "Enter sendet, Umschalt+Enter beginnt eine neue Zeile",
 
         "COPY": "Kopieren",
 

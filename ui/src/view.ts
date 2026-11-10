@@ -244,6 +244,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
   let shell: HTMLElement | null = null;
   let opener: HTMLElement | null = null;
   const noteTimers: Partial<Record<AssistPlace, number>> = {};
+  /** Chat turns already read out, so a repaint does not announce an answer twice. */
+  let chatAnnounced = 0;
   let section = "look";
   let edit: DeskEdit | null = null;
   let snap: SettingsSnapshot | null = null;
@@ -487,7 +489,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-spam" data-one="1" title="${esc(t("MESSAGE.BUTTON_SPAM", "Spam"))}" hidden>${withIcon("spam", t("MESSAGE.BUTTON_SPAM", "Spam"))}</button>
               <button type="button" class="text-btn bar-btn" data-direct="1" data-action="m-notspam" data-one="1" title="${esc(t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam"))}" hidden>${withIcon("not-spam", t("MESSAGE.BUTTON_NOT_SPAM", "Kein Spam"))}</button>
             </div>
-            <div class="bar-group bar-assist"></div>
+            <div class="bar-group bar-assist" role="group" aria-label="${esc(t("APP_TEXT.ASSISTANT", "Assistent"))}"></div>
             <div class="bar-group bar-end" role="group" aria-label="${esc(t("MESSAGE.MORE_AND_NAVIGATION", "Weitere Aktionen und Navigation"))}">
               <div class="bar-more">
                 <button type="button" class="icon-btn" data-direct="1" data-action="m-more" data-one="1" aria-label="${esc(t("MESSAGE.MORE_ACTIONS", "Weitere Aktionen"))}" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" title="${esc(t("MESSAGE.MORE_ACTIONS", "Weitere Aktionen"))}" hidden>${icon("more")}</button>
@@ -922,6 +924,14 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     requestAnimationFrame(() => { layer.dataset.open = "true"; });
   }
 
+  function openChat(from: HTMLElement | null): void {
+    const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
+    if (!sheet) return;
+    if (!wide()) pane("reader");
+    openLayer(sheet, from);
+    (sheet.querySelector("#ask") as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
+  }
+
   function closeLayer(layer: HTMLElement): void {
     const back = opener;
     opener = null;
@@ -1251,9 +1261,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
         if (sheet) closeLayer(sheet);
       } else if (action === "open-sheet") {
-        if (!wide()) pane("reader");
-        const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
-        if (sheet) openLayer(sheet, target);
+        openChat(target);
       } else if (action === "close-translation") {
         const box = shell?.querySelector("#translated") as HTMLElement | null;
         if (box) box.hidden = true;
@@ -1539,6 +1547,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
           back?.focus({ preventScroll: true });
           return;
         }
+        const chat = shell?.querySelector<HTMLElement>(".sheet:not([hidden])");
+        if (chat && chat.contains(document.activeElement)) {
+          event.preventDefault();
+          closeLayer(chat);
+          return;
+        }
         if (shell?.dataset.full === "true") { toggleFullscreen(false); return; }
         if (!docked() && shell?.dataset.sidebar === "open") { setSidebar(false); return; }
         const selHead = shell?.querySelector("#selection-head:not([hidden])");
@@ -1589,8 +1603,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         (shell?.querySelector("#keys") as HTMLDialogElement).showModal();
       } else if (event.key === "." && (event.ctrlKey || event.metaKey) && shell?.querySelector(".sheet")) {
         event.preventDefault();
-        if (!wide()) pane("reader");
-        openLayer(shell.querySelector(".sheet") as HTMLElement, null);
+        openChat(document.activeElement instanceof HTMLElement ? document.activeElement : null);
       } else if (key === "a" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         actions.act("select-all", {});
@@ -1941,7 +1954,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     }
     if (flags.chat) {
       const ask = document.createElement("button");
-      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Den Assistenten zu dieser Mail fragen");
+      const askHint = t("AI_COPILOT.ASK_COPILOT_HINT", "Den Assistenten zur geöffneten Mail oder zum Postfach fragen");
       ask.type = "button";
       ask.className = "text-btn assist-trigger ai-action";
       ask.dataset.action = "open-sheet";
@@ -1949,6 +1962,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       ask.classList.add("bar-btn", "primary");
       ask.title = askHint;
       ask.setAttribute("aria-label", askHint);
+      ask.setAttribute("aria-keyshortcuts", "Control+.");
       shell.querySelector(".reader-bar .bar-assist")?.append(ask);
       const sheet = document.createElement("aside");
       sheet.className = "sheet";
@@ -1958,9 +1972,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <div class="sheet-head">
           <h2 class="title title-md" id="copilot-title">${esc(t("AI_COPILOT.ASK_COPILOT", "Assistent fragen"))}</h2>
           <span class="spacer"></span>
+          <button type="button" class="text-btn" data-action="new-chat">${withIcon("plus", t("AI_COPILOT.NEW_CHAT", "Neuer Chat"))}</button>
           <button type="button" class="icon-btn" data-action="close-sheet" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>
         </div>
         <div class="sheet-meta mono quiet">${esc(flags.provider)}</div>
+        <p class="sr" id="chat-live" role="status"></p>
         <div class="sheet-log" id="chat-log">
           <p class="quiet">${esc(t("AI_COPILOT.CHAT_EMPTY", "Fragen Sie zum Beispiel: „Welche Mails warten auf meine Antwort?“, „Zeig mir Rechnungen vom letzten Monat“ oder „Fasse die geöffnete Mail zusammen“."))}</p>
           <div class="prompts">${chatPrompts().map((text) => `<button type="button" class="prompt" data-action="prompt">${esc(text)}</button>`).join("")}</div>
@@ -1968,12 +1984,25 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <button type="button" class="text-btn context-chip" data-action="drop-context" id="context-chip" hidden></button>
         <form class="sheet-form" data-action="ask">
           <label class="sr" for="ask">${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an den Assistenten …"))}</label>
-          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an den Assistenten …"))}"></textarea>
+          <textarea id="ask" rows="2" placeholder="${esc(t("AI_COPILOT.CHAT_PLACEHOLDER", "Nachricht an den Assistenten …"))}" title="${esc(t("AI_COPILOT.CHAT_KEYS", "Enter sendet, Umschalt+Enter beginnt eine neue Zeile"))}" aria-keyshortcuts="Enter"></textarea>
           <button type="submit" class="ink-btn">${esc(t("AI_COPILOT.SEND", "Senden"))}</button>
           <button type="button" class="text-btn" data-action="stop-chat" hidden>${withIcon("stop", t("AI_COPILOT.STOP", "Stopp"))}</button>
         </form>
         <p class="error sheet-error" id="chat-error" role="alert" hidden></p>`;
       shell.querySelector(".reader")?.append(sheet);
+      sheet.querySelector("#ask")?.addEventListener("keydown", (event) => {
+        const key = event as KeyboardEvent;
+        if (key.key !== "Enter" || key.shiftKey || key.ctrlKey || key.metaKey || key.altKey || key.isComposing) return;
+        key.preventDefault();
+        (sheet.querySelector(".sheet-form") as HTMLFormElement | null)?.requestSubmit();
+      });
+      const keys = shell.querySelector("#keys ul");
+      if (keys) {
+        const row = document.createElement("li");
+        row.dataset.assistNode = "1";
+        row.innerHTML = `<span>${esc(t("AI_COPILOT.ASK_COPILOT", "Assistent fragen"))}</span><kbd>${esc(t("APP_TEXT.CTRL", "Strg"))}</kbd> <kbd>.</kbd>`;
+        keys.append(row);
+      }
     }
     if (flags.draft) {
       const tools = document.createElement("div");
@@ -2000,9 +2029,11 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     }
     const consent = document.createElement("dialog");
     consent.id = "consent";
+    consent.setAttribute("aria-labelledby", "consent-title");
+    consent.setAttribute("aria-describedby", "consent-text");
     consent.innerHTML = `
       <div class="dialog-body">
-        <h2 class="title title-md">${esc(t("APP_TEXT.ASSISTANT", "Assistent"))}</h2>
+        <h2 class="title title-md" id="consent-title">${esc(t("APP_TEXT.ASSISTANT", "Assistent"))}</h2>
         <p id="consent-text"></p>
         <div class="dialog-actions">
           <button type="button" class="text-btn" value="cancel">${esc(t("GLOBAL.CANCEL", "Abbrechen"))}</button>
@@ -2719,6 +2750,12 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       turns.forEach((turn, turnIndex) => {
         const item = document.createElement("article");
         item.className = turn.role === "user" ? "bubble" : "assistant";
+        if (turn.role === "assistant") {
+          const who = document.createElement("span");
+          who.className = "mono quiet assist-label";
+          who.innerHTML = `${icon("assist")}<span>${esc(t("APP_TEXT.ASSISTANT", "Assistent"))}</span>`;
+          item.append(who);
+        }
         if (turn.trace.length) {
           const trace = document.createElement("p");
           trace.className = "mono quiet";
@@ -2774,13 +2811,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         log.append(p);
       }
       log.scrollTop = log.scrollHeight;
+      const live = shell?.querySelector("#chat-live");
+      const last = turns[turns.length - 1];
+      if (live && turns.length !== chatAnnounced) {
+        live.textContent = last?.role === "assistant" && turns.length > chatAnnounced ? last.text : "";
+        chatAnnounced = turns.length;
+      }
     },
     openSheet() {
-      const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
-      if (!sheet) return;
-      if (!wide()) pane("reader");
-      openLayer(sheet, document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      (shell?.querySelector("#ask") as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
+      openChat(document.activeElement instanceof HTMLElement ? document.activeElement : null);
     },
     closeSheet() {
       const sheet = shell?.querySelector(".sheet") as HTMLElement | null;

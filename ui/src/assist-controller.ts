@@ -96,6 +96,8 @@ export class AssistController {
   private turns: ChatTurn[] = [];
   private chatBusy = false;
   private chatAbort: AbortController | null = null;
+  /** Counts conversations: an answer that arrives for an earlier one is dropped. */
+  private chatSession = 0;
   private assistRunning = new Set<string>();
   private translatedFolder = "";
   private chatKnown: string[] = [];
@@ -673,6 +675,7 @@ export class AssistController {
       this.host.view.setChat(this.turns, t("AI_COPILOT.CHAT_WORKING", "Assistent arbeitet …"), this.contextLabel());
       const controller = new AbortController();
       this.chatAbort = controller;
+      const session = this.chatSession;
       try {
         const result = await plugin<{ reply: string; actions?: Record<string, unknown>[]; trace?: ChatTrace[]; known?: string[] }>("AiChat", {
           messages: this.chat,
@@ -682,6 +685,7 @@ export class AssistController {
           sent: this.host.sentFolder,
           timezone: timezone()
         }, controller.signal);
+        if (session !== this.chatSession) return;
         this.chatKnown = result.known || [];
         const reply = result.reply || ((result.actions || []).length ? t("APP_TEXT.SUGGESTIONS", "Vorschläge:") : t("APP_TEXT.NO_ANSWER_RECEIVED", "Keine Antwort erhalten."));
         this.chat.push({ role: "assistant", content: reply });
@@ -693,6 +697,7 @@ export class AssistController {
         });
         this.host.view.setChat(this.turns, "", this.contextLabel());
       } catch (error) {
+        if (session !== this.chatSession) return;
         // Take the question back so sending it again is one deliberate click.
         this.chat.pop();
         this.turns.pop();
@@ -703,6 +708,17 @@ export class AssistController {
         this.chatBusy = false;
         this.chatAbort = null;
       }
+      return;
+    }
+    if (name === "new-chat") {
+      this.chatSession++;
+      this.chatAbort?.abort();
+      this.chat = [];
+      this.turns = [];
+      this.chatKnown = [];
+      this.useContext = true;
+      this.host.view.setChat(this.turns, "", this.contextLabel());
+      this.host.view.openSheet();
       return;
     }
     if (name === "stop-chat") {

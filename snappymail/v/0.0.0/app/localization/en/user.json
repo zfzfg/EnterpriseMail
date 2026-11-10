@@ -1249,7 +1249,7 @@
         "QUICK_REPLIES": "Reply suggestions",
         "QUICK_REPLIES_HINT": "Generate three reply suggestions",
         "ASK_COPILOT": "Ask the assistant",
-        "ASK_COPILOT_HINT": "Ask the assistant about this email",
+        "ASK_COPILOT_HINT": "Ask the assistant about the open email or your mailbox",
         "REGENERATE": "Regenerate",
         "GENERATE": "Generate",
         "WORKING": "Working …",
@@ -1285,6 +1285,10 @@
         "PLACEHOLDER_WARNING": "The AI text still contains placeholders such as [?]. Fill them in, or click Send again.",
         "NO_FILTER_MATCH": "No email matches this filter.",
         "BULK_REPLIES_LIMIT": "Suggestions cover the first %LIMIT% of %COUNT% emails.",
+
+        "NEW_CHAT": "New chat",
+
+        "CHAT_KEYS": "Enter sends, Shift+Enter starts a new line",
 
         "COPY": "Copy",
 
