@@ -1911,7 +1911,7 @@ class Session implements AssistHost {
     }
     this.view.setStrip(null);
     this.view.notice("");
-    this.assistant.keepCheckedReplies();
+    this.assistant.syncBulkSelection();
     const checkedUids = [...this.checked];
     const selectedMsgs = checkedUids
       .map((uid) => this.messages.find((m) => m.uid === uid))

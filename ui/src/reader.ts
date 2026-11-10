@@ -104,6 +104,8 @@ export interface BulkAssistState {
   loadingSummary?: string;
   loadingReplies?: string;
   error?: string;
+  /** The action a failed request can be repeated with. */
+  errorAction?: string;
   summary?: BulkSummaryState | null;
   repliesList?: BulkReplyItem[];
   repliesNote?: string;
@@ -355,10 +357,14 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
       <span class="mono quiet">${esc(title)}</span>
       <ul class="bulk-summary-points">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "";
 
+  // One provider run at a time: a second click would only be dropped.
+  const busyAttr = data.assist?.loadingSummary || data.assist?.loadingReplies ? ` disabled aria-busy="true"` : "";
+
   const aiStatus = (data.assist && (data.assist.loadingSummary || data.assist.loadingReplies || data.assist.error)) ? `
     <div class="bulk-ai-status ${data.assist.error ? "error" : "quiet"}" role="${data.assist.error ? "alert" : "status"}">
       ${icon(data.assist.error ? "error" : "loading")}
       <span>${esc(data.assist.error || data.assist.loadingSummary || data.assist.loadingReplies || "")}</span>
+      ${data.assist.error && data.assist.errorAction ? `<button type="button" class="text-btn" data-action="${esc(data.assist.errorAction)}" data-force="1">${esc(t("AI_COPILOT.RETRY", "Erneut versuchen"))}</button>` : ""}
     </div>` : "";
 
   const aiSummary = data.assist?.summary ? `
@@ -367,6 +373,7 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
         <span class="mono quiet">${withAssist(t("AI_COPILOT.BULK_SUMMARY_TITLE", "Zusammenfassung aller ausgewählten Mails"))}</span>
         <span class="quiet">(${data.assist.summary.shown && data.assist.summary.shown < data.count ? `${data.assist.summary.shown} / ${data.count}` : data.count} ${esc(t("AI_COPILOT.MAILS", "Mails"))})</span>
       </div>
+      ${data.assist.summary.shown && data.assist.summary.shown < data.count ? `<p class="assist-limit">${esc(t("AI_COPILOT.BULK_SUMMARY_LIMIT", "Nur die neuesten %LIMIT% von %COUNT% Mails sind berücksichtigt.").replace("%LIMIT%", String(data.assist.summary.shown)).replace("%COUNT%", String(data.count)))}</p>` : ""}
       <p class="bulk-summary-tldr">${esc(data.assist.summary.tldr)}</p>
       ${data.assist.summary.points && data.assist.summary.points.length ? `
         <ul class="bulk-summary-points">
@@ -376,7 +383,7 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
       ${bulkList(t("AI_COPILOT.TASKS", "Aufgaben"), data.assist.summary.actions)}
       ${bulkList(t("AI_COPILOT.NEXT_STEP", "Nächster Schritt"), data.assist.summary.next ? [data.assist.summary.next] : [])}
       <div class="bulk-summary-meta">
-        <button type="button" class="text-btn ai-action text-btn-sm" data-action="m-bulk-summarize" data-force="1">
+        <button type="button" class="text-btn ai-action" data-action="m-bulk-summarize" data-force="1"${busyAttr}>
           ${withAssist(t("AI_COPILOT.REGENERATE", "Neu erzeugen"))}
         </button>
         ${data.assist.summary.cached ? `<span class="quiet text-xs">${esc(t("AI_COPILOT.CACHED", "Aus dem Zwischenspeicher"))}</span>` : ""}
@@ -479,8 +486,8 @@ export function renderBulk(body: HTMLElement, data: BulkData): void {
           <div class="bulk-card bulk-card--ai">
             <h3 class="bulk-card-title mono">${withAssist(t("AI_COPILOT.CARD_TITLE", "KI-Unterstützung"))}</h3>
             <div class="bulk-btn-group">
-              ${data.assist.summarize ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-summarize" title="${esc(t("AI_COPILOT.BULK_SUMMARIZE_HINT", "Alle ausgewählten Mails mit KI zusammenfassen"))}">${withAssist(t("AI_COPILOT.BULK_SUMMARIZE", "Auswahl zusammenfassen"))}</button>` : ""}
-              ${data.assist.replies ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-replies" title="${esc(t("AI_COPILOT.BULK_REPLIES_HINT", "Antwortvorschläge für jede ausgewählte Mail erstellen"))}">${withAssist(t("AI_COPILOT.BULK_REPLIES", "Antworten für alle vorschlagen"))}</button>` : ""}
+              ${data.assist.summarize ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-summarize"${busyAttr} title="${esc(t("AI_COPILOT.BULK_SUMMARIZE_HINT", "Alle ausgewählten Mails mit KI zusammenfassen"))}">${withAssist(t("AI_COPILOT.BULK_SUMMARIZE", "Auswahl zusammenfassen"))}</button>` : ""}
+              ${data.assist.replies ? `<button type="button" class="text-btn bulk-btn ai-action" data-action="m-bulk-replies"${busyAttr} title="${esc(t("AI_COPILOT.BULK_REPLIES_HINT", "Antwortvorschläge für jede ausgewählte Mail erstellen"))}">${withAssist(t("AI_COPILOT.BULK_REPLIES", "Antworten für alle vorschlagen"))}</button>` : ""}
             </div>
           </div>` : ""}
 

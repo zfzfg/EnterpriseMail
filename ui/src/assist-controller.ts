@@ -105,6 +105,9 @@ export class AssistController {
   private replyCache = new BoundedCache<string, AssistReply[]>(AI_CACHE_ENTRIES, AI_CACHE_BYTES, (value) => JSON.stringify(value).length);
   private replies: { label: string; body: string }[] = [];
   private bulkSummary: BulkSummaryState | null = null;
+  /** The selection the bulk summary describes; any other selection must not show it. */
+  private bulkSummaryKey = "";
+  private bulkErrorAction: "m-bulk-summarize" | "m-bulk-replies" | "" = "";
   private bulkSummaryLoading = "";
   private bulkSummaryError = "";
   private bulkRepliesList: BulkReplyItem[] = [];
@@ -178,8 +181,14 @@ export class AssistController {
     try { await this.ensureTagged(); } catch { /* Der Filter zeigt dann den letzten Stand. */ }
   }
 
-  keepCheckedReplies(): void {
+  /** Results follow the selection: replies of unchecked mails go, and a summary of another selection is dropped. */
+  syncBulkSelection(): void {
     if (this.bulkRepliesList.length) this.bulkRepliesList = this.bulkRepliesList.filter((r) => this.host.checked.has(r.uid));
+    if (this.bulkSummary && this.bulkSummaryKey !== this.bulkKey()) this.bulkSummary = null;
+  }
+
+  private bulkKey(): string {
+    return assistKey(this.host.folder, [...this.host.checked]);
   }
 
   bulkState(): BulkAssistState | undefined {
@@ -190,6 +199,7 @@ export class AssistController {
           loadingSummary: this.bulkSummaryLoading || undefined,
           loadingReplies: this.bulkRepliesLoading || undefined,
           error: this.bulkSummaryError || this.bulkRepliesError || undefined,
+          errorAction: this.bulkErrorAction || undefined,
           summary: this.bulkSummary,
           repliesList: this.bulkRepliesList.length ? this.bulkRepliesList : undefined,
           repliesNote: this.bulkRepliesList.length && this.host.checked.size > BULK_REPLY_LIMIT
@@ -201,6 +211,8 @@ export class AssistController {
 
   clearBulkState(): void {
     this.bulkSummary = null;
+    this.bulkSummaryKey = "";
+    this.bulkErrorAction = "";
     this.bulkSummaryLoading = "";
     this.bulkSummaryError = "";
     this.bulkRepliesList = [];
@@ -363,7 +375,7 @@ export class AssistController {
       try {
         await this.ensureTagged();
       } catch (error) {
-        this.host.view.notice(explain(error));
+        this.host.view.assistNote("list", explain(error), "error");
         return;
       }
       this.host.offset = 0;
@@ -403,7 +415,7 @@ export class AssistController {
       const input = document.querySelector("#search") as HTMLInputElement | null;
       const text = query || input?.value.trim() || "";
       if (!text) return;
-      this.host.view.notice(t("AI_COPILOT.WORKING", "Wird erstellt …"));
+      this.host.view.assistNote("list", t("AI_COPILOT.WORKING", "Wird erstellt …"));
       try {
         const result = await plugin<{ search: string; explanation?: string; folder?: string }>("AiSearch", {
           query: text,
@@ -414,10 +426,10 @@ export class AssistController {
         });
         // Nothing changes until the user accepts the suggestion with "Suchen".
         this.translatedFolder = result.folder || "";
-        this.host.view.notice("");
+        this.host.view.assistNote("list", "");
         this.host.view.showTranslation(result.search, [result.explanation, result.folder].filter(Boolean).join(" · "));
       } catch (error) {
-        this.host.view.notice(this.assistError(error, () => void this.assist(name, data)));
+        this.host.view.assistNote("list", this.assistError(error, () => void this.assist(name, data)), "error");
       }
       return;
     }
@@ -428,6 +440,7 @@ export class AssistController {
       this.host.view.pressCategory("all");
       if (this.translatedFolder && this.translatedFolder !== this.host.folder) await this.host.selectFolder(this.translatedFolder);
       this.translatedFolder = "";
+      this.host.view.hideTranslation();
       await this.host.setSearch(query);
       return;
     }
@@ -489,9 +502,11 @@ export class AssistController {
       if (!await this.consent()) return;
       this.bulkSummaryLoading = t("AI_COPILOT.BULK_SUMMARIZING", "Ausgewählte Mails werden zusammengefasst …");
       this.bulkSummaryError = "";
+      this.bulkErrorAction = "";
+      const key = this.bulkKey();
+      const selected = this.host.checked.size;
       this.host.paintBulk();
       try {
-        const key = assistKey(this.host.folder, [...this.host.checked]);
         const known = data.force === "1" ? undefined : this.summaryCache.get(key);
         const summary = known || (await plugin<{ summary: AssistSummary }>("AiSummarize", {
           folder: this.host.folder,
@@ -499,20 +514,28 @@ export class AssistController {
           selection: true
         })).summary || {};
         this.summaryCache.set(key, summary);
+        this.bulkSummaryLoading = "";
+        // The selection moved on while the provider answered: keep the result cached, show nothing stale.
+        if (key !== this.bulkKey()) {
+          this.host.paintBulk();
+          return;
+        }
+        this.bulkSummaryKey = key;
         this.bulkSummary = {
           tldr: summary.tldr || "",
           points: Array.isArray(summary.points) ? summary.points : [],
           decisions: Array.isArray(summary.decisions) ? summary.decisions : [],
           actions: (Array.isArray(summary.actions) ? summary.actions : []).map(summaryActionText),
           next: summary.next || "",
-          shown: Number(summary.count) || this.host.checked.size,
+          shown: Number(summary.count) || selected,
           cached: Boolean(known),
           model: summary.model || this.assistFlags?.provider || ""
         };
         this.bulkSummaryLoading = "";
       } catch (error) {
         this.bulkSummaryLoading = "";
-        this.bulkSummaryError = this.assistError(error);
+        this.bulkSummaryError = this.assistError(error, () => void this.assist(name, data));
+        this.bulkErrorAction = "m-bulk-summarize";
       }
       this.host.paintBulk();
       return;
@@ -522,6 +545,7 @@ export class AssistController {
       if (!await this.consent()) return;
       this.bulkRepliesLoading = t("AI_COPILOT.GENERATING_BULK_REPLIES", "Antwortvorschläge für ausgewählte Mails werden erstellt …");
       this.bulkRepliesError = "";
+      this.bulkErrorAction = "";
       this.host.paintBulk();
       const checkedUids = [...this.host.checked];
       const targetMsgs = checkedUids
@@ -554,13 +578,15 @@ export class AssistController {
         }
         if (!successful.length) {
           this.bulkRepliesError = t("AI_COPILOT.NO_REPLIES_GENERATED", "Keine Antwortvorschläge für die ausgewählten Mails erhalten.");
+          this.bulkErrorAction = "m-bulk-replies";
         } else {
           this.bulkRepliesList = successful;
         }
         this.bulkRepliesLoading = "";
       } catch (error) {
         this.bulkRepliesLoading = "";
-        this.bulkRepliesError = this.assistError(error);
+        this.bulkRepliesError = this.assistError(error, () => void this.assist(name, data));
+        this.bulkErrorAction = "m-bulk-replies";
       }
       this.host.paintBulk();
       return;
@@ -582,7 +608,7 @@ export class AssistController {
       return;
     }
     if (name === "triage") {
-      this.host.view.notice(t("AI_COPILOT.TRIAGE_DISCLOSURE", "Absender, Betreff und Vorschau dieser Seite gehen an das Modell."));
+      this.host.view.assistNote("list", t("AI_COPILOT.TRIAGE_DISCLOSURE", "Absender, Betreff und Vorschau dieser Seite gehen an das Modell."));
       try {
         const result = await plugin<{ stored?: number; warning?: string }>("AiTriageLlm", {
           folder: this.host.folder,
@@ -596,20 +622,21 @@ export class AssistController {
             bulk: message.category === "newsletter" || message.category === "notification"
           }))
         });
-        this.host.view.notice(result.warning ? t("APP_TEXT.CATEGORIES_COULD_NOT_BE_SAVED_KEYWORDS_NOT_ALLOW", "Kategorien konnten nicht gespeichert werden (Schlagwörter nicht erlaubt).") : t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)));
+        if (result.warning) this.host.view.assistNote("list", t("APP_TEXT.CATEGORIES_COULD_NOT_BE_SAVED_KEYWORDS_NOT_ALLOW", "Kategorien konnten nicht gespeichert werden (Schlagwörter nicht erlaubt)."), "error");
+        else this.host.view.assistNote("list", t("AI_COPILOT.TRIAGE_SAVED", "%COUNT% Mails eingeordnet.").replace("%COUNT%", String(result.stored || 0)), "done");
         await this.host.loadList(false);
       } catch (error) {
-        this.host.view.notice(this.assistError(error, () => void this.assist(name, data)));
+        this.host.view.assistNote("list", this.assistError(error, () => void this.assist(name, data)), "error");
       }
       return;
     }
     if (name === "deadlines") {
       const items = this.alertItems.filter((item) => item.type !== "followup").slice(0, 8);
       if (!items.length) {
-        this.host.view.notice(t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
+        this.host.view.assistNote("sidebar", t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."), "done");
         return;
       }
-      this.host.view.notice(t("AI_COPILOT.WORKING", "Wird erstellt …"));
+      this.host.view.assistNote("sidebar", t("AI_COPILOT.WORKING", "Wird erstellt …"));
       try {
         const result = await plugin<{ alerts: DueItem[] }>("AiAlertsLlm", { items, timezone: timezone() });
         this.alertDues = (result.alerts || []).filter((item) => item.due);
@@ -619,9 +646,9 @@ export class AssistController {
           this.alertItems.filter((item) => item.type === "invoice").length,
           this.alertDues
         );
-        this.host.view.notice(this.alertDues.length ? "" : t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."));
+        this.host.view.assistNote("sidebar", this.alertDues.length ? "" : t("AI_COPILOT.NO_DEADLINES", "Keine Mails für eine Frist."), "done");
       } catch (error) {
-        this.host.view.notice(this.assistError(error, () => void this.assist(name, data)));
+        this.host.view.assistNote("sidebar", this.assistError(error, () => void this.assist(name, data)), "error");
       }
       return;
     }

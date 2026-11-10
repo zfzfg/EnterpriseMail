@@ -1285,6 +1285,10 @@
         "PLACEHOLDER_WARNING": "The AI text still contains placeholders such as [?]. Fill them in, or click Send again.",
         "NO_FILTER_MATCH": "No email matches this filter.",
         "BULK_REPLIES_LIMIT": "Suggestions cover the first %LIMIT% of %COUNT% emails.",
+
+        "RETRY": "Try again",
+
+        "BULK_SUMMARY_LIMIT": "Only the newest %LIMIT% of %COUNT% emails are included.",
         "THE_PROVIDER": "the provider",
         "CONSENT_QUERY": "Your search query goes to %PROVIDER%; the emails stay on the server. This consent also covers later AI actions that send email content to %PROVIDER% after a click. Continue?",
         "CONSENT_MAIL": "This AI feature sends the content of the affected emails to %PROVIDER%. Nothing is sent unless you click an AI action. Continue?",

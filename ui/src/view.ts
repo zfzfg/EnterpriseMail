@@ -91,6 +91,8 @@ export interface StripState {
   showReplies: boolean;
 }
 
+export type AssistPlace = "list" | "sidebar";
+
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
@@ -214,6 +216,9 @@ export interface MailView {
   attachCompose(items: { key: string; name: string; size: number }[]): Promise<void>;
   setSendState(busy: boolean, error: string): void;
   notice(text: string): void;
+  /** Assistant feedback next to the control that started it: the list pane or the sidebar. */
+  assistNote(place: AssistPlace, text: string, kind?: "busy" | "done" | "error"): void;
+  hideTranslation(): void;
   confirmDelete(): Promise<boolean>;
   confirmConsent(text: string): Promise<boolean>;
   setAlerts(reply: number, follow: number, invoice: number, dues: { folder: string; uid: number; title: string; due: string }[]): void;
@@ -238,6 +243,7 @@ export interface MailView {
 export function createView(root: HTMLElement, actions: MailActions): MailView {
   let shell: HTMLElement | null = null;
   let opener: HTMLElement | null = null;
+  const noteTimers: Partial<Record<AssistPlace, number>> = {};
   let section = "look";
   let edit: DeskEdit | null = null;
   let snap: SettingsSnapshot | null = null;
@@ -1248,6 +1254,10 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         if (!wide()) pane("reader");
         const sheet = shell?.querySelector(".sheet") as HTMLElement | null;
         if (sheet) openLayer(sheet, target);
+      } else if (action === "close-translation") {
+        const box = shell?.querySelector("#translated") as HTMLElement | null;
+        if (box) box.hidden = true;
+        (shell?.querySelector("#search") as HTMLElement | null)?.focus({ preventScroll: true });
       } else if (action === "cat") {
         shell?.querySelectorAll<HTMLButtonElement>(".filter").forEach((button) => {
           button.setAttribute("aria-pressed", button.dataset.cat === target.dataset.cat ? "true" : "false");
@@ -1876,7 +1886,8 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         <button type="button" class="count-row" data-action="alert" data-kind="follow"><span>${esc(t("AI_COPILOT.ALERT_FOLLOW", "Ohne Antwort"))}</span><span class="count" data-count="follow">0</span></button>
         <button type="button" class="count-row" data-action="alert" data-kind="invoice"><span>${esc(t("AI_COPILOT.ALERT_INVOICE", "Rechnungen"))}</span><span class="count" data-count="invoice">0</span></button>
         <div class="dues" id="dues"></div>
-        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>`;
+        <button type="button" class="text-btn ai-action" data-action="deadlines" aria-label="${esc(deadlineHint)}" title="${esc(deadlineHint)}">${withAssist(deadlineLabel)}</button>
+        <p class="assist-note quiet" data-assist-note="sidebar" role="status" hidden></p>`;
       shell.querySelector(".write-btn")?.after(block);
     }
     const searchForm = shell.querySelector(".search-wrap");
@@ -1891,6 +1902,15 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         `<button type="button" class="filter" data-action="cat" data-cat="${id}" aria-pressed="${index === 0 ? "true" : "false"}">${esc(id === "all" ? t("AI_COPILOT.TAB_ALL", label) : t("AI_COPILOT.CAT_" + id.toUpperCase(), label))}</button>`
       ).join("") + (flags.triageLlm ? `<button type="button" class="text-btn ai-action" data-action="triage" aria-label="${esc(triageHint)}" title="${esc(triageHint)}">${withAssist(t("AI_COPILOT.TRIAGE_LLM", "Mit KI einordnen"))}</button>` : "");
       searchForm.after(filters);
+    }
+    if (searchForm && (flags.search || (flags.triage && flags.tabs))) {
+      const note = document.createElement("p");
+      note.className = "assist-note quiet";
+      note.dataset.assistNote = "list";
+      note.dataset.assistNode = "1";
+      note.setAttribute("role", "status");
+      note.hidden = true;
+      searchForm.after(note);
     }
     if (flags.search && searchForm) {
       const button = document.createElement("button");
@@ -1907,7 +1927,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
       hint.id = "translated";
       hint.hidden = true;
       hint.className = "translate";
-      hint.innerHTML = `<div class="translate-copy"><span class="mono quiet">${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}</span><p class="quiet" id="translate-why"></p></div><input class="search" id="translate-q" aria-label="${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}"><button type="button" class="ink-btn" data-action="run-search">${esc(t("AI_COPILOT.SEARCH_RUN", "Suchen"))}</button>`;
+      hint.innerHTML = `<div class="translate-copy"><span class="mono quiet">${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}</span><p class="quiet" id="translate-why"></p></div><input class="search" id="translate-q" aria-label="${esc(t("AI_COPILOT.SEARCH_SUGGESTION", "Vorgeschlagene Suche"))}"><button type="button" class="ink-btn" data-action="run-search">${esc(t("AI_COPILOT.SEARCH_RUN", "Suchen"))}</button><button type="button" class="icon-btn" data-action="close-translation" aria-label="${esc(t("GLOBAL.CLOSE", "Schließen"))}">${icon("close")}</button>`;
       searchForm.after(hint);
       const input = shell.querySelector("#search") as HTMLInputElement;
       input.addEventListener("input", () => { button.hidden = !input.value.trim(); });
@@ -2438,6 +2458,25 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
     notice(text) {
       const slot = shell?.querySelector("#notice") as HTMLElement | null;
       if (slot) slot.textContent = text;
+    },
+    assistNote(place, text, kind = "busy") {
+      const slot = shell?.querySelector<HTMLElement>(`[data-assist-note='${place}']`);
+      if (!slot) {
+        this.notice(text);
+        return;
+      }
+      window.clearTimeout(noteTimers[place]);
+      slot.textContent = text;
+      slot.hidden = !text;
+      slot.classList.toggle("error", kind === "error");
+      slot.classList.toggle("quiet", kind !== "error");
+      slot.setAttribute("role", kind === "error" ? "alert" : "status");
+      // A finished note has said its piece; progress and errors stay until replaced.
+      if (text && kind === "done") noteTimers[place] = window.setTimeout(() => { slot.textContent = ""; slot.hidden = true; }, 8000);
+    },
+    hideTranslation() {
+      const box = shell?.querySelector("#translated") as HTMLElement | null;
+      if (box) box.hidden = true;
     },
     confirmDelete() {
       return this.confirm(t("APP_TEXT.REALLY_DELETE", "Wirklich löschen?"), "", t("GLOBAL.DELETE", "Löschen"));

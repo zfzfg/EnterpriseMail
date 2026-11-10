@@ -1293,6 +1293,10 @@
         "PLACEHOLDER_WARNING": "Der KI-Text enthält noch Platzhalter wie [?]. Bitte ergänzen oder erneut auf Senden klicken.",
         "NO_FILTER_MATCH": "Keine Mails für diesen Filter.",
         "BULK_REPLIES_LIMIT": "Vorschläge gibt es für die ersten %LIMIT% von %COUNT% Mails.",
+
+        "RETRY": "Erneut versuchen",
+
+        "BULK_SUMMARY_LIMIT": "Nur die neuesten %LIMIT% von %COUNT% Mails sind berücksichtigt.",
         "THE_PROVIDER": "den Anbieter",
         "CONSENT_QUERY": "Ihre Suchanfrage geht an %PROVIDER%, die Mails bleiben dabei auf dem Server. Diese Einwilligung gilt auch für spätere KI-Aktionen, die nach einem Klick Mailinhalte an %PROVIDER% senden. Fortfahren?",
         "CONSENT_MAIL": "Diese KI-Funktion sendet den Inhalt der betroffenen Mails an %PROVIDER%. Es wird nur gesendet, wenn Sie eine KI-Aktion anklicken. Fortfahren?",
