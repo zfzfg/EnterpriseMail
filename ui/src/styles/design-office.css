@@ -1,0 +1,82 @@
+/* Office design: structure only. Colours, radius and label face come from app-tokens.css. */
+
+[data-design="office"] h1,
+[data-design="office"] .title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+/* Toolbars sit on the sidebar tone, so the content panes read as sheets. */
+[data-design="office"] .pane-head,
+[data-design="office"] .reader-bar,
+[data-design="office"] .composer-bar {
+  background: var(--sidebar);
+}
+
+/* The new-mail button is the one filled action in the sidebar. */
+[data-design="office"] .sidebar > .write-btn {
+  justify-content: center;
+  min-height: 40px;
+  margin: 12px 12px 8px;
+  padding-inline: 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--action);
+  color: var(--action-foreground);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+[data-design="office"] .sidebar > .write-btn .icon {
+  width: 20px;
+  height: 20px;
+  transform: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-design="office"] .sidebar > .write-btn:hover {
+    background: var(--action-hover);
+    color: var(--action-foreground);
+  }
+}
+
+/* Current folder and current message carry a 3px accent bar. */
+[data-design="office"] .folder[aria-current="page"] {
+  color: var(--primary);
+  font-weight: 600;
+}
+[data-design="office"] .frow:has(.folder[aria-current="page"]) {
+  box-shadow: inset 3px 0 0 var(--indicator);
+}
+[data-design="office"] .msg-row:has(.msg[aria-current="true"]) {
+  box-shadow: inset 3px 0 0 var(--indicator);
+}
+[data-design="office"] .unread-mark {
+  top: 50%;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+}
+[data-design="office"] .wait,
+[data-design="office"] .thinking::before {
+  border-radius: 50%;
+}
+
+[data-design="office"] .ink-btn,
+[data-design="office"] .reader-bar .reply-main:not([hidden]) {
+  font-weight: 600;
+}
+[data-design="office"] .sm-tooltip {
+  padding: 4px 8px;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 12px;
+  line-height: 16px;
+}
+[data-design="office"] .toggle-track::after {
+  background: var(--card);
+}
+[data-design="office"] .theme-preview {
+  border-radius: calc(var(--radius) - 2px);
+}

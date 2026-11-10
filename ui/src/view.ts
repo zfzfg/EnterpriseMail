@@ -10,7 +10,7 @@ import { ruleCard, syncFilterRow } from "./sieve/form";
 import { compileFilterForm, parseFilterScript } from "./sieve/script";
 import { renderFolderDesk, renderFolderMenu, renderQuota, renderSidebarRows, type FolderAction, type FolderDesk, type SidebarData } from "./folders";
 import { readSearchForm, renderSearchForm, serializeSearch, type QuickFlag, type SearchCriteria } from "./search";
-import { applyAppearance, type Appearance } from "./theme";
+import { applyAppearance, applyDesign, type Appearance } from "./theme";
 
 export type { ComposeFile, ComposeSeed } from "./compose";
 
@@ -1387,6 +1387,7 @@ export function createView(root: HTMLElement, actions: MailActions): MailView {
         return;
       }
       if (input.name === "appearance") applyAppearance(input.value as Appearance);
+      if (input.name === "design") applyDesign(input.value === "office" ? "office" : "mistral", true);
       const filterPart = (event.target as HTMLElement).dataset?.part;
       if (filterPart === "field" || filterPart === "type") {
         const row = (event.target as HTMLElement).closest<HTMLElement>(".rule-line");

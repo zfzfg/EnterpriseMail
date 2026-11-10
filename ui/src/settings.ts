@@ -4,7 +4,7 @@ import { icon, type IconName } from "./icons";
 import { t, uiLocale } from "./i18n";
 import { renderFilterEditor } from "./sieve/form";
 import { parseFilterScript } from "./sieve/script";
-import { readAppearance, type Appearance } from "./theme";
+import { readAppearance, readDesign, type Appearance, type Design } from "./theme";
 
 export { writeProp } from "./jcard";
 
@@ -845,8 +845,25 @@ export function renderAssistant(snap: SettingsSnapshot): string {
 
 function lookSection(): string {
   const current = readAppearance();
+  const design = readDesign();
+  const preview = `<span class="prev-nav"></span><span class="prev-main"><span class="prev-line"></span><span class="prev-line short"></span><span class="prev-action"></span></span>`;
+  const designCard = (value: Design, name: string, desc: string): string => `
+        <label class="theme-card">
+          <input type="radio" name="design" value="${value}"${design === value ? " checked" : ""}>
+          <div class="theme-preview design-preview design-preview-${value}" aria-hidden="true">${preview}</div>
+          <span class="theme-label"><strong>${esc(name)}</strong><span class="quiet">${esc(desc)}</span></span>
+        </label>`;
+  const twoDesc = (classic: string, office: string): string =>
+    `<span class="quiet only-mistral">${esc(classic)}</span><span class="quiet only-office">${esc(office)}</span>`;
   return `
-    <p class="mono">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
+    <p class="mono">${esc(t("SETTINGS_DESK.DESIGN", "Design"))}</p>
+    <div class="settings-card">
+      <div class="theme-cards theme-cards-two">
+        ${designCard("mistral", t("SETTINGS_DESK.DESIGN_CLASSIC", "Klassisch"), t("SETTINGS_DESK.DESIGN_CLASSIC_DESC", "Tinte, Pixel-Symbole"))}
+        ${designCard("office", t("SETTINGS_DESK.DESIGN_OFFICE", "Office"), t("SETTINGS_DESK.DESIGN_OFFICE_DESC", "Petrol, Linien-Symbole"))}
+      </div>
+    </div>
+    <p class="mono look-next">${esc(t("SETTINGS_DESK.APPEARANCE", "Erscheinungsbild"))}</p>
     <div class="settings-card">
       <div class="theme-cards">
         <label class="theme-card${current === "system" ? " is-active" : ""}">
@@ -862,14 +879,14 @@ function lookSection(): string {
           <div class="theme-preview theme-preview-light" aria-hidden="true">
             <span class="prev-nav"></span><span class="prev-main"><span class="prev-line"></span><span class="prev-line short"></span></span>
           </div>
-          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.LIGHT", "Hell"))}</strong><span class="quiet">${esc(t("SETTINGS_DESK.LIGHT_DESC", "Warmes Papier"))}</span></span>
+          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.LIGHT", "Hell"))}</strong>${twoDesc(t("SETTINGS_DESK.LIGHT_DESC", "Warmes Papier"), t("SETTINGS_DESK.LIGHT_DESC_OFFICE", "Klares Weiß"))}</span>
         </label>
         <label class="theme-card${current === "dark" ? " is-active" : ""}">
           <input type="radio" name="appearance" value="dark"${current === "dark" ? " checked" : ""}>
           <div class="theme-preview theme-preview-dark" aria-hidden="true">
             <span class="prev-nav"></span><span class="prev-main"><span class="prev-line"></span><span class="prev-line short"></span></span>
           </div>
-          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.DARK", "Dunkel"))}</strong><span class="quiet">${esc(t("SETTINGS_DESK.DARK_DESC", "Deep Steel"))}</span></span>
+          <span class="theme-label"><strong>${esc(t("SETTINGS_DESK.DARK", "Dunkel"))}</strong>${twoDesc(t("SETTINGS_DESK.DARK_DESC", "Deep Steel"), t("SETTINGS_DESK.DARK_DESC_OFFICE", "Anthrazit"))}</span>
         </label>
       </div>
     </div>`;

@@ -1,6 +1,8 @@
 export type Appearance = "system" | "light" | "dark";
+export type Design = "mistral" | "office";
 
 const KEY = "sm-appearance";
+const DESIGN_KEY = "sm-design";
 
 export function readAppearance(): Appearance {
   try {
@@ -28,4 +30,35 @@ export function applyAppearance(mode: Appearance): void {
 
 export function watchSystemTheme(onChange: () => void): void {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onChange);
+}
+
+function isDesign(value: unknown): value is Design {
+  return value === "mistral" || value === "office";
+}
+
+/** The user's own choice, or null while they follow the administrator's default. */
+export function storedDesign(): Design | null {
+  try {
+    const value = localStorage.getItem(DESIGN_KEY);
+    if (isDesign(value)) return value;
+  } catch {
+    /* private mode */
+  }
+  return null;
+}
+
+export function readDesign(): Design {
+  const fallback = document.documentElement.dataset.designDefault;
+  return storedDesign() ?? (isDesign(fallback) ? fallback : "mistral");
+}
+
+/** Shows a design. Only a choice the user made is stored; the default stays the administrator's. */
+export function applyDesign(design: Design, remember = false): void {
+  document.documentElement.dataset.design = design;
+  if (!remember) return;
+  try {
+    localStorage.setItem(DESIGN_KEY, design);
+  } catch {
+    /* private mode */
+  }
 }

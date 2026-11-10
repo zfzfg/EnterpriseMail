@@ -219,6 +219,142 @@
   --types-object-foreground: #c462f1b3;
 }
 
+/* Design cards in the settings always show both designs, whichever one is active. */
+:root {
+  --design-prev-mistral-bg: #fbfbf8;
+  --design-prev-mistral-nav: #ebe9e0;
+  --design-prev-mistral-line: #e4e3de;
+  --design-prev-mistral-action: #141416;
+  --design-prev-office-bg: #ffffff;
+  --design-prev-office-nav: #f0f3f4;
+  --design-prev-office-line: #dfe3e6;
+  --design-prev-office-action: #0b6e79;
+}
+.dark {
+  --design-prev-mistral-bg: #111113;
+  --design-prev-mistral-nav: #1e1e22;
+  --design-prev-mistral-line: #27272b;
+  --design-prev-mistral-action: #f4f4f6;
+  --design-prev-office-bg: #1b1d1f;
+  --design-prev-office-nav: #131517;
+  --design-prev-office-line: #33373b;
+  --design-prev-office-action: #4fb8c4;
+}
+
+/* ==========================================================================
+   Office design: cool neutral surfaces, petrol accent, sans labels.
+   Same layout and the same token names as above; only the values change.
+   ========================================================================== */
+:root[data-design="office"] {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --radius: 6px;
+
+  --background: #ffffff;
+  --foreground: #1b1f22;
+  --dark-foreground: #1b1f22;
+  --card: #ffffff;
+  --card-foreground: #1b1f22;
+  --popover: #ffffff;
+  --popover-foreground: #1b1f22;
+
+  --primary: #0b6e79;
+  --primary-foreground: #ffffff;
+  --primary-soft: #cfe9ec;
+  --primary-soft-foreground: #0d2a2e;
+
+  --secondary: #eef0f2;
+  --secondary-foreground: #1b1f22;
+  --muted: #eef0f2;
+  --muted-foreground: #5c6670;
+  --accent: #e9eef0;
+  --accent-foreground: #1b1f22;
+  --destructive: #c42b1c;
+
+  --border: #dfe3e6;
+  --input: #c3cacf;
+  --ring: #0b6e79;
+
+  --sidebar: #f0f3f4;
+  --sidebar-foreground: #1b1f22;
+  --sidebar-primary: #0b6e79;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dfe6e8;
+  --sidebar-accent-foreground: #1b1f22;
+  --sidebar-border: #dfe3e6;
+  --sidebar-ring: #0b6e79;
+
+  --code-background: #f0f3f4;
+  --code-foreground: #1b1f22;
+  --syntax-string: #0a7a3b;
+  --syntax-number: #0b63b0;
+
+  --action: var(--primary);
+  --action-foreground: var(--primary-foreground);
+  --action-hover: color-mix(in srgb, var(--primary) 86%, var(--foreground));
+  --indicator: var(--primary);
+  --label-font: var(--font-sans);
+  --label-size: 12px;
+  --label-weight: 600;
+  --label-transform: none;
+
+  --surface-hover: var(--accent);
+  --surface-selected: color-mix(in srgb, var(--primary) 10%, var(--background));
+  --surface-checked: color-mix(in srgb, var(--primary) 17%, var(--background));
+  --shadow-functional: 0 1px 2px color-mix(in srgb, var(--foreground) 8%, transparent), 0 8px 24px color-mix(in srgb, var(--foreground) 12%, transparent);
+
+  --theme-prev-light-bg: #ffffff;
+  --theme-prev-light-nav: #f0f3f4;
+  --theme-prev-light-border: #dfe3e6;
+  --theme-prev-dark-bg: #1b1d1f;
+  --theme-prev-dark-nav: #131517;
+  --theme-prev-dark-border: #33373b;
+}
+
+:root[data-design="office"].dark {
+  --background: #1b1d1f;
+  --foreground: #eceef0;
+  --dark-foreground: #ffffff;
+  --card: #232629;
+  --card-foreground: #eceef0;
+  --popover: #26292c;
+  --popover-foreground: #eceef0;
+
+  --primary: #4fb8c4;
+  --primary-foreground: #0c1416;
+  --primary-soft: #1f4a50;
+  --primary-soft-foreground: #eceef0;
+
+  --secondary: #2a2e31;
+  --secondary-foreground: #eceef0;
+  --muted: #25282b;
+  --muted-foreground: #a3abb3;
+  --accent: #2b3033;
+  --accent-foreground: #eceef0;
+  --destructive: #ff7b72;
+
+  --border: #33373b;
+  --input: #4a5056;
+  --ring: #4fb8c4;
+
+  --sidebar: #131517;
+  --sidebar-foreground: #eceef0;
+  --sidebar-primary: #4fb8c4;
+  --sidebar-primary-foreground: #0c1416;
+  --sidebar-accent: #262b2e;
+  --sidebar-accent-foreground: #eceef0;
+  --sidebar-border: #2a2e31;
+  --sidebar-ring: #4fb8c4;
+
+  --code-background: #232629;
+  --code-foreground: #eceef0;
+  --syntax-string: #4fd08a;
+  --syntax-number: #6cb8f5;
+
+  --surface-selected: color-mix(in srgb, var(--primary) 16%, var(--background));
+  --surface-checked: color-mix(in srgb, var(--primary) 26%, var(--background));
+  --shadow-functional: 0 1px 2px #00000052, 0 8px 24px #00000066;
+}
+
 /* Tailwind v4 bridge – expose the variables as utilities (bg-background, text-primary, border-border …) */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);

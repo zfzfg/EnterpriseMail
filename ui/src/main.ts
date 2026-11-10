@@ -1,7 +1,8 @@
 import { call } from "./api";
 import { boot } from "./mail";
-import { applyAppearance, readAppearance, watchSystemTheme } from "./theme";
+import { applyAppearance, applyDesign, readAppearance, readDesign, watchSystemTheme } from "./theme";
 
+applyDesign(readDesign());
 applyAppearance(readAppearance());
 watchSystemTheme(() => applyAppearance(readAppearance()));
 

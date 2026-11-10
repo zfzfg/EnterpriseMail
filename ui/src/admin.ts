@@ -7,8 +7,9 @@ import { paintBranding, paintContacts, paintGeneral, paintLogin, paintSecurity }
 import { esc, type AppSnap, type Cfg, type Ctx, type Section } from "./admin/util";
 import { icon } from "./icons";
 import { t } from "./i18n";
-import { applyAppearance, readAppearance, watchSystemTheme } from "./theme";
+import { applyAppearance, applyDesign, readAppearance, readDesign, watchSystemTheme } from "./theme";
 
+applyDesign(readDesign());
 applyAppearance(readAppearance());
 watchSystemTheme(() => applyAppearance(readAppearance()));
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html data-design-default='{{BaseAppDesign}}'>
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -16,6 +16,13 @@
 			if (dark) document.documentElement.classList.add("dark");
 			document.documentElement.style.colorScheme = dark ? "dark" : "light";
 		} catch (e) {}
+		try {
+			var design = localStorage.getItem("sm-design");
+			if (design !== "mistral" && design !== "office") design = document.documentElement.dataset.designDefault;
+			document.documentElement.dataset.design = design === "office" ? "office" : "mistral";
+		} catch (e) {
+			document.documentElement.dataset.design = "mistral";
+		}
 	</script>
 	<link rel="manifest" href="{{BaseAppManifestLink}}">
 	<link rel="icon" href="{{BaseFavIconSvg}}" type="image/svg+xml">
