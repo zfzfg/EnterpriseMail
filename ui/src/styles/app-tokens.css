@@ -53,6 +53,16 @@
   --sidebar-border: #e0ded7;
   --sidebar-ring: #a1a1a1;
 
+  /* Semantic roles. Each design maps them; shell.css never picks ink or accent itself. */
+  --action: var(--foreground);
+  --action-foreground: var(--background);
+  --action-hover: color-mix(in srgb, var(--foreground) 88%, transparent);
+  --indicator: var(--foreground);
+  --label-font: var(--font-mono);
+  --label-size: 11px;
+  --label-weight: 400;
+  --label-transform: uppercase;
+
   --theme-prev-light-bg: #fbfbf8;
   --theme-prev-light-nav: #ebe9e0;
   --theme-prev-light-border: #e4e3de;
