@@ -571,6 +571,28 @@ try {
       await page.waitForSelector("#settings .theme-cards", { visible: true });
       await shot("settings-appearance");
     });
+    await step("Design switches live between classic and Office", async () => {
+      const state = () => page.evaluate(() => ({
+        design: document.documentElement.dataset.design,
+        sprite: document.getElementById("icon-sprite")?.dataset.set,
+        symbols: document.querySelectorAll("#icon-sprite symbol").length,
+        action: getComputedStyle(document.documentElement).getPropertyValue("--action").trim()
+      }));
+      const before = await state();
+      await page.click("#settings .theme-card:has(input[name='design'][value='office'])");
+      await page.waitForFunction(() => document.documentElement.dataset.design === "office");
+      const office = await state();
+      assert.equal(office.sprite, "office");
+      assert.equal(office.symbols, before.symbols);
+      assert.ok(office.symbols > 100, "the icon sprite is empty");
+      await shot("settings-design-office");
+      await page.click("#settings .theme-card:has(input[name='design'][value='mistral'])");
+      await page.waitForFunction(() => document.documentElement.dataset.design === "mistral");
+      assert.equal((await state()).sprite, "mistral");
+      // Leave no stored choice behind: later scenarios follow the administrator's default again.
+      await page.evaluate(() => localStorage.removeItem("sm-design"));
+      return { before, office };
+    });
     await step("General and folder sections render fixture data", async () => {
       await page.click("#settings [data-section='general']");
       await page.waitForSelector("#settings-panel [data-pref]", { visible: true });

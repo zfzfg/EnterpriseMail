@@ -7,6 +7,18 @@
   line-height: 1.2;
 }
 
+/* Line icons: the sprite carries the shapes, inline (animated) icons switch sets here. */
+[data-design="office"] .icon-part-mistral { display: none; }
+[data-design="office"] .icon-part-office { display: block; }
+[data-design="office"] .icon-loading .icon-part-office g {
+  transform-origin: 10px 10px;
+  animation: icon-spin 800ms linear infinite;
+}
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  [data-design="office"] .icon-loading .icon-part-office g { animation: none; }
+}
+
 /* Toolbars sit on the sidebar tone, so the content panes read as sheets. */
 [data-design="office"] .pane-head,
 [data-design="office"] .reader-bar,
@@ -17,8 +29,9 @@
 /* The new-mail button is the one filled action in the sidebar. */
 [data-design="office"] .sidebar > .write-btn {
   justify-content: center;
+  width: auto;
   min-height: 40px;
-  margin: 12px 12px 8px;
+  margin: 12px 8px 8px;
   padding-inline: 16px;
   border: 0;
   border-radius: var(--radius);
@@ -52,11 +65,10 @@
   box-shadow: inset 3px 0 0 var(--indicator);
 }
 [data-design="office"] .unread-mark {
-  top: 50%;
-  left: 4px;
-  width: 6px;
-  height: 6px;
-  margin-top: -3px;
+  top: 16px;
+  left: 7px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
 }
 [data-design="office"] .wait,

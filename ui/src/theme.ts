@@ -1,3 +1,5 @@
+import { mountIcons } from "./icons";
+
 export type Appearance = "system" | "light" | "dark";
 export type Design = "mistral" | "office";
 
@@ -55,6 +57,7 @@ export function readDesign(): Design {
 /** Shows a design. Only a choice the user made is stored; the default stays the administrator's. */
 export function applyDesign(design: Design, remember = false): void {
   document.documentElement.dataset.design = design;
+  mountIcons(design);
   if (!remember) return;
   try {
     localStorage.setItem(DESIGN_KEY, design);
